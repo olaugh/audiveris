@@ -5,8 +5,8 @@
 //! The dependency-light lifecycle in [`crate::reduction_step`] owns sheet and
 //! system ordering.  This module starts the production bridge from terminal
 //! native STEMS SIGs with Java's deterministic `SIGraph.reduceExclusions()`
-//! algorithm, lossless overlap discovery, chord prolog, and the contiguous
-//! foundations prefix through `checkLedgers()` and its following weak purge.
+//! algorithm, lossless overlap discovery, chord prolog, and one complete
+//! foundations consistency pass through `checkStems()` and its weak purge.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -172,6 +172,29 @@ pub struct NativeReductionLedgerCheckTransaction {
     pub modification_count: usize,
 }
 
+/// One directed stem whose head links at the tail end were cut by Java
+/// `stemHasSingleHeadEnd()`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionStemTailPrune {
+    pub stem: NativeSigVertexId,
+    /// Java `StemInter.computeDirection()`: -1 upward, +1 downward.
+    pub direction: i8,
+    pub removed_head_stem_edges: Vec<NativeSigEdgeId>,
+    pub added_exclusions: Vec<NativeSigEdgeId>,
+}
+
+/// Full Java `checkStems()` transaction in the snapshotted stem order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionStemCheckTransaction {
+    pub system_id: usize,
+    pub stem_order: Vec<NativeSigVertexId>,
+    pub removed_orphan_stems: Vec<NativeSigVertexId>,
+    pub tail_prunes: Vec<NativeReductionStemTailPrune>,
+    pub removed_ensembles: Vec<NativeSigVertexId>,
+    /// Java's return value: one per orphan stem or modified directed stem.
+    pub modification_count: usize,
+}
+
 /// Exact relation mutations made by foundations `analyzeChords()` in good
 /// stem order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -183,8 +206,8 @@ pub struct NativeReductionChordAnalysisTransaction {
     pub head_head_supports: Vec<NativeSigEdgeId>,
 }
 
-/// The exact contiguous prefix of Java foundations reduction currently native:
-/// overlap discovery through the ledger purge after `checkHeads()`.
+/// One complete Java foundations consistency pass, from overlap discovery
+/// through `checkStems()` and its following contextual weak purge.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeReductionFoundationPrefixTransaction {
     pub system_id: usize,
@@ -202,6 +225,8 @@ pub struct NativeReductionFoundationPrefixTransaction {
     pub post_beams_weak_purge: NativeReductionWeakPurgeTransaction,
     pub ledgers: NativeReductionLedgerCheckTransaction,
     pub post_ledgers_weak_purge: NativeReductionWeakPurgeTransaction,
+    pub stems: NativeReductionStemCheckTransaction,
+    pub post_stems_weak_purge: NativeReductionWeakPurgeTransaction,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -782,8 +807,8 @@ pub fn detect_native_stems_reduction_overlaps(
     )
 }
 
-/// Execute the exact contiguous Java foundations prefix which is currently
-/// native, stopping immediately before `checkStems()`.
+/// Execute one complete Java foundations consistency pass against terminal
+/// native STEMS state.
 pub fn reduce_native_stems_foundation_prefix(
     stems: &mut NativeStemsRecognition,
     system_id: usize,
@@ -810,8 +835,8 @@ pub fn reduce_native_stems_foundation_prefix(
     )
 }
 
-/// Dependency-light foundations prefix used by the production STEMS adapter
-/// and synthetic order/failure tests.
+/// Dependency-light foundations pass used by the production STEMS adapter and
+/// synthetic order/failure tests.
 pub fn reduce_native_foundation_prefix(
     sig: &mut NativeSigSystem,
     bindings: &mut NativeSigSystemBindings,
@@ -837,6 +862,8 @@ pub fn reduce_native_foundation_prefix(
     let post_beams_weak_purge = contextualize_and_purge_native_weaks(sig)?;
     let ledgers = prune_native_foundation_ledgers(sig, bindings)?;
     let post_ledgers_weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    let stems = prune_native_foundation_stems(sig, stem_medians)?;
+    let post_stems_weak_purge = contextualize_and_purge_native_weaks(sig)?;
     Ok(NativeReductionFoundationPrefixTransaction {
         system_id: sig.system_id,
         overlap,
@@ -853,6 +880,8 @@ pub fn reduce_native_foundation_prefix(
         post_beams_weak_purge,
         ledgers,
         post_ledgers_weak_purge,
+        stems,
+        post_stems_weak_purge,
     })
 }
 
@@ -2463,6 +2492,111 @@ pub fn prune_native_foundation_stems_without_heads(
     )
 }
 
+/// Port Java `SigReducer.checkStems()` in its snapshotted stem order.
+///
+/// Orphan stems are removed extensively. For every remaining directed stem,
+/// all head links at the tail end are collected against one extended-line
+/// snapshot, removed together, and invading pairs become overlap exclusions.
+pub fn prune_native_foundation_stems(
+    sig: &mut NativeSigSystem,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+) -> Result<NativeReductionStemCheckTransaction, NativeReductionFoundationPrefixError> {
+    sig.validate_integrity()?;
+    let stem_order = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Stem)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut removed_orphan_stems = Vec::new();
+    let mut tail_prunes = Vec::new();
+    let mut removed_ensembles = Vec::new();
+
+    for &stem in &stem_order {
+        if sig.vertex(stem.0).is_none() {
+            continue;
+        }
+        let head_links = active_head_stem_relations_to(sig, stem);
+        if head_links.is_empty() {
+            let dying = dying_ensembles(sig, stem);
+            remove_vertex_extensively(sig, stem, &dying)?;
+            removed_orphan_stems.push(stem);
+            for ensemble in dying {
+                push_unique(&mut removed_ensembles, ensemble);
+            }
+            continue;
+        }
+
+        let &median = stem_medians.get(&stem).ok_or(
+            NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id: sig.system_id,
+                stem,
+            },
+        )?;
+        // Java computes this line before computeDirection() and uses the same
+        // immutable geometry for every relation in stemHasSingleHeadEnd().
+        let extended = extended_stem_line(sig, stem, median);
+        let direction = native_stem_direction(sig, stem, stem_medians)?;
+        if direction == 0 {
+            continue;
+        }
+        let forbidden = if direction > 0 {
+            NativeReductionStemPortion::Bottom
+        } else {
+            NativeReductionStemPortion::Top
+        };
+        let removed_head_stem_edges = head_links
+            .into_iter()
+            .filter(|relation| {
+                let edge = sig.edges[relation.0];
+                let payload = edge.head_stem.expect("validated HeadStem payload");
+                head_stem_portion(
+                    sig.vertices[edge.source].bounds.height,
+                    extended,
+                    payload.extension_point.y,
+                ) == forbidden
+            })
+            .collect::<Vec<_>>();
+        if removed_head_stem_edges.is_empty() {
+            continue;
+        }
+
+        let invading_heads = removed_head_stem_edges
+            .iter()
+            .filter_map(|relation| {
+                let edge = sig.edges[relation.0];
+                let payload = edge.head_stem.expect("validated HeadStem payload");
+                (payload.dy <= 0.0 && payload.dx <= 0.05).then_some(NativeSigVertexId(edge.source))
+            })
+            .collect::<Vec<_>>();
+        for &relation in &removed_head_stem_edges {
+            sig.remove_edge(relation)?;
+        }
+        let mut added_exclusions = Vec::new();
+        for head in invading_heads {
+            if let Some(exclusion) = insert_native_overlap_exclusion(sig, head, stem)? {
+                added_exclusions.push(exclusion);
+            }
+        }
+        tail_prunes.push(NativeReductionStemTailPrune {
+            stem,
+            direction,
+            removed_head_stem_edges,
+            added_exclusions,
+        });
+    }
+    sig.validate_integrity()?;
+    let modification_count = removed_orphan_stems.len() + tail_prunes.len();
+    Ok(NativeReductionStemCheckTransaction {
+        system_id: sig.system_id,
+        stem_order,
+        removed_orphan_stems,
+        tail_prunes,
+        removed_ensembles,
+        modification_count,
+    })
+}
+
 /// Port Java `checkStemEndingHeads()` / `pruneStemHeads()`.
 ///
 /// `stem_medians` is the exact `StemInter.median` authority retained by the
@@ -3666,7 +3800,7 @@ mod tests {
     }
 
     #[test]
-    fn foundation_prefix_stops_after_ledgers_in_java_order() {
+    fn foundation_pass_reaches_stems_and_its_weak_purge_in_java_order() {
         let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
         stem.bounds = NativeSigBounds {
             x: 10,
@@ -3744,6 +3878,15 @@ mod tests {
         assert!(transaction.hooks.removed_beams.is_empty());
         assert!(transaction.beams.removed_beams.is_empty());
         assert!(transaction.ledgers.removals.is_empty());
+        assert!(transaction.stems.removed_orphan_stems.is_empty());
+        assert!(transaction.stems.tail_prunes.is_empty());
+        assert_eq!(transaction.stems.modification_count, 0);
+        assert!(
+            transaction
+                .post_stems_weak_purge
+                .removed_vertices
+                .is_empty()
+        );
         assert!(sig.vertex(0).is_some());
         assert!(sig.vertex(1).is_some());
     }
@@ -4053,6 +4196,77 @@ mod tests {
         assert!(sig.vertex(1).is_none());
         assert!(sig.vertex(2).is_some());
         assert!(sig.vertex(3).is_none());
+    }
+
+    #[test]
+    fn stem_check_removes_orphan_and_all_forbidden_tail_links_in_java_order() {
+        let orphan = vertex(0, NativeSigInterKind::Stem, 0.8);
+        let directed = vertex(1, NativeSigInterKind::Stem, 0.8);
+        let mut top = shaped_head(2, "NOTEHEAD_BLACK", 0);
+        top.grade = 0.95;
+        let bottom = shaped_head(3, "NOTEHEAD_BLACK", 95);
+        let undecidable = vertex(4, NativeSigInterKind::Stem, 0.8);
+        let middle = shaped_head(5, "NOTEHEAD_BLACK", 47);
+        let mut top_link = head_stem_edge(0, 2, 1);
+        top_link.head_stem.as_mut().unwrap().head_side = NativeStemHeadSide::Left;
+        top_link.head_stem.as_mut().unwrap().extension_point = NativeStemPoint { x: 11.0, y: 2.0 };
+        let mut forbidden_link = head_stem_edge(1, 3, 1);
+        forbidden_link.head_stem.as_mut().unwrap().extension_point =
+            NativeStemPoint { x: 11.0, y: 98.0 };
+        forbidden_link.head_stem.as_mut().unwrap().dx = 0.05;
+        forbidden_link.head_stem.as_mut().unwrap().dy = 0.0;
+        let mut middle_link = head_stem_edge(2, 5, 4);
+        middle_link.head_stem.as_mut().unwrap().extension_point =
+            NativeStemPoint { x: 41.0, y: 50.0 };
+        let mut sig = NativeSigSystem {
+            system_id: 10,
+            vertices: vec![orphan, directed, top, bottom, undecidable, middle],
+            edges: vec![top_link, forbidden_link, middle_link],
+        };
+        let medians = BTreeMap::from([
+            (
+                NativeSigVertexId(1),
+                NativeStemLine {
+                    start: NativeStemPoint { x: 11.0, y: 10.0 },
+                    stop: NativeStemPoint { x: 11.0, y: 90.0 },
+                },
+            ),
+            (
+                NativeSigVertexId(4),
+                NativeStemLine {
+                    start: NativeStemPoint { x: 41.0, y: 10.0 },
+                    stop: NativeStemPoint { x: 41.0, y: 90.0 },
+                },
+            ),
+        ]);
+
+        let result = prune_native_foundation_stems(&mut sig, &medians).unwrap();
+
+        assert_eq!(
+            result.stem_order,
+            vec![
+                NativeSigVertexId(0),
+                NativeSigVertexId(1),
+                NativeSigVertexId(4)
+            ]
+        );
+        assert_eq!(result.removed_orphan_stems, vec![NativeSigVertexId(0)]);
+        assert_eq!(
+            result.tail_prunes,
+            vec![NativeReductionStemTailPrune {
+                stem: NativeSigVertexId(1),
+                direction: 1,
+                removed_head_stem_edges: vec![NativeSigEdgeId(1)],
+                added_exclusions: vec![NativeSigEdgeId(3)],
+            }]
+        );
+        assert_eq!(result.modification_count, 2);
+        assert!(sig.vertex(0).is_none());
+        assert!(sig.edges[0].active);
+        assert!(!sig.edges[1].active);
+        assert!(sig.edges[2].active, "direction zero must remain undecided");
+        assert_eq!(sig.edges[3].kind, NativeSigRelationKind::Exclusion);
+        assert_eq!((sig.edges[3].source, sig.edges[3].target), (1, 3));
     }
 
     #[test]

@@ -11799,3 +11799,27 @@ passes 737 tests with two ignored. Formatting, strict Clippy, and diff checks
 are clean. The next exact frontier is `checkStems()`, followed by the
 foundations consistency fixed point and late consistency/refinement/group
 epochs.
+
+## Boundary 288: complete `checkStems` through its weak purge
+
+The production foundations transaction now executes one complete Java
+consistency pass. It snapshots live stems after the ledger purge, removes
+orphans with extensive ensemble semantics, and applies
+`stemHasSingleHeadEnd()` before the pass's final contextual weak purge.
+
+The stem check consumes retained exact medians and the same extended-line and
+stable best-grade direction logic used by `checkHeads()`. Direction zero makes
+no decision. Direction +1 forbids bottom-end heads; direction -1 forbids
+top-end heads. All forbidden `HeadStemRelation`s are collected in insertion
+order against the original extended line and removed together. Invading links
+(`dy <= 0`, `dx <= 0.05`) add normalized overlap exclusions only after the
+batch removal. The result records the stem-order snapshot, orphan/ensemble
+removals, per-stem direction, ordered relation/exclusion changes, and Java's
+modification count.
+
+The focused REDUCTION suite passes 33/33; the every-system Batuque production
+gate passes; the frozen native SIG baseline remains ten active passes plus
+five ignored diagnostics; and the full library passes 738 tests with two
+ignored. Strict all-target/all-feature Clippy, formatting, and diff checks are
+green. Next implement the outer foundations consistency fixed point, then the
+late consistency, refinement, beam-group, free-stem, and glyph-cleanup epochs.

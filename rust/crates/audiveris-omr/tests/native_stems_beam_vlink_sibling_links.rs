@@ -8741,6 +8741,8 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         assert_eq!(prefix.post_beams_weak_purge.system_id, system_id);
         assert_eq!(prefix.ledgers.system_id, system_id);
         assert_eq!(prefix.post_ledgers_weak_purge.system_id, system_id);
+        assert_eq!(prefix.stems.system_id, system_id);
+        assert_eq!(prefix.post_stems_weak_purge.system_id, system_id);
     }
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
