@@ -6,7 +6,7 @@
 //! system ordering.  This module starts the production bridge from terminal
 //! native STEMS SIGs with Java's deterministic `SIGraph.reduceExclusions()`
 //! algorithm, lossless overlap discovery, chord prolog, and the contiguous
-//! foundations prefix through the purge after `checkStemEndingHeads()`.
+//! foundations prefix through the beam purge which follows `checkHeads()`.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -95,6 +95,51 @@ pub struct NativeReductionStemEndingTransaction {
     pub modified_stems: Vec<NativeReductionStemEndingPrune>,
 }
 
+/// Staff/pitch identity consumed by Java `SigReducer.lookupHead`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeReductionHeadIdentity {
+    pub staff_id: usize,
+    pub integer_pitch: i32,
+}
+
+type NativeReductionHeadLookup = (
+    BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
+    Vec<(usize, usize)>,
+);
+
+/// One Java-counted mutation from `checkHeads()`, in its exact head/relation
+/// traversal order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeReductionHeadMutation {
+    OrphanRemoved {
+        head: NativeSigVertexId,
+    },
+    UnknownDirectionStemRemoved {
+        head: NativeSigVertexId,
+        stem: NativeSigVertexId,
+        relation: NativeSigEdgeId,
+    },
+    WrongSideRelationRemoved {
+        head: NativeSigVertexId,
+        stem: NativeSigVertexId,
+        relation: NativeSigEdgeId,
+        exclusion: Option<NativeSigEdgeId>,
+    },
+}
+
+/// Full Java `checkHeads()` graph transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionHeadCheckTransaction {
+    pub system_id: usize,
+    pub head_order: Vec<NativeSigVertexId>,
+    pub mutations: Vec<NativeReductionHeadMutation>,
+    /// Ensemble cascades are not included in Java's modification count but
+    /// remain observable graph mutations.
+    pub removed_ensembles: Vec<NativeSigVertexId>,
+    /// `StemInter.remove()` can invalidate same-stem `HeadHeadRelation`s.
+    pub removed_head_head_supports: Vec<NativeSigEdgeId>,
+}
+
 /// Exact relation mutations made by foundations `analyzeChords()` in good
 /// stem order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,7 +152,7 @@ pub struct NativeReductionChordAnalysisTransaction {
 }
 
 /// The exact contiguous prefix of Java foundations reduction currently native:
-/// overlap discovery through the purge after `checkStemEndingHeads()`.
+/// overlap discovery through the beam purge after `checkHeads()`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeReductionFoundationPrefixTransaction {
     pub system_id: usize,
@@ -117,6 +162,12 @@ pub struct NativeReductionFoundationPrefixTransaction {
     pub initial_weak_purge: NativeReductionWeakPurgeTransaction,
     pub stem_ending: NativeReductionStemEndingTransaction,
     pub post_stem_ending_weak_purge: NativeReductionWeakPurgeTransaction,
+    pub heads: NativeReductionHeadCheckTransaction,
+    pub post_heads_weak_purge: NativeReductionWeakPurgeTransaction,
+    pub hooks: NativeReductionBeamPruneTransaction,
+    pub post_hooks_weak_purge: NativeReductionWeakPurgeTransaction,
+    pub beams: NativeReductionBeamPruneTransaction,
+    pub post_beams_weak_purge: NativeReductionWeakPurgeTransaction,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,6 +179,10 @@ pub enum NativeReductionFoundationPrefixError {
     MissingStemMedian {
         system_id: usize,
         stem: NativeSigVertexId,
+    },
+    MissingHeadIdentity {
+        system_id: usize,
+        head: NativeSigVertexId,
     },
     UnsupportedHeadShape {
         system_id: usize,
@@ -156,6 +211,11 @@ impl fmt::Display for NativeReductionFoundationPrefixError {
                 "REDUCTION system {system_id} chord analysis has no median for stem {}",
                 stem.0
             ),
+            Self::MissingHeadIdentity { system_id, head } => write!(
+                formatter,
+                "REDUCTION system {system_id} head check has no staff/pitch identity for head {}",
+                head.0
+            ),
             Self::UnsupportedHeadShape { system_id, head } => write!(
                 formatter,
                 "REDUCTION system {system_id} chord analysis has unsupported head shape at {}",
@@ -173,6 +233,7 @@ impl Error for NativeReductionFoundationPrefixError {
             Self::StemEnding(source) => Some(source),
             Self::MissingSystem(_)
             | Self::MissingStemMedian { .. }
+            | Self::MissingHeadIdentity { .. }
             | Self::UnsupportedHeadShape { .. } => None,
         }
     }
@@ -676,7 +737,7 @@ pub fn detect_native_stems_reduction_overlaps(
 }
 
 /// Execute the exact contiguous Java foundations prefix which is currently
-/// native, stopping immediately before `checkHeads()`.
+/// native, stopping immediately before `checkLedgers()`.
 pub fn reduce_native_stems_foundation_prefix(
     stems: &mut NativeStemsRecognition,
     system_id: usize,
@@ -684,6 +745,7 @@ pub fn reduce_native_stems_foundation_prefix(
     let mut resolver = native_stems_lossless_overlap_resolver(stems, system_id)
         .map_err(NativeReductionOverlapError::from)?;
     let medians = native_stems_terminal_medians(stems, system_id)?;
+    let (head_identities, merged_staff_pairs) = native_stems_head_identities(stems, system_id)?;
     let system = stems
         .systems
         .iter_mut()
@@ -695,6 +757,8 @@ pub fn reduce_native_stems_foundation_prefix(
         &mut system.transaction.state_after.beam_state.sig,
         &mut resolver,
         &medians,
+        &head_identities,
+        &merged_staff_pairs,
     )
 }
 
@@ -704,6 +768,8 @@ pub fn reduce_native_foundation_prefix(
     sig: &mut NativeSigSystem,
     geometry: &mut impl NativeReductionOverlapGeometry,
     stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    head_identities: &BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
+    merged_staff_pairs: &[(usize, usize)],
 ) -> Result<NativeReductionFoundationPrefixTransaction, NativeReductionFoundationPrefixError> {
     let overlap = detect_native_reduction_overlaps(sig, geometry)?;
     // AdapterForFoundations.checkFrozens() is the inherited no-op.
@@ -713,6 +779,13 @@ pub fn reduce_native_foundation_prefix(
     // AdapterForFoundations.checkSlurs() is the inherited empty set.
     let stem_ending = prune_native_foundation_stem_ending_heads(sig, stem_medians)?;
     let post_stem_ending_weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    let heads =
+        prune_native_foundation_heads(sig, stem_medians, head_identities, merged_staff_pairs)?;
+    let post_heads_weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    let hooks = prune_native_foundation_hooks(sig)?;
+    let post_hooks_weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    let beams = prune_native_foundation_beams(sig)?;
+    let post_beams_weak_purge = contextualize_and_purge_native_weaks(sig)?;
     Ok(NativeReductionFoundationPrefixTransaction {
         system_id: sig.system_id,
         overlap,
@@ -721,7 +794,45 @@ pub fn reduce_native_foundation_prefix(
         initial_weak_purge,
         stem_ending,
         post_stem_ending_weak_purge,
+        heads,
+        post_heads_weak_purge,
+        hooks,
+        post_hooks_weak_purge,
+        beams,
+        post_beams_weak_purge,
     })
+}
+
+fn native_stems_head_identities(
+    stems: &NativeStemsRecognition,
+    system_id: usize,
+) -> Result<NativeReductionHeadLookup, NativeReductionFoundationPrefixError> {
+    let system = stems
+        .systems
+        .iter()
+        .find(|system| system.system_id == system_id)
+        .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
+            system_id,
+        ))?;
+    let bindings = &system.transaction.state_after.beam_state.bindings;
+    let identities = bindings
+        .overlap_geometry
+        .iter()
+        .filter_map(|(&vertex, geometry)| {
+            geometry.head.and_then(|head| {
+                head.staff_id.map(|staff_id| {
+                    (
+                        vertex,
+                        NativeReductionHeadIdentity {
+                            staff_id,
+                            integer_pitch: head.integer_pitch,
+                        },
+                    )
+                })
+            })
+        })
+        .collect();
+    Ok((identities, bindings.merged_staff_pairs.clone()))
 }
 
 fn native_stems_terminal_medians(
@@ -788,7 +899,11 @@ pub fn analyze_native_foundation_chords(
     let mut all_heads = sig
         .vertices
         .iter()
-        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Head)
+        .filter(|vertex| {
+            vertex.active
+                && vertex.kind == NativeSigInterKind::Head
+                && vertex.shape.as_deref().is_some_and(is_stem_head_shape)
+        })
         .map(|vertex| NativeSigVertexId(vertex.ordinal))
         .collect::<Vec<_>>();
     all_heads.sort_by_key(|head| sig.vertices[head.0].bounds.x);
@@ -1513,11 +1628,363 @@ pub fn prune_native_foundation_beams(
 pub fn prune_native_foundation_heads_without_stems(
     sig: &mut NativeSigSystem,
 ) -> Result<NativeReductionOrphanPruneTransaction, NativeSigError> {
-    prune_orphans_without_relation(
+    prune_orphans_without_relation_matching(
         sig,
         NativeSigInterKind::Head,
         NativeSigRelationKind::HeadStem,
+        |vertex| vertex.shape.as_deref().is_some_and(is_stem_head_shape),
     )
+}
+
+/// Port Java `SigReducer.checkHeads()` including direction-aware wrong-side
+/// pruning and the merged-grand-staff lookup exception.
+pub fn prune_native_foundation_heads(
+    sig: &mut NativeSigSystem,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    head_identities: &BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
+    merged_staff_pairs: &[(usize, usize)],
+) -> Result<NativeReductionHeadCheckTransaction, NativeReductionFoundationPrefixError> {
+    sig.validate_integrity()?;
+    let head_order = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Head)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut mutations = Vec::new();
+    let mut removed_ensembles = Vec::new();
+    let mut removed_head_head_supports = Vec::new();
+
+    for &head in &head_order {
+        if sig.vertex(head.0).is_none() {
+            continue;
+        }
+        let relations = active_head_stem_relations(sig, head);
+        if relations.is_empty() {
+            let dying = dying_ensembles(sig, head);
+            remove_vertex_extensively(sig, head, &dying)?;
+            mutations.push(NativeReductionHeadMutation::OrphanRemoved { head });
+            for ensemble in dying {
+                push_unique(&mut removed_ensembles, ensemble);
+            }
+            continue;
+        }
+
+        // Java snapshots getRelations(head, HeadStemRelation.class) before
+        // visiting it in insertion order.
+        for relation in relations {
+            if !sig.edges.get(relation.0).is_some_and(|edge| edge.active) {
+                continue;
+            }
+            let edge = sig.edges[relation.0];
+            let stem = NativeSigVertexId(edge.target);
+            let direction = native_stem_direction(sig, stem, stem_medians)?;
+            if direction == 0 {
+                remove_native_reduction_stem(
+                    sig,
+                    stem,
+                    &mut removed_ensembles,
+                    &mut removed_head_head_supports,
+                )?;
+                mutations.push(NativeReductionHeadMutation::UnknownDirectionStemRemoved {
+                    head,
+                    stem,
+                    relation,
+                });
+                continue;
+            }
+
+            let payload = edge.head_stem.expect("validated HeadStem payload");
+            let normal_side = matches!(
+                (payload.head_side, direction),
+                (NativeStemHeadSide::Left, 1) | (NativeStemHeadSide::Right, -1)
+            );
+            if normal_side {
+                continue;
+            }
+            let identity = *head_identities.get(&head).ok_or(
+                NativeReductionFoundationPrefixError::MissingHeadIdentity {
+                    system_id: sig.system_id,
+                    head,
+                },
+            )?;
+            let target_side = opposite_head_side(payload.head_side);
+            let has_opposite =
+                (identity.integer_pitch - 1..=identity.integer_pitch + 1).any(|pitch| {
+                    lookup_native_reduction_head(
+                        sig,
+                        stem,
+                        target_side,
+                        identity.staff_id,
+                        pitch,
+                        head_identities,
+                        merged_staff_pairs,
+                    )
+                    .is_some()
+                });
+            if has_opposite {
+                continue;
+            }
+
+            sig.remove_edge(relation)?;
+            let exclusion = if payload.dy <= 0.0 && payload.dx <= 0.05 {
+                insert_native_overlap_exclusion(sig, head, stem)?
+            } else {
+                None
+            };
+            mutations.push(NativeReductionHeadMutation::WrongSideRelationRemoved {
+                head,
+                stem,
+                relation,
+                exclusion,
+            });
+        }
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionHeadCheckTransaction {
+        system_id: sig.system_id,
+        head_order,
+        mutations,
+        removed_ensembles,
+        removed_head_head_supports,
+    })
+}
+
+fn active_head_stem_relations(
+    sig: &NativeSigSystem,
+    head: NativeSigVertexId,
+) -> Vec<NativeSigEdgeId> {
+    sig.edges
+        .iter()
+        .filter(|edge| {
+            edge.active && edge.kind == NativeSigRelationKind::HeadStem && edge.source == head.0
+        })
+        .map(|edge| NativeSigEdgeId(edge.ordinal))
+        .collect()
+}
+
+fn native_stem_direction(
+    sig: &NativeSigSystem,
+    stem: NativeSigVertexId,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+) -> Result<i8, NativeReductionFoundationPrefixError> {
+    let &median =
+        stem_medians
+            .get(&stem)
+            .ok_or(NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id: sig.system_id,
+                stem,
+            })?;
+    let extended = extended_stem_line(sig, stem, median);
+    let mut links = sig
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.active
+                && edge.target == stem.0
+                && matches!(
+                    edge.kind,
+                    NativeSigRelationKind::HeadStem | NativeSigRelationKind::BeamStem
+                )
+        })
+        .collect::<Vec<_>>();
+    // Java Collections.sort is stable, retaining SIG relation order for equal
+    // source best grades.
+    links.sort_by(|left, right| {
+        best_grade_of(sig, right.source).total_cmp(&best_grade_of(sig, left.source))
+    });
+    let (_, bottom) = ordered_stem_points(extended);
+    let (top, _) = ordered_stem_points(extended);
+    let middle = (top.y + bottom.y) / 2.0;
+    for edge in links {
+        match edge.kind {
+            NativeSigRelationKind::HeadStem => {
+                let payload = edge.head_stem.expect("validated HeadStem payload");
+                let portion = head_stem_portion(
+                    sig.vertices[edge.source].bounds.height,
+                    extended,
+                    payload.extension_point.y,
+                );
+                let percussion = sig.vertices[edge.source]
+                    .shape
+                    .as_deref()
+                    .is_some_and(is_percussion_head_shape);
+                if portion == NativeReductionStemPortion::Bottom
+                    && (payload.head_side == NativeStemHeadSide::Right || percussion)
+                {
+                    return Ok(-1);
+                }
+                if portion == NativeReductionStemPortion::Top
+                    && (payload.head_side == NativeStemHeadSide::Left || percussion)
+                {
+                    return Ok(1);
+                }
+            }
+            NativeSigRelationKind::BeamStem => {
+                let extension = edge.stem_extension.expect("validated BeamStem payload");
+                return Ok(if extension.y < middle { -1 } else { 1 });
+            }
+            _ => unreachable!("filtered stem connection"),
+        }
+    }
+    Ok(0)
+}
+
+fn is_percussion_head_shape(shape: &str) -> bool {
+    shape.contains("_CROSS")
+        || shape.contains("_DIAMOND")
+        || shape.contains("_TRIANGLE_DOWN")
+        || shape.contains("_CIRCLE_X")
+}
+
+fn is_stem_head_shape(shape: &str) -> bool {
+    matches!(
+        shape,
+        "NOTEHEAD_BLACK"
+            | "NOTEHEAD_VOID"
+            | "NOTEHEAD_BLACK_SMALL"
+            | "NOTEHEAD_VOID_SMALL"
+            | "NOTEHEAD_CROSS"
+            | "NOTEHEAD_CROSS_VOID"
+            | "NOTEHEAD_DIAMOND_FILLED"
+            | "NOTEHEAD_DIAMOND_VOID"
+            | "NOTEHEAD_TRIANGLE_DOWN_FILLED"
+            | "NOTEHEAD_TRIANGLE_DOWN_VOID"
+            | "NOTEHEAD_CIRCLE_X"
+            | "NOTEHEAD_CIRCLE_X_VOID"
+    )
+}
+
+const fn opposite_head_side(side: NativeStemHeadSide) -> NativeStemHeadSide {
+    match side {
+        NativeStemHeadSide::Left => NativeStemHeadSide::Right,
+        NativeStemHeadSide::Right => NativeStemHeadSide::Left,
+    }
+}
+
+fn lookup_native_reduction_head(
+    sig: &NativeSigSystem,
+    stem: NativeSigVertexId,
+    side: NativeStemHeadSide,
+    mut staff_id: usize,
+    mut pitch: i32,
+    head_identities: &BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
+    merged_staff_pairs: &[(usize, usize)],
+) -> Option<NativeSigVertexId> {
+    sig.vertex(stem.0)?;
+    for &(first, last) in merged_staff_pairs {
+        if staff_id == first && pitch == 7 {
+            staff_id = last;
+            pitch = -5;
+            break;
+        }
+        if staff_id == last && pitch == -6 {
+            staff_id = first;
+            pitch = 5;
+            break;
+        }
+    }
+    sig.edges
+        .iter()
+        .filter(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::HeadStem
+                && edge.target == stem.0
+                && edge
+                    .head_stem
+                    .is_some_and(|payload| payload.head_side == side)
+        })
+        .find_map(|edge| {
+            let head = NativeSigVertexId(edge.source);
+            head_identities
+                .get(&head)
+                .is_some_and(|identity| {
+                    identity.staff_id == staff_id && identity.integer_pitch == pitch
+                })
+                .then_some(head)
+        })
+}
+
+fn remove_native_reduction_stem(
+    sig: &mut NativeSigSystem,
+    stem: NativeSigVertexId,
+    removed_ensembles: &mut Vec<NativeSigVertexId>,
+    removed_head_head_supports: &mut Vec<NativeSigEdgeId>,
+) -> Result<(), NativeSigError> {
+    if sig.vertices[stem.0].grade >= 0.4 {
+        let stem_heads = active_head_stem_relations_to(sig, stem)
+            .into_iter()
+            .map(|relation| NativeSigVertexId(sig.edges[relation.0].source))
+            .collect::<BTreeSet<_>>();
+        for &head in &stem_heads {
+            let head_head_relations = sig
+                .edges
+                .iter()
+                .filter(|edge| {
+                    edge.active
+                        && edge.kind == NativeSigRelationKind::HeadHead
+                        && (edge.source == head.0 || edge.target == head.0)
+                })
+                .map(|edge| NativeSigEdgeId(edge.ordinal))
+                .collect::<Vec<_>>();
+            for relation in head_head_relations {
+                if !sig.edges[relation.0].active {
+                    continue;
+                }
+                let edge = sig.edges[relation.0];
+                let similar = NativeSigVertexId(if edge.source == head.0 {
+                    edge.target
+                } else {
+                    edge.source
+                });
+                if !stem_heads.contains(&similar)
+                    || heads_share_other_good_stem(sig, head, similar, stem)
+                {
+                    continue;
+                }
+                sig.remove_edge(relation)?;
+                removed_head_head_supports.push(relation);
+            }
+        }
+    }
+    let dying = dying_ensembles(sig, stem);
+    remove_vertex_extensively(sig, stem, &dying)?;
+    for ensemble in dying {
+        push_unique(removed_ensembles, ensemble);
+    }
+    Ok(())
+}
+
+fn active_head_stem_relations_to(
+    sig: &NativeSigSystem,
+    stem: NativeSigVertexId,
+) -> Vec<NativeSigEdgeId> {
+    sig.edges
+        .iter()
+        .filter(|edge| {
+            edge.active && edge.kind == NativeSigRelationKind::HeadStem && edge.target == stem.0
+        })
+        .map(|edge| NativeSigEdgeId(edge.ordinal))
+        .collect()
+}
+
+fn heads_share_other_good_stem(
+    sig: &NativeSigSystem,
+    one: NativeSigVertexId,
+    two: NativeSigVertexId,
+    removed: NativeSigVertexId,
+) -> bool {
+    let one_stems = active_head_stem_relations(sig, one)
+        .into_iter()
+        .map(|relation| NativeSigVertexId(sig.edges[relation.0].target))
+        .filter(|stem| *stem != removed)
+        .collect::<BTreeSet<_>>();
+    active_head_stem_relations(sig, two)
+        .into_iter()
+        .map(|relation| NativeSigVertexId(sig.edges[relation.0].target))
+        .any(|stem| {
+            stem != removed && one_stems.contains(&stem) && sig.vertices[stem.0].grade >= 0.4
+        })
 }
 
 /// Java `checkStems()`'s `stem.getHeads().isEmpty()` removal branch.
@@ -2091,11 +2558,20 @@ fn prune_orphans_without_relation(
     kind: NativeSigInterKind,
     required_relation: NativeSigRelationKind,
 ) -> Result<NativeReductionOrphanPruneTransaction, NativeSigError> {
+    prune_orphans_without_relation_matching(sig, kind, required_relation, |_| true)
+}
+
+fn prune_orphans_without_relation_matching(
+    sig: &mut NativeSigSystem,
+    kind: NativeSigInterKind,
+    required_relation: NativeSigRelationKind,
+    matches: impl Fn(&crate::native_sig::NativeSigVertex) -> bool,
+) -> Result<NativeReductionOrphanPruneTransaction, NativeSigError> {
     sig.validate_integrity()?;
     let candidates = sig
         .vertices
         .iter()
-        .filter(|vertex| vertex.active && vertex.kind == kind)
+        .filter(|vertex| vertex.active && vertex.kind == kind && matches(vertex))
         .map(|vertex| NativeSigVertexId(vertex.ordinal))
         .collect::<Vec<_>>();
     let mut removed_vertices = Vec::new();
@@ -2421,7 +2897,7 @@ mod tests {
     }
 
     #[test]
-    fn foundation_prefix_stops_after_stem_ending_purge_in_java_order() {
+    fn foundation_prefix_stops_before_ledgers_in_java_order() {
         let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
         stem.bounds = NativeSigBounds {
             x: 10,
@@ -2439,7 +2915,7 @@ mod tests {
             .head_stem
             .as_mut()
             .expect("payload")
-            .extension_point = NativeStemPoint { x: 11.0, y: 82.0 };
+            .extension_point = NativeStemPoint { x: 11.0, y: 99.0 };
         let medians = BTreeMap::from([(
             NativeSigVertexId(0),
             NativeStemLine {
@@ -2449,8 +2925,21 @@ mod tests {
         )]);
         let mut geometry = ScriptedOverlapGeometry::default();
 
-        let transaction = reduce_native_foundation_prefix(&mut sig, &mut geometry, &medians)
-            .expect("exact foundations prefix");
+        let head_identities = BTreeMap::from([(
+            NativeSigVertexId(1),
+            NativeReductionHeadIdentity {
+                staff_id: 1,
+                integer_pitch: 0,
+            },
+        )]);
+        let transaction = reduce_native_foundation_prefix(
+            &mut sig,
+            &mut geometry,
+            &medians,
+            &head_identities,
+            &[],
+        )
+        .expect("exact foundations prefix");
 
         assert_eq!(transaction.overlap.system_id, 41);
         assert_eq!(
@@ -2465,6 +2954,13 @@ mod tests {
                 .removed_vertices
                 .is_empty()
         );
+        assert!(
+            transaction.heads.mutations.is_empty(),
+            "{:?}",
+            transaction.heads
+        );
+        assert!(transaction.hooks.removed_beams.is_empty());
+        assert!(transaction.beams.removed_beams.is_empty());
         assert!(sig.vertex(0).is_some());
         assert!(sig.vertex(1).is_some());
     }
@@ -2722,10 +3218,11 @@ mod tests {
         let mut sig = NativeSigSystem {
             system_id: 8,
             vertices: vec![
-                vertex(0, NativeSigInterKind::Head, 0.8),
-                vertex(1, NativeSigInterKind::Head, 0.8),
-                vertex(2, NativeSigInterKind::Head, 0.8),
+                shaped_head(0, "NOTEHEAD_BLACK", 0),
+                shaped_head(1, "NOTEHEAD_BLACK", 0),
+                shaped_head(2, "NOTEHEAD_BLACK", 0),
                 vertex(3, NativeSigInterKind::Stem, 0.8),
+                shaped_head(4, "WHOLE_NOTE", 0),
             ],
             edges: vec![head_stem_edge(0, 1, 3), inactive],
         };
@@ -2741,6 +3238,10 @@ mod tests {
         assert!(sig.vertex(1).is_some());
         assert!(sig.vertex(2).is_none());
         assert!(sig.vertex(3).is_some());
+        assert!(
+            sig.vertex(4).is_some(),
+            "stemless heads are outside checkHeads"
+        );
     }
 
     #[test]
@@ -3026,6 +3527,166 @@ mod tests {
         assert!(sig.vertices[0].active);
         assert!(sig.vertices[3].removed);
         assert!(sig.vertices[5].active);
+    }
+
+    #[test]
+    fn head_check_removes_invading_wrong_side_relation_in_java_order() {
+        let mut beam = vertex(0, NativeSigInterKind::Beam, 0.95);
+        beam.contextual_grade = Some(0.95);
+        let stem = vertex(1, NativeSigInterKind::Stem, 0.8);
+        let mut head = shaped_head(2, "NOTEHEAD_BLACK", 80);
+        head.contextual_grade = Some(0.8);
+        let mut wrong = head_stem_edge(1, 2, 1);
+        wrong.head_stem.as_mut().unwrap().dx = 0.05;
+        wrong.head_stem.as_mut().unwrap().dy = 0.0;
+        wrong.head_stem.as_mut().unwrap().head_side = NativeStemHeadSide::Left;
+        wrong.head_stem.as_mut().unwrap().extension_point = NativeStemPoint { x: 11.0, y: 82.0 };
+        let mut beam_link = beam_stem_edge(0, 0, 1, NativeBeamPortion::Left);
+        beam_link.stem_extension = Some(NativeStemPoint { x: 11.0, y: 2.0 });
+        let mut sig = NativeSigSystem {
+            system_id: 7,
+            vertices: vec![beam, stem, head],
+            edges: vec![beam_link, wrong],
+        };
+        let medians = BTreeMap::from([(
+            NativeSigVertexId(1),
+            NativeStemLine {
+                start: NativeStemPoint { x: 11.0, y: 0.0 },
+                stop: NativeStemPoint { x: 11.0, y: 100.0 },
+            },
+        )]);
+        let identities = BTreeMap::from([(
+            NativeSigVertexId(2),
+            NativeReductionHeadIdentity {
+                staff_id: 1,
+                integer_pitch: 0,
+            },
+        )]);
+
+        let transaction =
+            prune_native_foundation_heads(&mut sig, &medians, &identities, &[]).unwrap();
+
+        assert_eq!(transaction.head_order, vec![NativeSigVertexId(2)]);
+        assert_eq!(
+            transaction.mutations,
+            vec![NativeReductionHeadMutation::WrongSideRelationRemoved {
+                head: NativeSigVertexId(2),
+                stem: NativeSigVertexId(1),
+                relation: NativeSigEdgeId(1),
+                exclusion: Some(NativeSigEdgeId(2)),
+            }]
+        );
+        assert!(!sig.edges[1].active);
+        assert_eq!(sig.edges[2].kind, NativeSigRelationKind::Exclusion);
+    }
+
+    #[test]
+    fn head_check_lookup_remaps_merged_grand_staff_gutter_pitch() {
+        let mut beam = vertex(0, NativeSigInterKind::Beam, 0.95);
+        beam.contextual_grade = Some(0.95);
+        let stem = vertex(1, NativeSigInterKind::Stem, 0.8);
+        let first_head = shaped_head(2, "NOTEHEAD_BLACK", 80);
+        let second_head = shaped_head(3, "NOTEHEAD_BLACK", 80);
+        let mut first_link = head_stem_edge(1, 2, 1);
+        first_link.head_stem.as_mut().unwrap().head_side = NativeStemHeadSide::Left;
+        first_link.head_stem.as_mut().unwrap().extension_point =
+            NativeStemPoint { x: 11.0, y: 82.0 };
+        let mut second_link = head_stem_edge(2, 3, 1);
+        second_link.head_stem.as_mut().unwrap().head_side = NativeStemHeadSide::Right;
+        second_link.head_stem.as_mut().unwrap().extension_point =
+            NativeStemPoint { x: 11.0, y: 82.0 };
+        let mut beam_link = beam_stem_edge(0, 0, 1, NativeBeamPortion::Left);
+        beam_link.stem_extension = Some(NativeStemPoint { x: 11.0, y: 2.0 });
+        let mut sig = NativeSigSystem {
+            system_id: 8,
+            vertices: vec![beam, stem, first_head, second_head],
+            edges: vec![beam_link, first_link, second_link],
+        };
+        let medians = BTreeMap::from([(
+            NativeSigVertexId(1),
+            NativeStemLine {
+                start: NativeStemPoint { x: 11.0, y: 0.0 },
+                stop: NativeStemPoint { x: 11.0, y: 100.0 },
+            },
+        )]);
+        let identities = BTreeMap::from([
+            (
+                NativeSigVertexId(2),
+                NativeReductionHeadIdentity {
+                    staff_id: 10,
+                    integer_pitch: 6,
+                },
+            ),
+            (
+                NativeSigVertexId(3),
+                NativeReductionHeadIdentity {
+                    staff_id: 11,
+                    integer_pitch: -5,
+                },
+            ),
+        ]);
+
+        let transaction =
+            prune_native_foundation_heads(&mut sig, &medians, &identities, &[(10, 11)]).unwrap();
+
+        assert!(transaction.mutations.is_empty());
+        assert!(
+            sig.edges[1].active,
+            "merged opposite-side head preserves link"
+        );
+    }
+
+    #[test]
+    fn unknown_direction_stem_removal_drops_based_head_support_then_orphan() {
+        let stem = vertex(0, NativeSigInterKind::Stem, 0.8);
+        let first = shaped_head(1, "NOTEHEAD_BLACK", 45);
+        let second = shaped_head(2, "NOTEHEAD_BLACK", 50);
+        let mut first_link = head_stem_edge(0, 1, 0);
+        first_link.head_stem.as_mut().unwrap().extension_point =
+            NativeStemPoint { x: 11.0, y: 48.0 };
+        let mut second_link = head_stem_edge(1, 2, 0);
+        second_link.head_stem.as_mut().unwrap().extension_point =
+            NativeStemPoint { x: 11.0, y: 52.0 };
+        let mut support = edge(2, 1, 2, NativeSigRelationKind::HeadHead);
+        support.support = Some(NativeSigSupport {
+            grade: 1.0,
+            bar_connection_impacts: None,
+        });
+        let mut sig = NativeSigSystem {
+            system_id: 9,
+            vertices: vec![stem, first, second],
+            edges: vec![first_link, second_link, support],
+        };
+        let medians = BTreeMap::from([(
+            NativeSigVertexId(0),
+            NativeStemLine {
+                start: NativeStemPoint { x: 11.0, y: 0.0 },
+                stop: NativeStemPoint { x: 11.0, y: 100.0 },
+            },
+        )]);
+
+        let transaction =
+            prune_native_foundation_heads(&mut sig, &medians, &BTreeMap::new(), &[]).unwrap();
+
+        assert_eq!(
+            transaction.mutations,
+            vec![
+                NativeReductionHeadMutation::UnknownDirectionStemRemoved {
+                    head: NativeSigVertexId(1),
+                    stem: NativeSigVertexId(0),
+                    relation: NativeSigEdgeId(0),
+                },
+                NativeReductionHeadMutation::OrphanRemoved {
+                    head: NativeSigVertexId(2),
+                },
+            ]
+        );
+        assert_eq!(
+            transaction.removed_head_head_supports,
+            vec![NativeSigEdgeId(2)]
+        );
+        assert!(sig.vertices[0].removed);
+        assert!(sig.vertices[2].removed);
     }
 
     #[test]

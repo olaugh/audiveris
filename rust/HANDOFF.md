@@ -11736,3 +11736,31 @@ and the complete library passes 730 tests with two ignored. Formatting, strict
 all-target/all-feature workspace Clippy, and diff checks pass. Next implement
 `checkHeadSide()` to complete `checkHeads()`; that unlocks the next contiguous
 Java-order segment through hook and beam checks.
+
+## Boundary 286: complete head check through beam purge
+
+Native REDUCTION now owns the next contiguous foundations segment in Java
+order. After the stem-ending purge, the production path executes complete
+`checkHeads()`, contextualizes and purges, executes `checkHooksHaveStem()`,
+contextualizes and purges, executes `checkBeamsHaveBothStems()`, and performs
+the final purge before `checkLedgers()`.
+
+The head transaction snapshots only Java `ShapeSet.StemHeads` in SIG order.
+It removes true orphans; computes each stem direction from live HeadStem and
+BeamStem sources in stable decreasing best-grade order; handles oval and
+percussion heads; accepts the normal head side; and otherwise searches the
+opposite side at pitch -1/0/+1. The terminal SIG binding now retains exact
+merged-grand-staff pairs, so Java's two gutter-pitch remaps are preserved
+instead of guessed. A wrong-side relation is removed, and an invading one adds
+the normalized overlap exclusion. An indeterminate stem is removed with
+`StemInter.remove()` semantics, including invalidation of HeadHead supports
+which no other good common stem sustains. Whole and breve heads remain outside
+this check.
+
+Focused REDUCTION coverage passes 28/28. The production Batuque regression
+executes the enlarged prefix on every system, and all 10 active frozen-SIG
+gates pass (five diagnostics ignored). The exact frontier is now
+`checkLedgers()`; after ledger validation come `checkStems()`, the consistency
+fixed point, late chord/exclusion checks, stem refinement, beam groups,
+free-stem measurement, and glyph cleanup. The complete library passes 733
+tests with two ignored.

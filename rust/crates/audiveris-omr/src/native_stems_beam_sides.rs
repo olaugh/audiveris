@@ -17340,6 +17340,7 @@ mod tests {
                 (other_ref, NativeSigVertexId(0)),
                 (current_ref, NativeSigVertexId(1)),
             ]),
+            merged_staff_pairs: Vec::new(),
             overlap_geometry: BTreeMap::new(),
         };
         let current_head = heads[0].clone();
@@ -17517,6 +17518,7 @@ mod tests {
             beam_group_vertices: BTreeMap::from([(7, NativeSigVertexId(0))]),
             stem_vertices: BTreeMap::new(),
             head_vertices: BTreeMap::new(),
+            merged_staff_pairs: Vec::new(),
             overlap_geometry: BTreeMap::new(),
         };
         assert_eq!(

@@ -8732,6 +8732,13 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             .expect("Batuque exact REDUCTION foundations prefix");
         assert!(!prefix.overlap.scan_order.is_empty());
         assert!(!prefix.chord_analysis.scanned_stems.is_empty());
+        assert_eq!(prefix.heads.system_id, system_id);
+        assert!(!prefix.heads.head_order.is_empty());
+        assert_eq!(prefix.post_heads_weak_purge.system_id, system_id);
+        assert_eq!(prefix.hooks.system_id, system_id);
+        assert_eq!(prefix.post_hooks_weak_purge.system_id, system_id);
+        assert_eq!(prefix.beams.system_id, system_id);
+        assert_eq!(prefix.post_beams_weak_purge.system_id, system_id);
     }
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;

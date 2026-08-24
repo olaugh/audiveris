@@ -6832,3 +6832,21 @@ Focused REDUCTION coverage passes 25/25, the frozen SIG baseline passes all 10
 active gates, and the full library passes 730 tests with two ignored. Strict
 Clippy, formatting, and diff checks are clean. The next frontier is completing
 `checkHeadSide()` inside `checkHeads()`.
+
+## Boundary 286: complete `checkHeads` and the following beam segment
+
+The native foundations prefix now runs full Java-order head validation, the
+following contextual purge, hook validation and purge, and standard-beam
+validation and purge. It stops at `checkLedgers()`.
+
+The new head transaction preserves Java's stem-capable shape filter, stable
+best-grade direction search over HeadStem/BeamStem connections, percussion
+rules, normal-side acceptance, opposite-side pitch search, invading
+exclusions, and directionless StemInter/HeadHead cleanup. Exact merged-grand-
+staff pairs are retained in terminal SIG bindings so the two special gutter
+pitch translations are lossless. Whole and breve heads are not treated as
+orphans. Twenty-eight focused REDUCTION tests, the every-system Batuque
+production gate, and all ten active frozen-SIG checks pass. The next bounded
+frontier is ledger validation, followed by stem validation and the later
+fixed-point/refinement/group/cleanup epochs. The complete library passes 733
+tests with two ignored.

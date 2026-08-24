@@ -731,6 +731,12 @@ pub struct NativeSigSystemBindings {
     pub beam_group_vertices: BTreeMap<usize, NativeSigVertexId>,
     pub stem_vertices: BTreeMap<usize, NativeSigVertexId>,
     pub head_vertices: BTreeMap<NativeHeadStaffEpilogRef, NativeSigVertexId>,
+    /// Ordered first/last staff IDs for Java merged-grand-staff parts.
+    ///
+    /// `SigReducer.lookupHead` remaps only the two gutter pitches across each
+    /// such pair, so REDUCTION needs the actual part topology rather than a
+    /// staff-distance guess.
+    pub merged_staff_pairs: Vec<(usize, usize)>,
     /// Exact immutable overlap evidence for vertices published before STEMS.
     /// Dynamic StemInter entries are joined from the terminal stem registry.
     pub overlap_geometry: BTreeMap<NativeSigVertexId, NativeReductionInterGeometry>,
@@ -1078,6 +1084,7 @@ pub fn assemble_native_sig(
             beam_group_vertices: BTreeMap::new(),
             stem_vertices: BTreeMap::new(),
             head_vertices: BTreeMap::new(),
+            merged_staff_pairs: merged_staff_pairs(heads, system_id)?,
             overlap_geometry: BTreeMap::new(),
         };
         append_grid(grid, grid_system, &mut graph, &mut system_bindings)?;
@@ -1103,6 +1110,35 @@ pub fn assemble_native_sig(
         bindings.push(system_bindings);
     }
     Ok(NativeSigRecognition { systems, bindings })
+}
+
+fn merged_staff_pairs(
+    heads: &NativeHeadsRecognition,
+    system_id: usize,
+) -> Result<Vec<(usize, usize)>, NativeSigError> {
+    let scanner_system = heads
+        .scanners
+        .systems
+        .iter()
+        .find(|system| system.system_id == system_id)
+        .ok_or(NativeSigError::MissingHeadsSystem(system_id))?;
+    let mut pairs = Vec::new();
+    let mut index = 0;
+    while index < scanner_system.staffs.len() {
+        if !scanner_system.staffs[index].merged {
+            index += 1;
+            continue;
+        }
+        let Some(last) = scanner_system.staffs.get(index + 1) else {
+            return Err(NativeSigError::MissingHeadsSystem(system_id));
+        };
+        if !last.merged {
+            return Err(NativeSigError::MissingHeadsSystem(system_id));
+        }
+        pairs.push((scanner_system.staffs[index].staff_id, last.staff_id));
+        index += 2;
+    }
+    Ok(pairs)
 }
 
 fn push_vertex(graph: &mut NativeSigSystem, mut vertex: NativeSigVertex) -> usize {
