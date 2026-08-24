@@ -6,7 +6,7 @@
 //! system ordering.  This module starts the production bridge from terminal
 //! native STEMS SIGs with Java's deterministic `SIGraph.reduceExclusions()`
 //! algorithm, lossless overlap discovery, chord prolog, and the contiguous
-//! foundations prefix through the beam purge which follows `checkHeads()`.
+//! foundations prefix through `checkLedgers()` and its following weak purge.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -17,8 +17,9 @@ use std::{
 use audiveris_image::run_table::{Orientation, RunTable};
 
 use crate::native_sig::{
-    NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigError, NativeSigInterKind,
-    NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSystem, NativeSigVertexId,
+    NativeSigBounds, NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigError,
+    NativeSigInterKind, NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSystem,
+    NativeSigSystemBindings, NativeSigVertexId,
 };
 use crate::native_stems::NativeStemsRecognition;
 use crate::stems_step::{NativeBeamPortion, NativeStemHeadSide, NativeStemLine, NativeStemPoint};
@@ -140,6 +141,37 @@ pub struct NativeReductionHeadCheckTransaction {
     pub removed_head_head_supports: Vec<NativeSigEdgeId>,
 }
 
+/// One pathological ledger identity repaired between two adjacent staff maps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionSharedLedgerFix {
+    pub ledger: NativeSigVertexId,
+    pub upper_staff_id: usize,
+    pub lower_staff_id: usize,
+    pub column_ledgers: Vec<NativeSigVertexId>,
+    pub column_heads: Vec<NativeSigVertexId>,
+    pub owner_staff_id: Option<usize>,
+}
+
+/// One unsupported ledger removal, including the iterative Java pass that
+/// exposed it after an outer ledger disappeared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeReductionLedgerRemoval {
+    pub pass: usize,
+    pub staff_id: usize,
+    pub ledger_index: i32,
+    pub ledger: NativeSigVertexId,
+}
+
+/// Full Java `checkLedgers()` transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionLedgerCheckTransaction {
+    pub system_id: usize,
+    pub shared_fixes: Vec<NativeReductionSharedLedgerFix>,
+    pub removals: Vec<NativeReductionLedgerRemoval>,
+    /// Java's return value: shared identities fixed plus SIG ledgers removed.
+    pub modification_count: usize,
+}
+
 /// Exact relation mutations made by foundations `analyzeChords()` in good
 /// stem order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,7 +184,7 @@ pub struct NativeReductionChordAnalysisTransaction {
 }
 
 /// The exact contiguous prefix of Java foundations reduction currently native:
-/// overlap discovery through the beam purge after `checkHeads()`.
+/// overlap discovery through the ledger purge after `checkHeads()`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeReductionFoundationPrefixTransaction {
     pub system_id: usize,
@@ -168,6 +200,8 @@ pub struct NativeReductionFoundationPrefixTransaction {
     pub post_hooks_weak_purge: NativeReductionWeakPurgeTransaction,
     pub beams: NativeReductionBeamPruneTransaction,
     pub post_beams_weak_purge: NativeReductionWeakPurgeTransaction,
+    pub ledgers: NativeReductionLedgerCheckTransaction,
+    pub post_ledgers_weak_purge: NativeReductionWeakPurgeTransaction,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -183,6 +217,10 @@ pub enum NativeReductionFoundationPrefixError {
     MissingHeadIdentity {
         system_id: usize,
         head: NativeSigVertexId,
+    },
+    MissingLedgerStaff {
+        system_id: usize,
+        staff_id: usize,
     },
     UnsupportedHeadShape {
         system_id: usize,
@@ -216,6 +254,13 @@ impl fmt::Display for NativeReductionFoundationPrefixError {
                 "REDUCTION system {system_id} head check has no staff/pitch identity for head {}",
                 head.0
             ),
+            Self::MissingLedgerStaff {
+                system_id,
+                staff_id,
+            } => write!(
+                formatter,
+                "REDUCTION system {system_id} ledger check has no staff geometry {staff_id}"
+            ),
             Self::UnsupportedHeadShape { system_id, head } => write!(
                 formatter,
                 "REDUCTION system {system_id} chord analysis has unsupported head shape at {}",
@@ -234,6 +279,7 @@ impl Error for NativeReductionFoundationPrefixError {
             Self::MissingSystem(_)
             | Self::MissingStemMedian { .. }
             | Self::MissingHeadIdentity { .. }
+            | Self::MissingLedgerStaff { .. }
             | Self::UnsupportedHeadShape { .. } => None,
         }
     }
@@ -737,7 +783,7 @@ pub fn detect_native_stems_reduction_overlaps(
 }
 
 /// Execute the exact contiguous Java foundations prefix which is currently
-/// native, stopping immediately before `checkLedgers()`.
+/// native, stopping immediately before `checkStems()`.
 pub fn reduce_native_stems_foundation_prefix(
     stems: &mut NativeStemsRecognition,
     system_id: usize,
@@ -753,8 +799,10 @@ pub fn reduce_native_stems_foundation_prefix(
         .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
             system_id,
         ))?;
+    let beam_state = &mut system.transaction.state_after.beam_state;
     reduce_native_foundation_prefix(
-        &mut system.transaction.state_after.beam_state.sig,
+        &mut beam_state.sig,
+        &mut beam_state.bindings,
         &mut resolver,
         &medians,
         &head_identities,
@@ -766,6 +814,7 @@ pub fn reduce_native_stems_foundation_prefix(
 /// and synthetic order/failure tests.
 pub fn reduce_native_foundation_prefix(
     sig: &mut NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
     geometry: &mut impl NativeReductionOverlapGeometry,
     stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
     head_identities: &BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
@@ -786,6 +835,8 @@ pub fn reduce_native_foundation_prefix(
     let post_hooks_weak_purge = contextualize_and_purge_native_weaks(sig)?;
     let beams = prune_native_foundation_beams(sig)?;
     let post_beams_weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    let ledgers = prune_native_foundation_ledgers(sig, bindings)?;
+    let post_ledgers_weak_purge = contextualize_and_purge_native_weaks(sig)?;
     Ok(NativeReductionFoundationPrefixTransaction {
         system_id: sig.system_id,
         overlap,
@@ -800,7 +851,418 @@ pub fn reduce_native_foundation_prefix(
         post_hooks_weak_purge,
         beams,
         post_beams_weak_purge,
+        ledgers,
+        post_ledgers_weak_purge,
     })
+}
+
+/// Port Java `SigReducer.checkLedgers()` including the pathological shared
+/// identity repair and the iterative inside-to-outside support cascade.
+pub fn prune_native_foundation_ledgers(
+    sig: &mut NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
+) -> Result<NativeReductionLedgerCheckTransaction, NativeReductionFoundationPrefixError> {
+    sig.validate_integrity()?;
+    let shared_fixes = fix_native_shared_ledgers(sig, bindings)?;
+    let all_heads = {
+        let mut heads = sig
+            .vertices
+            .iter()
+            .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Head)
+            .map(|vertex| NativeSigVertexId(vertex.ordinal))
+            .collect::<Vec<_>>();
+        heads.sort_by_key(|head| sig.vertices[head.0].bounds.x);
+        heads
+    };
+    let mut removals = Vec::new();
+    let mut pass = 0;
+    loop {
+        pass += 1;
+        let snapshot = bindings
+            .reduction_staffs
+            .iter()
+            .enumerate()
+            .filter(|(_, staff)| !staff.tablature)
+            .flat_map(|(staff_index, staff)| {
+                staff
+                    .ledger_map
+                    .iter()
+                    .flat_map(move |(&ledger_index, ledgers)| {
+                        ledgers
+                            .iter()
+                            .copied()
+                            .map(move |ledger| (staff_index, ledger_index, ledger))
+                    })
+            })
+            .collect::<Vec<_>>();
+        let mut modified = false;
+        for (staff_index, ledger_index, ledger) in snapshot {
+            if sig.vertex(ledger.0).is_none() {
+                continue;
+            }
+            if native_ledger_has_support(
+                sig,
+                bindings,
+                staff_index,
+                ledger_index,
+                ledger,
+                &all_heads,
+            )? {
+                continue;
+            }
+            let staff_id = bindings.reduction_staffs[staff_index].staff_id;
+            remove_first_staff_ledger(&mut bindings.reduction_staffs[staff_index], ledger);
+            sig.remove_vertex(ledger)?;
+            removals.push(NativeReductionLedgerRemoval {
+                pass,
+                staff_id,
+                ledger_index,
+                ledger,
+            });
+            modified = true;
+        }
+        if !modified {
+            break;
+        }
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionLedgerCheckTransaction {
+        system_id: sig.system_id,
+        modification_count: shared_fixes.len() + removals.len(),
+        shared_fixes,
+        removals,
+    })
+}
+
+fn fix_native_shared_ledgers(
+    sig: &NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
+) -> Result<Vec<NativeReductionSharedLedgerFix>, NativeReductionFoundationPrefixError> {
+    let mut shared = Vec::new();
+    for lower_index in 1..bindings.reduction_staffs.len() {
+        let upper_index = lower_index - 1;
+        let upper_first = bindings.reduction_staffs[upper_index]
+            .ledger_map
+            .get(&1)
+            .cloned()
+            .unwrap_or_default();
+        if upper_first.is_empty()
+            || !bindings.reduction_staffs[lower_index]
+                .ledger_map
+                .contains_key(&-1)
+        {
+            continue;
+        }
+        let lower_outer = bindings.reduction_staffs[lower_index]
+            .ledger_map
+            .first_key_value()
+            .map(|(_, ledgers)| ledgers.clone())
+            .unwrap_or_default();
+        for ledger in upper_first
+            .into_iter()
+            .filter(|ledger| lower_outer.contains(ledger))
+        {
+            shared.push(fix_native_shared_ledger(
+                sig,
+                bindings,
+                ledger,
+                upper_index,
+                lower_index,
+            )?);
+        }
+    }
+    Ok(shared)
+}
+
+fn fix_native_shared_ledger(
+    sig: &NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
+    ledger: NativeSigVertexId,
+    upper_index: usize,
+    lower_index: usize,
+) -> Result<NativeReductionSharedLedgerFix, NativeReductionFoundationPrefixError> {
+    let ledger_bounds = sig
+        .vertex(ledger.0)
+        .ok_or(NativeSigError::MissingVertex {
+            system_id: sig.system_id,
+            ordinal: ledger.0,
+        })?
+        .bounds;
+    let (center_x, _) = java_bounds_center(ledger_bounds);
+    let upper_y = bindings.reduction_staffs[upper_index]
+        .last_line
+        .y_at_x_ext(f64::from(center_x))
+        .round_ties_even() as i32;
+    let lower_y = bindings.reduction_staffs[lower_index]
+        .first_line
+        .y_at_x_ext(f64::from(center_x))
+        .round_ties_even() as i32;
+    let upper_margin = (f64::from(bindings.reduction_staffs[upper_index].specific_interline) * 0.33)
+        .round_ties_even() as i32;
+    let lower_margin = (f64::from(bindings.reduction_staffs[lower_index].specific_interline) * 0.33)
+        .round_ties_even() as i32;
+    let mut column_box = ledger_bounds;
+    java_bounds_add_point(
+        &mut column_box,
+        center_x,
+        upper_y.saturating_add(upper_margin),
+    );
+    java_bounds_add_point(
+        &mut column_box,
+        center_x,
+        lower_y.saturating_sub(lower_margin),
+    );
+
+    let column_ledgers = sig
+        .vertices
+        .iter()
+        .filter(|vertex| {
+            vertex.active
+                && vertex.kind == NativeSigInterKind::Ledger
+                && java_bounds_intersect(vertex.bounds, column_box)
+        })
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut column_heads = sig
+        .vertices
+        .iter()
+        .filter(|vertex| {
+            vertex.active
+                && vertex.kind == NativeSigInterKind::Head
+                && java_bounds_contains(column_box, java_bounds_center(vertex.bounds))
+        })
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    column_heads
+        .sort_by(|left, right| best_grade_of(sig, right.0).total_cmp(&best_grade_of(sig, left.0)));
+
+    let upper_staff_id = bindings.reduction_staffs[upper_index].staff_id;
+    let lower_staff_id = bindings.reduction_staffs[lower_index].staff_id;
+    let owner_staff_id = column_heads.first().map(|head| {
+        let (_, head_y) = java_bounds_center(sig.vertices[head.0].bounds);
+        let upper_dp = (f64::from(head_y - upper_y)
+            / (0.5 * f64::from(bindings.reduction_staffs[upper_index].specific_interline)))
+        .round_ties_even() as i32;
+        let lower_dp = (f64::from(lower_y - head_y)
+            / (0.5 * f64::from(bindings.reduction_staffs[lower_index].specific_interline)))
+        .round_ties_even() as i32;
+        if lower_dp > upper_dp {
+            lower_staff_id
+        } else {
+            upper_staff_id
+        }
+    });
+
+    if let Some(owner_id) = owner_staff_id {
+        let owner_index = if owner_id == upper_staff_id {
+            upper_index
+        } else {
+            lower_index
+        };
+        let other_index = if owner_index == upper_index {
+            lower_index
+        } else {
+            upper_index
+        };
+        purge_staff_ledgers(&mut bindings.reduction_staffs[other_index], &column_ledgers);
+        for &head in &column_heads {
+            let head_bounds = sig.vertices[head.0].bounds;
+            let geometry = bindings
+                .overlap_geometry
+                .get_mut(&head)
+                .and_then(|geometry| geometry.head.as_mut())
+                .ok_or(NativeReductionFoundationPrefixError::MissingHeadIdentity {
+                    system_id: sig.system_id,
+                    head,
+                })?;
+            if geometry.staff_id != Some(owner_id) {
+                geometry.staff_id = Some(owner_id);
+                geometry.integer_pitch = native_staff_integer_pitch(
+                    &bindings.reduction_staffs[owner_index],
+                    java_bounds_center(head_bounds),
+                );
+            }
+        }
+    } else {
+        purge_staff_ledgers(&mut bindings.reduction_staffs[upper_index], &column_ledgers);
+        purge_staff_ledgers(&mut bindings.reduction_staffs[lower_index], &column_ledgers);
+    }
+
+    Ok(NativeReductionSharedLedgerFix {
+        ledger,
+        upper_staff_id,
+        lower_staff_id,
+        column_ledgers,
+        column_heads,
+        owner_staff_id,
+    })
+}
+
+fn native_ledger_has_support(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    staff_index: usize,
+    ledger_index: i32,
+    ledger: NativeSigVertexId,
+    all_heads: &[NativeSigVertexId],
+) -> Result<bool, NativeReductionFoundationPrefixError> {
+    let staff = bindings.reduction_staffs.get(staff_index).ok_or(
+        NativeReductionFoundationPrefixError::MissingLedgerStaff {
+            system_id: sig.system_id,
+            staff_id: staff_index,
+        },
+    )?;
+    let bounds = sig.vertices[ledger.0].bounds;
+    let ledger_box = NativeSigBounds {
+        x: bounds.x,
+        y: bounds.y.saturating_sub(bindings.reduction_interline),
+        width: bounds.width,
+        height: bounds
+            .height
+            .saturating_add(bindings.reduction_interline.saturating_mul(2)),
+    };
+    let next_index = ledger_index + ledger_index.signum();
+    if staff.ledger_map.get(&next_index).is_some_and(|next| {
+        next.iter().any(|next_ledger| {
+            sig.vertex(next_ledger.0)
+                .is_some_and(|vertex| java_x_overlap(ledger_box, vertex.bounds) > 0)
+        })
+    }) {
+        return Ok(true);
+    }
+
+    let ledger_pitch = ledger_index.signum() * 4 + (2 * ledger_index);
+    let next_pitch = ledger_pitch + ledger_index.signum();
+    for &head in all_heads {
+        if sig.vertex(head.0).is_none()
+            || !java_bounds_intersect(ledger_box, sig.vertices[head.0].bounds)
+        {
+            continue;
+        }
+        let pitch = bindings
+            .overlap_geometry
+            .get(&head)
+            .and_then(|geometry| geometry.head)
+            .ok_or(NativeReductionFoundationPrefixError::MissingHeadIdentity {
+                system_id: sig.system_id,
+                head,
+            })?
+            .integer_pitch;
+        if pitch == ledger_pitch || pitch == next_pitch {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn native_staff_integer_pitch(
+    staff: &crate::native_sig::NativeSigReductionStaff,
+    (x, y): (i32, i32),
+) -> i32 {
+    let x = f64::from(x);
+    let y = f64::from(y);
+    let top = staff.first_line.y_at_x_ext(x);
+    let bottom = staff.last_line.y_at_x_ext(x);
+    let pitch = if y >= top && y <= bottom {
+        (staff.line_count.saturating_sub(1) as f64) * ((2.0 * y) - bottom - top) / (bottom - top)
+    } else {
+        let direction = if y < top { -1 } else { 1 };
+        let mut previous_y = if direction == -1 { top } else { bottom };
+        let mut previous_pitch = direction * staff.line_count.saturating_sub(1) as i32;
+        let mut index = direction;
+        loop {
+            let Some(line) = staff.ledger_lines.get(&index) else {
+                break previous_pitch as f64
+                    + (2.0 * (y - previous_y) / f64::from(staff.specific_interline));
+            };
+            let ledger_y = line.y_at_x_ext(x);
+            if (direction == -1 && ledger_y <= y) || (direction == 1 && ledger_y >= y) {
+                break previous_pitch as f64
+                    + (2.0 * f64::from(direction) * (y - previous_y) / (ledger_y - previous_y));
+            }
+            previous_y = ledger_y;
+            previous_pitch += 2 * direction;
+            index += direction;
+        }
+    };
+    pitch.round_ties_even() as i32
+}
+
+fn remove_first_staff_ledger(
+    staff: &mut crate::native_sig::NativeSigReductionStaff,
+    ledger: NativeSigVertexId,
+) {
+    let found = staff
+        .ledger_map
+        .iter()
+        .find_map(|(&index, ledgers)| ledgers.contains(&ledger).then_some(index));
+    if let Some(index) = found {
+        if let Some(ledgers) = staff.ledger_map.get_mut(&index) {
+            ledgers.retain(|candidate| *candidate != ledger);
+            if ledgers.is_empty() {
+                staff.ledger_map.remove(&index);
+            }
+        }
+    }
+}
+
+fn purge_staff_ledgers(
+    staff: &mut crate::native_sig::NativeSigReductionStaff,
+    ledgers: &[NativeSigVertexId],
+) {
+    staff.ledger_map.retain(|_, owned| {
+        owned.retain(|candidate| !ledgers.contains(candidate));
+        !owned.is_empty()
+    });
+}
+
+fn java_bounds_center(bounds: crate::native_sig::NativeSigBounds) -> (i32, i32) {
+    (
+        bounds.x.saturating_add(bounds.width / 2),
+        bounds.y.saturating_add(bounds.height / 2),
+    )
+}
+
+fn java_bounds_add_point(bounds: &mut crate::native_sig::NativeSigBounds, x: i32, y: i32) {
+    let right = bounds.x.saturating_add(bounds.width).max(x);
+    let bottom = bounds.y.saturating_add(bounds.height).max(y);
+    bounds.x = bounds.x.min(x);
+    bounds.y = bounds.y.min(y);
+    bounds.width = right.saturating_sub(bounds.x);
+    bounds.height = bottom.saturating_sub(bounds.y);
+}
+
+fn java_bounds_intersect(
+    left: crate::native_sig::NativeSigBounds,
+    right: crate::native_sig::NativeSigBounds,
+) -> bool {
+    left.width > 0
+        && left.height > 0
+        && right.width > 0
+        && right.height > 0
+        && left.x < right.x.saturating_add(right.width)
+        && right.x < left.x.saturating_add(left.width)
+        && left.y < right.y.saturating_add(right.height)
+        && right.y < left.y.saturating_add(left.height)
+}
+
+fn java_bounds_contains(bounds: crate::native_sig::NativeSigBounds, (x, y): (i32, i32)) -> bool {
+    bounds.width > 0
+        && bounds.height > 0
+        && x >= bounds.x
+        && y >= bounds.y
+        && x < bounds.x.saturating_add(bounds.width)
+        && y < bounds.y.saturating_add(bounds.height)
+}
+
+fn java_x_overlap(
+    left: crate::native_sig::NativeSigBounds,
+    right: crate::native_sig::NativeSigBounds,
+) -> i32 {
+    left.x
+        .saturating_add(left.width)
+        .min(right.x.saturating_add(right.width))
+        .saturating_sub(left.x.max(right.x))
 }
 
 fn native_stems_head_identities(
@@ -2698,10 +3160,11 @@ fn push_unique_edge(edges: &mut Vec<NativeSigEdgeId>, edge: NativeSigEdgeId) {
 mod tests {
     use super::*;
     use crate::native_sig::{
-        NativeSigBounds, NativeSigEdge, NativeSigHeadStemPayload, NativeSigRelationOrigin,
-        NativeSigSupport, NativeSigVertex,
+        NativeSigBounds, NativeSigEdge, NativeSigHeadStemPayload, NativeSigReductionStaff,
+        NativeSigRelationOrigin, NativeSigSupport, NativeSigSystemBindings, NativeSigVertex,
     };
     use crate::stems_step::{NativeStemHeadSide, NativeStemPoint};
+    use audiveris_image::system_population::{BoundarySegment, StaffBoundary};
     use std::collections::BTreeSet;
 
     #[derive(Default)]
@@ -2818,6 +3281,312 @@ mod tests {
         head
     }
 
+    fn horizontal_staff_line(y: f64) -> StaffBoundary {
+        StaffBoundary {
+            segments: vec![BoundarySegment::Line {
+                start: (0.0, y),
+                end: (200.0, y),
+            }],
+        }
+    }
+
+    fn reduction_staff(
+        staff_id: usize,
+        top: f64,
+        bottom: f64,
+        ledger_map: BTreeMap<i32, Vec<NativeSigVertexId>>,
+    ) -> NativeSigReductionStaff {
+        NativeSigReductionStaff {
+            staff_id,
+            tablature: false,
+            specific_interline: 10,
+            line_count: 5,
+            first_line: horizontal_staff_line(top),
+            last_line: horizontal_staff_line(bottom),
+            ledger_lines: BTreeMap::new(),
+            ledger_map,
+        }
+    }
+
+    fn reduction_bindings(
+        system_id: usize,
+        staffs: Vec<NativeSigReductionStaff>,
+        ledger_vertices: BTreeMap<usize, NativeSigVertexId>,
+        heads: BTreeMap<NativeSigVertexId, NativeReductionHeadGeometry>,
+    ) -> NativeSigSystemBindings {
+        NativeSigSystemBindings {
+            system_id,
+            beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
+            ledger_vertices,
+            reduction_interline: 10,
+            reduction_staffs: staffs,
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: heads
+                .into_iter()
+                .map(|(vertex, head)| {
+                    let bounds = NativeSigBounds {
+                        x: 0,
+                        y: 0,
+                        width: 1,
+                        height: 1,
+                    };
+                    (
+                        vertex,
+                        NativeReductionInterGeometry {
+                            bounds,
+                            core_bounds: bounds,
+                            implicit: false,
+                            glyph: None,
+                            area: None,
+                            head: Some(head),
+                            ensemble_members: Vec::new(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn ledger_pruning_repeats_until_an_inner_ledger_loses_outer_support() {
+        let mut inner = vertex(0, NativeSigInterKind::Ledger, 0.8);
+        inner.bounds = NativeSigBounds {
+            x: 20,
+            y: 50,
+            width: 20,
+            height: 2,
+        };
+        let mut outer = vertex(1, NativeSigInterKind::Ledger, 0.8);
+        outer.bounds = NativeSigBounds {
+            x: 25,
+            y: 70,
+            width: 20,
+            height: 2,
+        };
+        let mut sig = NativeSigSystem {
+            system_id: 50,
+            vertices: vec![inner, outer],
+            edges: Vec::new(),
+        };
+        let staff = reduction_staff(
+            7,
+            10.0,
+            50.0,
+            BTreeMap::from([
+                (1, vec![NativeSigVertexId(0)]),
+                (2, vec![NativeSigVertexId(1)]),
+            ]),
+        );
+        let mut bindings = reduction_bindings(
+            50,
+            vec![staff],
+            BTreeMap::from([(100, NativeSigVertexId(0)), (101, NativeSigVertexId(1))]),
+            BTreeMap::new(),
+        );
+
+        let transaction = prune_native_foundation_ledgers(&mut sig, &mut bindings).unwrap();
+
+        assert_eq!(
+            transaction.removals,
+            vec![
+                NativeReductionLedgerRemoval {
+                    pass: 1,
+                    staff_id: 7,
+                    ledger_index: 2,
+                    ledger: NativeSigVertexId(1),
+                },
+                NativeReductionLedgerRemoval {
+                    pass: 2,
+                    staff_id: 7,
+                    ledger_index: 1,
+                    ledger: NativeSigVertexId(0),
+                },
+            ]
+        );
+        assert_eq!(transaction.modification_count, 2);
+        assert!(sig.vertices.iter().all(|ledger| ledger.removed));
+    }
+
+    #[test]
+    fn ledger_support_accepts_the_ledger_pitch_and_the_next_outward_pitch() {
+        let mut ledger = vertex(0, NativeSigInterKind::Ledger, 0.8);
+        ledger.bounds = NativeSigBounds {
+            x: 20,
+            y: 50,
+            width: 20,
+            height: 2,
+        };
+        let mut head = shaped_head(1, "NOTEHEAD_BLACK", 48);
+        head.bounds.x = 25;
+        let mut sig = NativeSigSystem {
+            system_id: 51,
+            vertices: vec![ledger, head],
+            edges: Vec::new(),
+        };
+        let staff = reduction_staff(
+            8,
+            10.0,
+            50.0,
+            BTreeMap::from([(1, vec![NativeSigVertexId(0)])]),
+        );
+        let mut bindings = reduction_bindings(
+            51,
+            vec![staff],
+            BTreeMap::from([(100, NativeSigVertexId(0))]),
+            BTreeMap::from([(
+                NativeSigVertexId(1),
+                NativeReductionHeadGeometry {
+                    staff_id: Some(8),
+                    integer_pitch: 7,
+                },
+            )]),
+        );
+
+        let transaction = prune_native_foundation_ledgers(&mut sig, &mut bindings).unwrap();
+
+        assert!(transaction.removals.is_empty());
+        assert!(sig.vertex(0).is_some());
+    }
+
+    #[test]
+    fn shared_ledger_chooses_the_farther_staff_and_recomputes_head_pitch() {
+        let mut shared_ledger = vertex(0, NativeSigInterKind::Ledger, 0.8);
+        shared_ledger.bounds = NativeSigBounds {
+            x: 20,
+            y: 58,
+            width: 20,
+            height: 4,
+        };
+        let mut lower_first = vertex(1, NativeSigInterKind::Ledger, 0.8);
+        lower_first.bounds = NativeSigBounds {
+            x: 120,
+            y: 70,
+            width: 20,
+            height: 2,
+        };
+        let mut head = shaped_head(2, "NOTEHEAD_BLACK", 52);
+        head.bounds = NativeSigBounds {
+            x: 25,
+            y: 52,
+            width: 6,
+            height: 6,
+        };
+        let mut sig = NativeSigSystem {
+            system_id: 52,
+            vertices: vec![shared_ledger, lower_first, head],
+            edges: Vec::new(),
+        };
+        let upper = reduction_staff(
+            10,
+            0.0,
+            40.0,
+            BTreeMap::from([(1, vec![NativeSigVertexId(0)])]),
+        );
+        let mut lower = reduction_staff(
+            11,
+            80.0,
+            120.0,
+            BTreeMap::from([
+                (-2, vec![NativeSigVertexId(0)]),
+                (-1, vec![NativeSigVertexId(1)]),
+            ]),
+        );
+        lower.ledger_lines.insert(-1, horizontal_staff_line(70.0));
+        lower.ledger_lines.insert(-2, horizontal_staff_line(60.0));
+        let mut bindings = reduction_bindings(
+            52,
+            vec![upper, lower],
+            BTreeMap::from([(100, NativeSigVertexId(0)), (101, NativeSigVertexId(1))]),
+            BTreeMap::from([(
+                NativeSigVertexId(2),
+                NativeReductionHeadGeometry {
+                    staff_id: Some(10),
+                    integer_pitch: 6,
+                },
+            )]),
+        );
+
+        let transaction = prune_native_foundation_ledgers(&mut sig, &mut bindings).unwrap();
+
+        assert_eq!(transaction.shared_fixes.len(), 1);
+        assert_eq!(transaction.shared_fixes[0].owner_staff_id, Some(11));
+        assert!(
+            !bindings.reduction_staffs[0]
+                .ledger_map
+                .values()
+                .flatten()
+                .any(|ledger| *ledger == NativeSigVertexId(0))
+        );
+        assert_eq!(
+            bindings.overlap_geometry[&NativeSigVertexId(2)]
+                .head
+                .expect("head identity"),
+            NativeReductionHeadGeometry {
+                staff_id: Some(11),
+                integer_pitch: -9,
+            }
+        );
+        assert!(
+            sig.vertex(0).is_some(),
+            "reassigned ledger is head-supported"
+        );
+    }
+
+    #[test]
+    fn headless_shared_column_is_detached_from_both_staffs_without_sig_removal() {
+        let mut shared_ledger = vertex(0, NativeSigInterKind::Ledger, 0.8);
+        shared_ledger.bounds = NativeSigBounds {
+            x: 20,
+            y: 58,
+            width: 20,
+            height: 4,
+        };
+        let mut lower_first = vertex(1, NativeSigInterKind::Ledger, 0.8);
+        lower_first.bounds.x = 120;
+        let mut sig = NativeSigSystem {
+            system_id: 53,
+            vertices: vec![shared_ledger, lower_first],
+            edges: Vec::new(),
+        };
+        let upper = reduction_staff(
+            10,
+            0.0,
+            40.0,
+            BTreeMap::from([(1, vec![NativeSigVertexId(0)])]),
+        );
+        let lower = reduction_staff(
+            11,
+            80.0,
+            120.0,
+            BTreeMap::from([
+                (-2, vec![NativeSigVertexId(0)]),
+                (-1, vec![NativeSigVertexId(1)]),
+            ]),
+        );
+        let mut bindings = reduction_bindings(
+            53,
+            vec![upper, lower],
+            BTreeMap::from([(100, NativeSigVertexId(0)), (101, NativeSigVertexId(1))]),
+            BTreeMap::new(),
+        );
+
+        let transaction = prune_native_foundation_ledgers(&mut sig, &mut bindings).unwrap();
+
+        assert_eq!(transaction.shared_fixes[0].owner_staff_id, None);
+        assert!(sig.vertex(0).is_some());
+        assert!(bindings.reduction_staffs.iter().all(|staff| {
+            !staff
+                .ledger_map
+                .values()
+                .flatten()
+                .any(|ledger| *ledger == NativeSigVertexId(0))
+        }));
+        assert_eq!(transaction.modification_count, 2);
+    }
+
     #[test]
     fn chord_analysis_ports_intersection_duration_support_and_beam_size_order() {
         let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
@@ -2897,7 +3666,7 @@ mod tests {
     }
 
     #[test]
-    fn foundation_prefix_stops_before_ledgers_in_java_order() {
+    fn foundation_prefix_stops_after_ledgers_in_java_order() {
         let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
         stem.bounds = NativeSigBounds {
             x: 10,
@@ -2924,6 +3693,18 @@ mod tests {
             },
         )]);
         let mut geometry = ScriptedOverlapGeometry::default();
+        let mut bindings = NativeSigSystemBindings {
+            system_id: 41,
+            beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: BTreeMap::new(),
+        };
 
         let head_identities = BTreeMap::from([(
             NativeSigVertexId(1),
@@ -2934,6 +3715,7 @@ mod tests {
         )]);
         let transaction = reduce_native_foundation_prefix(
             &mut sig,
+            &mut bindings,
             &mut geometry,
             &medians,
             &head_identities,
@@ -2961,6 +3743,7 @@ mod tests {
         );
         assert!(transaction.hooks.removed_beams.is_empty());
         assert!(transaction.beams.removed_beams.is_empty());
+        assert!(transaction.ledgers.removals.is_empty());
         assert!(sig.vertex(0).is_some());
         assert!(sig.vertex(1).is_some());
     }

@@ -16,6 +16,7 @@ use std::{
 use audiveris_image::{
     bars_logic::{BracketKind, ConnectorInterKind, PeakWidthClass, VerticalInterKind},
     grid_sig::{GridInterId, GridSigNode, GridSigRelation},
+    system_population::StaffBoundary,
 };
 use audiveris_music_font::{MusicFamily, layout_bounds};
 
@@ -724,6 +725,24 @@ pub struct NativeSigRecognition {
     pub bindings: Vec<NativeSigSystemBindings>,
 }
 
+/// Exact staff-owned state Java's REDUCTION `checkLedgers()` reads and mutates.
+///
+/// A ledger can deliberately occur in two adjacent staff maps before
+/// `fixAllSharedLedgers()`.  Keeping the map entries separate from each
+/// ledger's single SIG identity preserves that pathological-but-supported
+/// state losslessly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeSigReductionStaff {
+    pub staff_id: usize,
+    pub tablature: bool,
+    pub specific_interline: i32,
+    pub line_count: usize,
+    pub first_line: StaffBoundary,
+    pub last_line: StaffBoundary,
+    pub ledger_lines: BTreeMap<i32, StaffBoundary>,
+    pub ledger_map: BTreeMap<i32, Vec<NativeSigVertexId>>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeSigSystemBindings {
     pub system_id: usize,
@@ -731,6 +750,14 @@ pub struct NativeSigSystemBindings {
     pub beam_group_vertices: BTreeMap<usize, NativeSigVertexId>,
     pub stem_vertices: BTreeMap<usize, NativeSigVertexId>,
     pub head_vertices: BTreeMap<NativeHeadStaffEpilogRef, NativeSigVertexId>,
+    /// Live `LedgerInter.id -> SIG vertex` bindings. Staff ownership is kept
+    /// separately because Java temporarily permits one identity in two maps.
+    pub ledger_vertices: BTreeMap<usize, NativeSigVertexId>,
+    /// Sheet `Scale.getInterline()` used by orphan-ledger support boxes.
+    pub reduction_interline: i32,
+    /// Staff order, exact splines, full ledger-line paths and mutable ledger
+    /// ownership maps consumed by REDUCTION.
+    pub reduction_staffs: Vec<NativeSigReductionStaff>,
     /// Ordered first/last staff IDs for Java merged-grand-staff parts.
     ///
     /// `SigReducer.lookupHead` remaps only the two gutter pitches across each
@@ -767,6 +794,32 @@ impl NativeSigSystemBindings {
                     system_id: self.system_id,
                 });
             }
+        }
+        let bound_ledgers = self
+            .ledger_vertices
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        for vertex in &bound_ledgers {
+            if sig
+                .vertex(vertex.0)
+                .is_none_or(|item| item.kind != NativeSigInterKind::Ledger)
+            {
+                return Err(NativeSigError::InvalidLedgerBinding {
+                    system_id: self.system_id,
+                });
+            }
+        }
+        if self.reduction_staffs.iter().any(|staff| {
+            staff
+                .ledger_map
+                .values()
+                .flatten()
+                .any(|vertex| !bound_ledgers.contains(vertex))
+        }) {
+            return Err(NativeSigError::InvalidLedgerBinding {
+                system_id: self.system_id,
+            });
         }
         for (&group_ordinal, vertex) in &self.beam_group_vertices {
             if sig
@@ -907,7 +960,18 @@ pub enum NativeSigError {
         system_id: usize,
         head: NativeHeadStaffEpilogRef,
     },
+    DuplicateLedgerBinding {
+        system_id: usize,
+        inter_id: usize,
+    },
+    MissingLedgerBinding {
+        system_id: usize,
+        inter_id: usize,
+    },
     InvalidBeamSourceBinding {
+        system_id: usize,
+    },
+    InvalidLedgerBinding {
         system_id: usize,
     },
     InvalidVertexOrdinal {
@@ -999,12 +1063,30 @@ impl fmt::Display for NativeSigError {
                 formatter,
                 "system {system_id} has duplicate head binding {head:?}"
             ),
+            Self::DuplicateLedgerBinding {
+                system_id,
+                inter_id,
+            } => write!(
+                formatter,
+                "system {system_id} has duplicate ledger binding {inter_id}"
+            ),
+            Self::MissingLedgerBinding {
+                system_id,
+                inter_id,
+            } => write!(
+                formatter,
+                "system {system_id} has no live ledger binding {inter_id}"
+            ),
             Self::InvalidBeamSourceBinding { system_id } => {
                 write!(
                     formatter,
                     "system {system_id} has ambiguous beam source binding"
                 )
             }
+            Self::InvalidLedgerBinding { system_id } => write!(
+                formatter,
+                "system {system_id} has an invalid REDUCTION ledger binding"
+            ),
             Self::InvalidVertexOrdinal {
                 system_id,
                 expected,
@@ -1084,6 +1166,9 @@ pub fn assemble_native_sig(
             beam_group_vertices: BTreeMap::new(),
             stem_vertices: BTreeMap::new(),
             head_vertices: BTreeMap::new(),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: grid.scale.scale.interline.main,
+            reduction_staffs: Vec::new(),
             merged_staff_pairs: merged_staff_pairs(heads, system_id)?,
             overlap_geometry: BTreeMap::new(),
         };
@@ -1096,7 +1181,13 @@ pub fn assemble_native_sig(
             &mut graph,
             &mut system_bindings,
         )?;
-        append_ledgers(ledgers, system_id, &mut graph)?;
+        append_ledgers(ledgers, system_id, &mut graph, &mut system_bindings)?;
+        system_bindings.reduction_staffs = reduction_staff_bindings(
+            grid,
+            header_system,
+            ledgers,
+            &system_bindings.ledger_vertices,
+        )?;
         append_heads(
             heads,
             head_system,
@@ -2173,6 +2264,7 @@ fn append_ledgers(
     ledgers: &NativeLedgerRecognition,
     system_id: usize,
     graph: &mut NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
 ) -> Result<(), NativeSigError> {
     for inter in ledgers
         .materializer
@@ -2186,7 +2278,7 @@ fn append_ledgers(
         let top = (y1.min(y2) - half).floor();
         let right = x1.max(x2).ceil();
         let bottom = (y1.max(y2) + half).ceil();
-        push_vertex(
+        let vertex = NativeSigVertexId(push_vertex(
             graph,
             NativeSigVertex {
                 ordinal: 0,
@@ -2206,9 +2298,76 @@ fn append_ledgers(
                 abnormal: false,
                 beam_geometry: None,
             },
-        );
+        ));
+        if bindings.ledger_vertices.insert(inter.id, vertex).is_some() {
+            return Err(NativeSigError::DuplicateLedgerBinding {
+                system_id,
+                inter_id: inter.id,
+            });
+        }
     }
     Ok(())
+}
+
+fn reduction_staff_bindings(
+    grid: &GridLinesRecognition,
+    headers: &crate::native_headers::NativeHeaderSystemRecognition,
+    ledgers: &NativeLedgerRecognition,
+    ledger_vertices: &BTreeMap<usize, NativeSigVertexId>,
+) -> Result<Vec<NativeSigReductionStaff>, NativeSigError> {
+    let mut staffs = Vec::with_capacity(headers.staffs.len());
+    for header_staff in &headers.staffs {
+        let staff_id = header_staff.staff_id;
+        let geometry = grid
+            .staff_lines
+            .iter()
+            .find(|staff| staff.staff_id == staff_id)
+            .ok_or(NativeSigError::MissingStaffLine(staff_id))?;
+        let candidate = grid
+            .staves
+            .iter()
+            .find(|staff| staff.id == staff_id)
+            .ok_or(NativeSigError::MissingStaffLine(staff_id))?;
+        let ledger_lines = ledgers
+            .ledger_lines
+            .iter()
+            .filter(|line| line.system_id == headers.system_id && line.staff_id == staff_id)
+            .map(|line| (line.index, line.geometry.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let mut ledger_map = BTreeMap::new();
+        for index in ledgers
+            .materializer
+            .staff_ledger_indexes(headers.system_id, staff_id)
+        {
+            let vertices = ledgers
+                .materializer
+                .staff_inter_ids(headers.system_id, staff_id, index)
+                .iter()
+                .map(|inter_id| {
+                    ledger_vertices.get(inter_id).copied().ok_or(
+                        NativeSigError::MissingLedgerBinding {
+                            system_id: headers.system_id,
+                            inter_id: *inter_id,
+                        },
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if !vertices.is_empty() {
+                ledger_map.insert(index, vertices);
+            }
+        }
+        staffs.push(NativeSigReductionStaff {
+            staff_id,
+            tablature: candidate.kind == "tablature",
+            specific_interline: geometry.interline,
+            line_count: candidate.line_count,
+            first_line: geometry.first_line.clone(),
+            last_line: geometry.last_line.clone(),
+            ledger_lines,
+            ledger_map,
+        });
+    }
+    Ok(staffs)
 }
 
 fn append_heads(

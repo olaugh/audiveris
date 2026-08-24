@@ -17340,6 +17340,9 @@ mod tests {
                 (other_ref, NativeSigVertexId(0)),
                 (current_ref, NativeSigVertexId(1)),
             ]),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
             merged_staff_pairs: Vec::new(),
             overlap_geometry: BTreeMap::new(),
         };
@@ -17518,6 +17521,9 @@ mod tests {
             beam_group_vertices: BTreeMap::from([(7, NativeSigVertexId(0))]),
             stem_vertices: BTreeMap::new(),
             head_vertices: BTreeMap::new(),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
             merged_staff_pairs: Vec::new(),
             overlap_geometry: BTreeMap::new(),
         };

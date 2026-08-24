@@ -11764,3 +11764,38 @@ gates pass (five diagnostics ignored). The exact frontier is now
 fixed point, late chord/exclusion checks, stem refinement, beam groups,
 free-stem measurement, and glyph cleanup. The complete library passes 733
 tests with two ignored.
+
+## Boundary 287: complete `checkLedgers` through its weak purge
+
+The production foundations prefix now executes Java's full `checkLedgers()`
+transaction and the immediately following contextual weak purge, then stops
+before `checkStems()`. Terminal SIG bindings retain each live ledger's stable
+vertex, Java's possibly multi-staff ledger ownership maps, sheet and
+staff-specific interlines, exact first/last staff splines, and full inferred
+ledger-line paths. Missing identities or staff/head geometry fail typed.
+
+Shared ledgers are repaired before orphan pruning exactly as Java orders them.
+For adjacent staffs, upper index +1 is intersected with the lower staff's most
+negative ledger index after requiring -1. The exact inter-staff column box is
+built with the 0.33 specific-interline margin. Live ledger intersections and
+center-contained heads are scanned in SIG order; heads are stable-sorted by
+decreasing best grade; the farther staff owns the column. Head staff and
+curve-aware pitch are recomputed, and the other staff's ownership entries are
+purged. A headless shared column is detached from both staff maps without
+removing its SIG vertices, matching `fixSharedLedger`.
+
+Orphan pruning snapshots staff maps in staff/index/insertion order, grows each
+ledger box by the sheet interline, accepts positive horizontal overlap with
+the next outward ledger, or accepts a live intersecting head at the ledger or
+next outward pitch. It repeats until no removal occurs, so removing an outer
+ledger can expose an inner orphan on the next pass. Transactions retain shared
+fixes, pass-numbered removals, and Java's modification count.
+
+Focused REDUCTION coverage passes 32/32, including a mandatory two-pass
+cascade, exact pitch support, headed reassignment, and headless shared-column
+cases. Every Batuque system crosses the production boundary; all 10 active
+frozen-SIG gates pass with five diagnostics ignored; the complete library
+passes 737 tests with two ignored. Formatting, strict Clippy, and diff checks
+are clean. The next exact frontier is `checkStems()`, followed by the
+foundations consistency fixed point and late consistency/refinement/group
+epochs.
