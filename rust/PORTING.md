@@ -6192,3 +6192,20 @@ passes 720 tests with two ignored; scoped formatting and strict
 all-target/all-feature `audiveris-omr` Clippy pass. Percussion heads are not yet
 present in the native HEADS kind set; their Java exemption must be added when
 that shape family enters the SIG.
+
+## Boundary 283: exact glyph/area overlap resolver
+
+REDUCTION's precise overlap collaborator is now concrete and lossless. It
+ports Java's directional `AbstractInter` dispatch across exact glyph run
+tables, convex area components, bounds-only interpretations, ensembles,
+mirrors, and support relations, plus `HeadInter`'s shrunken core bounds,
+same-staff pitch test, and exact width/area thresholds. Missing evidence is a
+typed error rather than a rectangle fallback, and the scheduler propagates it.
+
+GRID now retains registered bar-filament members and STEMS head corners retain
+the exact registered head run table so the production adapter does not need to
+reconstruct ink from bounds. Focused REDUCTION coverage is 21/21; the full
+library is 725 passed with two ignored; rustfmt and strict all-target/all-feature
+Clippy pass. Remaining work is to bind every live terminal GRID/beam/head/stem
+identity to this evidence (including connector and bracket area components)
+and invoke the resolver from the Java-order overlap epoch.

@@ -8,7 +8,13 @@
 //! algorithm.  Overlap discovery and the foundation-specific consistency
 //! passes remain later REDUCTION boundaries.
 
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
+
+use audiveris_image::run_table::{Orientation, RunTable};
 
 use crate::native_sig::{
     NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigError, NativeSigInterKind,
@@ -141,10 +147,527 @@ pub const MIN_REDUCTION_OVERLAP_IOU: f64 = 0.05;
 /// them from the retained stage products without weakening them to box tests.
 pub trait NativeReductionOverlapGeometry {
     /// Whether `right` belongs to the mirror entity set built for `left`.
-    fn is_mirror_entity(&mut self, left: NativeSigVertexId, right: NativeSigVertexId) -> bool;
+    fn is_mirror_entity(
+        &mut self,
+        left: NativeSigVertexId,
+        right: NativeSigVertexId,
+    ) -> Result<bool, NativeReductionOverlapGeometryError>;
 
     /// Java's mutual `left.overlaps(right) && right.overlaps(left)` test.
-    fn mutually_overlaps(&mut self, left: NativeSigVertexId, right: NativeSigVertexId) -> bool;
+    fn mutually_overlaps(
+        &mut self,
+        left: NativeSigVertexId,
+        right: NativeSigVertexId,
+    ) -> Result<bool, NativeReductionOverlapGeometryError>;
+}
+
+/// One absolute point in a retained Java `Area` boundary.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeReductionAreaPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Lossless foreground ownership of one Java `Glyph`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionGlyphGeometry {
+    pub left: i32,
+    pub top: i32,
+    pub run_table: RunTable,
+}
+
+/// A Java `Area` represented as a union of convex path components.
+///
+/// Every currently scanned native area is a straight horizontal/vertical
+/// ribbon, or a bracket ribbon plus rectangular serifs, so convex components
+/// preserve the exact non-empty-intersection question without rasterization.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeReductionAreaGeometry {
+    pub components: Vec<Vec<NativeReductionAreaPoint>>,
+}
+
+/// Head-only state used by Java `HeadInter.overlaps(HeadInter)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeReductionHeadGeometry {
+    pub staff_id: Option<usize>,
+    pub integer_pitch: i32,
+}
+
+/// Complete overlap evidence for one live interpretation.
+///
+/// An explicit record with neither glyph nor area is meaningful: it is the
+/// Java bounds-only branch. A missing record is an error, never a rectangle
+/// fallback.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionInterGeometry {
+    pub bounds: crate::native_sig::NativeSigBounds,
+    pub core_bounds: crate::native_sig::NativeSigBounds,
+    pub implicit: bool,
+    pub glyph: Option<NativeReductionGlyphGeometry>,
+    pub area: Option<NativeReductionAreaGeometry>,
+    pub head: Option<NativeReductionHeadGeometry>,
+    pub ensemble_members: Vec<NativeSigVertexId>,
+}
+
+impl NativeReductionInterGeometry {
+    #[must_use]
+    pub const fn bounds_only(bounds: crate::native_sig::NativeSigBounds) -> Self {
+        Self {
+            bounds,
+            core_bounds: bounds,
+            implicit: false,
+            glyph: None,
+            area: None,
+            head: None,
+            ensemble_members: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn head(
+        bounds: crate::native_sig::NativeSigBounds,
+        glyph: NativeReductionGlyphGeometry,
+        staff_id: Option<usize>,
+        integer_pitch: i32,
+    ) -> Self {
+        Self {
+            bounds,
+            core_bounds: shrunk_head_core_bounds(bounds),
+            implicit: false,
+            glyph: Some(glyph),
+            area: None,
+            head: Some(NativeReductionHeadGeometry {
+                staff_id,
+                integer_pitch,
+            }),
+            ensemble_members: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NativeReductionOverlapGeometryError {
+    MissingGeometry(NativeSigVertexId),
+    InvalidArea {
+        vertex: NativeSigVertexId,
+        component: usize,
+    },
+    MissingEnsembleMember {
+        ensemble: NativeSigVertexId,
+        member: NativeSigVertexId,
+    },
+}
+
+impl fmt::Display for NativeReductionOverlapGeometryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingGeometry(vertex) => {
+                write!(
+                    formatter,
+                    "missing exact overlap geometry for vertex {}",
+                    vertex.0
+                )
+            }
+            Self::InvalidArea { vertex, component } => write!(
+                formatter,
+                "vertex {} has invalid overlap area component {component}",
+                vertex.0
+            ),
+            Self::MissingEnsembleMember { ensemble, member } => write!(
+                formatter,
+                "overlap ensemble {} has missing member {}",
+                ensemble.0, member.0
+            ),
+        }
+    }
+}
+
+impl Error for NativeReductionOverlapGeometryError {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NativeReductionOverlapError {
+    Graph(NativeSigError),
+    Geometry(NativeReductionOverlapGeometryError),
+}
+
+impl fmt::Display for NativeReductionOverlapError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Graph(source) => write!(formatter, "REDUCTION overlap graph: {source}"),
+            Self::Geometry(source) => write!(formatter, "REDUCTION overlap geometry: {source}"),
+        }
+    }
+}
+
+impl Error for NativeReductionOverlapError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Graph(source) => Some(source),
+            Self::Geometry(source) => Some(source),
+        }
+    }
+}
+
+impl From<NativeSigError> for NativeReductionOverlapError {
+    fn from(source: NativeSigError) -> Self {
+        Self::Graph(source)
+    }
+}
+
+impl From<NativeReductionOverlapGeometryError> for NativeReductionOverlapError {
+    fn from(source: NativeReductionOverlapGeometryError) -> Self {
+        Self::Geometry(source)
+    }
+}
+
+/// Exact, fail-closed implementation of Java `AbstractInter.overlaps` and
+/// `HeadInter.overlaps` over retained glyph/area evidence.
+#[derive(Clone, Debug, Default)]
+pub struct NativeReductionLosslessOverlapResolver {
+    geometry: BTreeMap<NativeSigVertexId, NativeReductionInterGeometry>,
+    mirror_pairs: BTreeSet<(NativeSigVertexId, NativeSigVertexId)>,
+    support_pairs: BTreeSet<(NativeSigVertexId, NativeSigVertexId)>,
+}
+
+impl NativeReductionLosslessOverlapResolver {
+    #[must_use]
+    pub fn new(
+        geometry: impl IntoIterator<Item = (NativeSigVertexId, NativeReductionInterGeometry)>,
+    ) -> Self {
+        Self {
+            geometry: geometry.into_iter().collect(),
+            mirror_pairs: BTreeSet::new(),
+            support_pairs: BTreeSet::new(),
+        }
+    }
+
+    pub fn add_mirror_pair(&mut self, one: NativeSigVertexId, two: NativeSigVertexId) {
+        self.mirror_pairs.insert(normalized_vertex_pair(one, two));
+    }
+
+    pub fn add_support_pair(&mut self, one: NativeSigVertexId, two: NativeSigVertexId) {
+        self.support_pairs.insert(normalized_vertex_pair(one, two));
+    }
+
+    fn evidence(
+        &self,
+        vertex: NativeSigVertexId,
+    ) -> Result<&NativeReductionInterGeometry, NativeReductionOverlapGeometryError> {
+        self.geometry
+            .get(&vertex)
+            .ok_or(NativeReductionOverlapGeometryError::MissingGeometry(vertex))
+    }
+
+    fn directional_overlaps(
+        &self,
+        this_id: NativeSigVertexId,
+        that_id: NativeSigVertexId,
+    ) -> Result<bool, NativeReductionOverlapGeometryError> {
+        let this = self.evidence(this_id)?;
+        let that = self.evidence(that_id)?;
+        if this.implicit
+            || that.implicit
+            || !rectangles_intersect(this.core_bounds, that.core_bounds)
+        {
+            return Ok(false);
+        }
+        if let (Some(this_head), Some(that_head)) = (this.head, that.head) {
+            return Ok(heads_overlap(this, this_head, that, that_head));
+        }
+        if !this.ensemble_members.is_empty() {
+            if this.ensemble_members.contains(&that_id) {
+                return Ok(false);
+            }
+            for &member in &this.ensemble_members {
+                self.evidence(member).map_err(|error| match error {
+                    NativeReductionOverlapGeometryError::MissingGeometry(_) => {
+                        NativeReductionOverlapGeometryError::MissingEnsembleMember {
+                            ensemble: this_id,
+                            member,
+                        }
+                    }
+                    other => other,
+                })?;
+                if self.directional_overlaps(member, that_id)?
+                    && self.directional_overlaps(that_id, member)?
+                    && !self
+                        .support_pairs
+                        .contains(&normalized_vertex_pair(member, that_id))
+                {
+                    return Ok(true);
+                }
+            }
+            return Ok(false);
+        }
+        if let (Some(one), Some(two)) = (&this.glyph, &that.glyph) {
+            return Ok(glyphs_intersect(one, two));
+        }
+        if let Some(area) = &this.area {
+            validate_area(this_id, area)?;
+            if let Some(that_area) = &that.area {
+                validate_area(that_id, that_area)?;
+                return Ok(areas_intersect(area, that_area));
+            }
+            if let Some(glyph) = &that.glyph {
+                return Ok(glyph_intersects_area(glyph, area));
+            }
+            return Ok(area_intersects_rectangle(area, that.bounds));
+        }
+        if let Some(glyph) = &this.glyph {
+            return Ok(glyph_intersects_rectangle(glyph, that.bounds));
+        }
+        if let Some(glyph) = &that.glyph {
+            return Ok(glyph_intersects_rectangle(glyph, this.bounds));
+        }
+        Ok(true)
+    }
+}
+
+impl NativeReductionOverlapGeometry for NativeReductionLosslessOverlapResolver {
+    fn is_mirror_entity(
+        &mut self,
+        left: NativeSigVertexId,
+        right: NativeSigVertexId,
+    ) -> Result<bool, NativeReductionOverlapGeometryError> {
+        self.evidence(left)?;
+        self.evidence(right)?;
+        Ok(self
+            .mirror_pairs
+            .contains(&normalized_vertex_pair(left, right)))
+    }
+
+    fn mutually_overlaps(
+        &mut self,
+        left: NativeSigVertexId,
+        right: NativeSigVertexId,
+    ) -> Result<bool, NativeReductionOverlapGeometryError> {
+        Ok(self.directional_overlaps(left, right)? && self.directional_overlaps(right, left)?)
+    }
+}
+
+fn normalized_vertex_pair(
+    one: NativeSigVertexId,
+    two: NativeSigVertexId,
+) -> (NativeSigVertexId, NativeSigVertexId) {
+    if one <= two { (one, two) } else { (two, one) }
+}
+
+fn shrunk_head_core_bounds(
+    bounds: crate::native_sig::NativeSigBounds,
+) -> crate::native_sig::NativeSigBounds {
+    let center_x = f64::from(bounds.x) + (f64::from(bounds.width) / 2.0);
+    let center_y = f64::from(bounds.y) + (f64::from(bounds.height) / 2.0);
+    let half_width = f64::from(bounds.width) * 0.25;
+    let half_height = f64::from(bounds.height) * 0.25;
+    let left = (center_x - half_width).floor() as i32;
+    let top = (center_y - half_height).floor() as i32;
+    let right = (center_x + half_width).ceil() as i32;
+    let bottom = (center_y + half_height).ceil() as i32;
+    crate::native_sig::NativeSigBounds {
+        x: left,
+        y: top,
+        width: right.saturating_sub(left),
+        height: bottom.saturating_sub(top),
+    }
+}
+
+fn rectangles_intersect(
+    one: crate::native_sig::NativeSigBounds,
+    two: crate::native_sig::NativeSigBounds,
+) -> bool {
+    one.width > 0
+        && one.height > 0
+        && two.width > 0
+        && two.height > 0
+        && one.x < two.x.saturating_add(two.width)
+        && two.x < one.x.saturating_add(one.width)
+        && one.y < two.y.saturating_add(two.height)
+        && two.y < one.y.saturating_add(one.height)
+}
+
+fn rectangle_intersection(
+    one: crate::native_sig::NativeSigBounds,
+    two: crate::native_sig::NativeSigBounds,
+) -> crate::native_sig::NativeSigBounds {
+    let x = one.x.max(two.x);
+    let y = one.y.max(two.y);
+    let right = one
+        .x
+        .saturating_add(one.width)
+        .min(two.x.saturating_add(two.width));
+    let bottom = one
+        .y
+        .saturating_add(one.height)
+        .min(two.y.saturating_add(two.height));
+    crate::native_sig::NativeSigBounds {
+        x,
+        y,
+        width: right.saturating_sub(x),
+        height: bottom.saturating_sub(y),
+    }
+}
+
+fn heads_overlap(
+    one: &NativeReductionInterGeometry,
+    one_head: NativeReductionHeadGeometry,
+    two: &NativeReductionInterGeometry,
+    two_head: NativeReductionHeadGeometry,
+) -> bool {
+    let pitch_distance = (one_head.staff_id == two_head.staff_id)
+        .then_some(one_head.integer_pitch.abs_diff(two_head.integer_pitch));
+    if pitch_distance.is_some_and(|distance| distance > 1) {
+        return false;
+    }
+    let common = rectangle_intersection(one.bounds, two.bounds);
+    let minimum_width = one.bounds.width.min(two.bounds.width);
+    let width_ratio = f64::from(common.width) / f64::from(minimum_width);
+    if width_ratio <= 0.2 {
+        return false;
+    }
+    if width_ratio >= 0.8 && pitch_distance.is_some_and(|distance| distance <= 1) {
+        return true;
+    }
+    let one_area = one.bounds.width.wrapping_mul(one.bounds.height);
+    let two_area = two.bounds.width.wrapping_mul(two.bounds.height);
+    let minimum_area = one_area.min(two_area);
+    let common_area = common.width.wrapping_mul(common.height);
+    f64::from(common_area) / f64::from(minimum_area) > 0.25
+}
+
+fn validate_area(
+    vertex: NativeSigVertexId,
+    area: &NativeReductionAreaGeometry,
+) -> Result<(), NativeReductionOverlapGeometryError> {
+    for (component, polygon) in area.components.iter().enumerate() {
+        if polygon.len() < 3
+            || polygon
+                .iter()
+                .any(|point| !point.x.is_finite() || !point.y.is_finite())
+        {
+            return Err(NativeReductionOverlapGeometryError::InvalidArea { vertex, component });
+        }
+    }
+    Ok(())
+}
+
+fn glyphs_intersect(
+    one: &NativeReductionGlyphGeometry,
+    two: &NativeReductionGlyphGeometry,
+) -> bool {
+    glyph_run_rectangles(one).any(|rectangle| glyph_intersects_rectangle(two, rectangle))
+}
+
+fn glyph_intersects_rectangle(
+    glyph: &NativeReductionGlyphGeometry,
+    rectangle: crate::native_sig::NativeSigBounds,
+) -> bool {
+    glyph_run_rectangles(glyph).any(|run| rectangles_intersect(run, rectangle))
+}
+
+fn glyph_intersects_area(
+    glyph: &NativeReductionGlyphGeometry,
+    area: &NativeReductionAreaGeometry,
+) -> bool {
+    glyph_run_rectangles(glyph).any(|run| area_intersects_rectangle(area, run))
+}
+
+fn glyph_run_rectangles(
+    glyph: &NativeReductionGlyphGeometry,
+) -> impl Iterator<Item = crate::native_sig::NativeSigBounds> + '_ {
+    (0..glyph.run_table.sequence_count()).flat_map(move |sequence| {
+        glyph
+            .run_table
+            .sequence(sequence)
+            .unwrap_or_default()
+            .iter()
+            .map(move |run| match glyph.run_table.orientation() {
+                Orientation::Horizontal => crate::native_sig::NativeSigBounds {
+                    x: glyph
+                        .left
+                        .saturating_add(i32::try_from(run.start).unwrap_or(i32::MAX)),
+                    y: glyph
+                        .top
+                        .saturating_add(i32::try_from(sequence).unwrap_or(i32::MAX)),
+                    width: i32::try_from(run.length).unwrap_or(i32::MAX),
+                    height: 1,
+                },
+                Orientation::Vertical => crate::native_sig::NativeSigBounds {
+                    x: glyph
+                        .left
+                        .saturating_add(i32::try_from(sequence).unwrap_or(i32::MAX)),
+                    y: glyph
+                        .top
+                        .saturating_add(i32::try_from(run.start).unwrap_or(i32::MAX)),
+                    width: 1,
+                    height: i32::try_from(run.length).unwrap_or(i32::MAX),
+                },
+            })
+    })
+}
+
+fn areas_intersect(one: &NativeReductionAreaGeometry, two: &NativeReductionAreaGeometry) -> bool {
+    one.components.iter().any(|left| {
+        two.components
+            .iter()
+            .any(|right| convex_polygons_intersect(left, right))
+    })
+}
+
+fn area_intersects_rectangle(
+    area: &NativeReductionAreaGeometry,
+    rectangle: crate::native_sig::NativeSigBounds,
+) -> bool {
+    if rectangle.width <= 0 || rectangle.height <= 0 {
+        return false;
+    }
+    let left = f64::from(rectangle.x);
+    let top = f64::from(rectangle.y);
+    let right = left + f64::from(rectangle.width);
+    let bottom = top + f64::from(rectangle.height);
+    let polygon = [
+        NativeReductionAreaPoint { x: left, y: top },
+        NativeReductionAreaPoint { x: right, y: top },
+        NativeReductionAreaPoint {
+            x: right,
+            y: bottom,
+        },
+        NativeReductionAreaPoint { x: left, y: bottom },
+    ];
+    area.components
+        .iter()
+        .any(|component| convex_polygons_intersect(component, &polygon))
+}
+
+fn convex_polygons_intersect(
+    one: &[NativeReductionAreaPoint],
+    two: &[NativeReductionAreaPoint],
+) -> bool {
+    !has_separating_axis(one, two) && !has_separating_axis(two, one)
+}
+
+fn has_separating_axis(
+    source: &[NativeReductionAreaPoint],
+    other: &[NativeReductionAreaPoint],
+) -> bool {
+    source.iter().enumerate().any(|(index, start)| {
+        let stop = source[(index + 1) % source.len()];
+        let axis = (-(stop.y - start.y), stop.x - start.x);
+        if axis == (0.0, 0.0) {
+            return false;
+        }
+        let range = |polygon: &[NativeReductionAreaPoint]| {
+            polygon.iter().fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(minimum, maximum), point| {
+                    let projection = (point.x * axis.0) + (point.y * axis.1);
+                    (minimum.min(projection), maximum.max(projection))
+                },
+            )
+        };
+        let (source_minimum, source_maximum) = range(source);
+        let (other_minimum, other_maximum) = range(other);
+        source_maximum <= other_minimum || other_maximum <= source_minimum
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -592,7 +1115,7 @@ pub fn contextualize_and_purge_native_weaks(
 pub fn detect_native_reduction_overlaps(
     sig: &mut NativeSigSystem,
     geometry: &mut impl NativeReductionOverlapGeometry,
-) -> Result<NativeReductionOverlapTransaction, NativeSigError> {
+) -> Result<NativeReductionOverlapTransaction, NativeReductionOverlapError> {
     sig.validate_integrity()?;
     let mut scan_order = sig
         .vertices
@@ -614,7 +1137,7 @@ pub fn detect_native_reduction_overlaps(
         let left_bounds = left_vertex.bounds;
         let left_max_x = f64::from(left_bounds.x) + f64::from(left_bounds.width);
         for &right in &scan_order[left_index + 1..] {
-            if geometry.is_mirror_entity(left, right) {
+            if geometry.is_mirror_entity(left, right)? {
                 pairs.push(overlap_pair(
                     left,
                     right,
@@ -655,7 +1178,7 @@ pub fn detect_native_reduction_overlaps(
                 }
                 continue;
             }
-            if !geometry.mutually_overlaps(left, right) {
+            if !geometry.mutually_overlaps(left, right)? {
                 pairs.push(overlap_pair(
                     left,
                     right,
@@ -1077,13 +1600,21 @@ mod tests {
     }
 
     impl NativeReductionOverlapGeometry for ScriptedOverlapGeometry {
-        fn is_mirror_entity(&mut self, left: NativeSigVertexId, right: NativeSigVertexId) -> bool {
-            self.mirrors.contains(&(left.0, right.0))
+        fn is_mirror_entity(
+            &mut self,
+            left: NativeSigVertexId,
+            right: NativeSigVertexId,
+        ) -> Result<bool, NativeReductionOverlapGeometryError> {
+            Ok(self.mirrors.contains(&(left.0, right.0)))
         }
 
-        fn mutually_overlaps(&mut self, left: NativeSigVertexId, right: NativeSigVertexId) -> bool {
+        fn mutually_overlaps(
+            &mut self,
+            left: NativeSigVertexId,
+            right: NativeSigVertexId,
+        ) -> Result<bool, NativeReductionOverlapGeometryError> {
             self.precise_calls.push((left.0, right.0));
-            self.overlaps.contains(&(left.0, right.0))
+            Ok(self.overlaps.contains(&(left.0, right.0)))
         }
     }
 
@@ -1707,5 +2238,175 @@ mod tests {
         assert!(sig.vertices[0].removed);
         assert!(sig.vertices[1].removed);
         assert!(sig.vertices[2].active);
+    }
+
+    fn geometry_bounds(x: i32, y: i32, width: i32, height: i32) -> NativeSigBounds {
+        NativeSigBounds {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn horizontal_glyph(
+        left: i32,
+        top: i32,
+        width: usize,
+        height: usize,
+        runs: &[(usize, usize, usize)],
+    ) -> NativeReductionGlyphGeometry {
+        use audiveris_image::run_table::Run;
+
+        let mut table = RunTable::new(Orientation::Horizontal, width, height).unwrap();
+        for &(row, start, length) in runs {
+            table.add_run(row, Run::new(start, length)).unwrap();
+        }
+        NativeReductionGlyphGeometry {
+            left,
+            top,
+            run_table: table,
+        }
+    }
+
+    fn glyph_geometry(
+        bounds: NativeSigBounds,
+        glyph: NativeReductionGlyphGeometry,
+    ) -> NativeReductionInterGeometry {
+        NativeReductionInterGeometry {
+            bounds,
+            core_bounds: bounds,
+            implicit: false,
+            glyph: Some(glyph),
+            area: None,
+            head: None,
+            ensemble_members: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn lossless_glyph_overlap_rejects_intersecting_boxes_without_shared_ink() {
+        let bounds = geometry_bounds(10, 20, 5, 5);
+        let one = glyph_geometry(bounds, horizontal_glyph(10, 20, 5, 5, &[(0, 0, 5)]));
+        let two = glyph_geometry(bounds, horizontal_glyph(10, 20, 5, 5, &[(4, 0, 5)]));
+        let mut resolver = NativeReductionLosslessOverlapResolver::new([
+            (NativeSigVertexId(0), one),
+            (NativeSigVertexId(1), two),
+        ]);
+
+        assert!(
+            !resolver
+                .mutually_overlaps(NativeSigVertexId(0), NativeSigVertexId(1))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn lossless_glyph_overlap_uses_absolute_foreground_pixels() {
+        let bounds = geometry_bounds(10, 20, 5, 5);
+        let one = glyph_geometry(bounds, horizontal_glyph(10, 20, 5, 5, &[(2, 0, 4)]));
+        let two = glyph_geometry(bounds, horizontal_glyph(12, 22, 3, 3, &[(0, 0, 3)]));
+        let mut resolver = NativeReductionLosslessOverlapResolver::new([
+            (NativeSigVertexId(0), one),
+            (NativeSigVertexId(1), two),
+        ]);
+
+        assert!(
+            resolver
+                .mutually_overlaps(NativeSigVertexId(0), NativeSigVertexId(1))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn lossless_area_glyph_overlap_uses_run_rectangles_not_glyph_bounds() {
+        let area = NativeReductionAreaGeometry {
+            components: vec![vec![
+                NativeReductionAreaPoint { x: 12.0, y: 20.0 },
+                NativeReductionAreaPoint { x: 14.0, y: 20.0 },
+                NativeReductionAreaPoint { x: 14.0, y: 25.0 },
+                NativeReductionAreaPoint { x: 12.0, y: 25.0 },
+            ]],
+        };
+        let bounds = geometry_bounds(10, 20, 5, 5);
+        let area_inter = NativeReductionInterGeometry {
+            area: Some(area),
+            ..NativeReductionInterGeometry::bounds_only(bounds)
+        };
+        let missed = glyph_geometry(bounds, horizontal_glyph(10, 20, 5, 5, &[(2, 0, 2)]));
+        let hit = glyph_geometry(bounds, horizontal_glyph(10, 20, 5, 5, &[(2, 2, 2)]));
+
+        let mut missed_resolver = NativeReductionLosslessOverlapResolver::new([
+            (NativeSigVertexId(0), area_inter.clone()),
+            (NativeSigVertexId(1), missed),
+        ]);
+        assert!(
+            !missed_resolver
+                .mutually_overlaps(NativeSigVertexId(0), NativeSigVertexId(1))
+                .unwrap()
+        );
+
+        let mut hit_resolver = NativeReductionLosslessOverlapResolver::new([
+            (NativeSigVertexId(0), area_inter),
+            (NativeSigVertexId(1), hit),
+        ]);
+        assert!(
+            hit_resolver
+                .mutually_overlaps(NativeSigVertexId(0), NativeSigVertexId(1))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn head_overlap_preserves_staff_pitch_and_java_ratio_thresholds() {
+        let one_bounds = geometry_bounds(10, 20, 10, 10);
+        let two_bounds = geometry_bounds(12, 20, 10, 10);
+        let glyph = |bounds: NativeSigBounds| {
+            horizontal_glyph(
+                bounds.x,
+                bounds.y,
+                bounds.width as usize,
+                bounds.height as usize,
+                &[(4, 0, bounds.width as usize)],
+            )
+        };
+        let one = NativeReductionInterGeometry::head(one_bounds, glyph(one_bounds), Some(1), 0);
+        let far_pitch =
+            NativeReductionInterGeometry::head(two_bounds, glyph(two_bounds), Some(1), 2);
+        let near_pitch =
+            NativeReductionInterGeometry::head(two_bounds, glyph(two_bounds), Some(1), 1);
+
+        let mut far = NativeReductionLosslessOverlapResolver::new([
+            (NativeSigVertexId(0), one.clone()),
+            (NativeSigVertexId(1), far_pitch),
+        ]);
+        assert!(
+            !far.mutually_overlaps(NativeSigVertexId(0), NativeSigVertexId(1))
+                .unwrap()
+        );
+
+        let mut near = NativeReductionLosslessOverlapResolver::new([
+            (NativeSigVertexId(0), one),
+            (NativeSigVertexId(1), near_pitch),
+        ]);
+        assert!(
+            near.mutually_overlaps(NativeSigVertexId(0), NativeSigVertexId(1))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn missing_geometry_fails_before_rectangle_fallback() {
+        let mut resolver = NativeReductionLosslessOverlapResolver::new([(
+            NativeSigVertexId(0),
+            NativeReductionInterGeometry::bounds_only(geometry_bounds(0, 0, 10, 10)),
+        )]);
+
+        assert_eq!(
+            resolver
+                .mutually_overlaps(NativeSigVertexId(0), NativeSigVertexId(1))
+                .unwrap_err(),
+            NativeReductionOverlapGeometryError::MissingGeometry(NativeSigVertexId(1))
+        );
     }
 }

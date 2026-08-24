@@ -31,7 +31,9 @@ use audiveris_image::bar_column::StaffId;
 use audiveris_image::bar_connections::{
     ConnectionBuildReport, ConnectionParameters, ConnectionRaster, find_connections,
 };
-use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_bar_sticks};
+use audiveris_image::bar_sticks::{
+    BarStick, BarStickBuildState, BarStickParameters, build_bar_sticks,
+};
 use audiveris_image::bars_coordinator::{
     BarsPurgeParameters, BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
     PeakRemovalStage,
@@ -241,6 +243,8 @@ pub struct PeakGraphReport {
     pub stick_count: usize,
     /// Peaks Java drops because no acceptable bar filament could be built.
     pub stickless_peak_count: usize,
+    /// Exact registered bar-filament members retained for GRID glyph overlap.
+    pub bar_sticks: Vec<BarStick>,
     /// Accepted detached brace-portion filaments in Java system/staff/probe
     /// order. Their member identities are retained for the later full brace
     /// glyph/SIG promotion boundary.
@@ -2180,6 +2184,7 @@ fn build_peak_graph(
         connection_count,
         stick_count,
         stickless_peak_count,
+        bar_sticks: stick_state.sticks().to_vec(),
         brace_filaments: brace_stage.filaments,
         brace_promotions,
         brace_sig,

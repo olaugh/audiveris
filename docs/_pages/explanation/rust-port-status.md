@@ -6777,3 +6777,19 @@ Focused REDUCTION coverage is 16/16; the full library is 720 passed with two
 ignored, and scoped formatting plus strict all-target/all-feature library
 Clippy pass. The native HEADS set currently contains only oval pitched heads;
 the percussion exemption remains explicit future shape-family work.
+
+## Boundary 283: exact glyph/area overlap resolver
+
+Native REDUCTION now has a fail-closed implementation of Java's precise
+overlap semantics: exact glyph foreground runs, convex area unions,
+directional glyph/area/bounds dispatch, ensemble recursion, mirror and support
+handling, and `HeadInter`'s staff/pitch and 0.2/0.8/0.25 threshold logic.
+Missing evidence is reported as a typed error and can never silently degrade
+to rectangle overlap.
+
+The native products now retain exact head run tables and original bar-filament
+members for the production adapter. Focused REDUCTION coverage passes 21/21;
+the full library passes 725 tests with two ignored; formatting and strict
+all-target/all-feature Clippy are clean. Next is terminal-SIG identity binding,
+including connector/bracket area components, followed by Java-order overlap
+epoch composition.

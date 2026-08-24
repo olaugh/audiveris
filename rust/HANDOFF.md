@@ -11667,3 +11667,23 @@ than guessed geometry.
 Focused coverage is 16/16; the full library is 720 passed and two ignored;
 scoped formatting and strict library Clippy are clean. Add the percussion-head
 exemption when percussion shapes enter the native HEADS/SIG domain.
+
+## Boundary 283: lossless REDUCTION overlap geometry kernel
+
+Native REDUCTION now has a concrete, fail-closed implementation of Java
+`AbstractInter.overlaps()` and `HeadInter.overlaps()`. It evaluates exact
+absolute glyph foreground runs, unions of convex Java-area path components,
+directional glyph/area/bounds dispatch, ensemble member recursion with support
+suppression, mirror pairs, head core bounds, and the exact 0.2/0.8 horizontal
+and 0.25 area thresholds with same-staff integer-pitch rejection. The overlap
+scheduler propagates typed geometry failures; a missing live interpretation
+can no longer become an implicit rectangle test.
+
+The production products now retain exact registered head run tables at the
+STEMS corner boundary and the original bar-filament members at GRID, closing
+the two evidence-loss gaps found by the adapter audit. Focused REDUCTION
+coverage passes 21/21; the full library passes 725 tests with two ignored;
+formatting and strict all-target/all-feature Clippy are clean. This boundary is
+the resolver kernel and evidence retention, not yet the terminal-SIG adapter:
+next bind each live GRID/beam/head/stem vertex to its glyph and ribbon/serif
+area, then run the existing scheduler with the concrete resolver.

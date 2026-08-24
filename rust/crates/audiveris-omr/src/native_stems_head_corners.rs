@@ -14,6 +14,8 @@ use std::{
     fmt,
 };
 
+use audiveris_image::run_table::RunTable;
+
 use crate::{
     head_scanner_slices::JavaRectangle,
     head_seed_tally_analysis::HeadSeedTallySide,
@@ -69,6 +71,8 @@ pub struct NativeStemsHeadCornerHead {
     pub glyph_bounds: JavaRectangle,
     pub glyph_weight: usize,
     pub glyph_run_digest: u64,
+    /// Exact registered foreground retained for REDUCTION overlap parity.
+    pub glyph_run_table: RunTable,
     pub point_size: i32,
     pub catalog_ordinal: usize,
     /// `LEFT/TOP`, `LEFT/BOTTOM`, `RIGHT/TOP`, `RIGHT/BOTTOM`.
@@ -104,6 +108,11 @@ pub enum NativeStemsHeadCornerError {
     InvalidHeadReference {
         system_id: usize,
         reference: NativeHeadStaffEpilogRef,
+    },
+    MissingHeadGlyph {
+        system_id: usize,
+        staff_id: usize,
+        origin: NativeHeadStaffEpilogOrigin,
     },
     FinalHeadSetMismatch {
         system_id: usize,
@@ -157,6 +166,14 @@ impl fmt::Display for NativeStemsHeadCornerError {
             } => write!(
                 formatter,
                 "STEMS head-corner system {system_id} has invalid head reference {reference:?}"
+            ),
+            Self::MissingHeadGlyph {
+                system_id,
+                staff_id,
+                origin,
+            } => write!(
+                formatter,
+                "STEMS head-corner system {system_id} staff {staff_id} has no {origin:?} glyph"
             ),
             Self::FinalHeadSetMismatch { system_id } => write!(
                 formatter,
@@ -348,6 +365,14 @@ pub fn materialize_native_stems_head_corners(
                     catalog_ordinal: selection.catalog_ordinal,
                 })?;
             let template = catalog.template(head.shape);
+            let glyph_run_table = source_head_glyph(heads, system_id, staff_id, head.origin)
+                .ok_or(NativeStemsHeadCornerError::MissingHeadGlyph {
+                    system_id,
+                    staff_id,
+                    origin: head.origin,
+                })?
+                .run_table
+                .clone();
             let shape = java_shape(head.shape);
             let seed_dx_left = scale_dx.get(&(shape, HeadSeedTallySide::Left)).copied();
             let seed_dx_right = scale_dx.get(&(shape, HeadSeedTallySide::Right)).copied();
@@ -387,6 +412,7 @@ pub fn materialize_native_stems_head_corners(
                 glyph_bounds: head.glyph_bounds,
                 glyph_weight: head.glyph_weight,
                 glyph_run_digest: head.glyph_run_digest,
+                glyph_run_table,
                 point_size: selection.point_size,
                 catalog_ordinal: selection.catalog_ordinal,
                 corners_in_constructor_order,
@@ -419,6 +445,32 @@ pub fn materialize_native_stems_head_corners(
         head_count,
         corner_count: head_count * 4,
     })
+}
+
+fn source_head_glyph(
+    heads: &NativeHeadsRecognition,
+    system_id: usize,
+    staff_id: usize,
+    origin: NativeHeadStaffEpilogOrigin,
+) -> Option<&crate::head_glyph_retrieval::RetrievedHeadGlyph> {
+    match origin {
+        NativeHeadStaffEpilogOrigin::Seed(ordinal) => heads
+            .seed_glyphs
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .and_then(|system| system.staffs.iter().find(|staff| staff.staff_id == staff_id))
+            .and_then(|staff| staff.heads.iter().find(|source| source.ordinal == ordinal))
+            .map(|source| &source.glyph),
+        NativeHeadStaffEpilogOrigin::Range(ordinal) => heads
+            .range_glyphs
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .and_then(|system| system.staffs.iter().find(|staff| staff.staff_id == staff_id))
+            .and_then(|staff| staff.heads.iter().find(|source| source.ordinal == ordinal))
+            .map(|source| &source.glyph),
+    }
 }
 
 fn resolve_head(
