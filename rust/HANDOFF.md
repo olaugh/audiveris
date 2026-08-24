@@ -11533,3 +11533,35 @@ the surviving `Unsupported*` errors validate malformed or upstream-impossible
 inputs. Generic headless STEMS is therefore complete. Further score scans are
 robustness expansion, while implementation work moves downstream to REDUCTION
 and the remaining prerequisites for SYMBOLS.
+
+## Boundary 276: REDUCTION starts with exact exclusion solving
+
+The port now crosses the STEMS/REDUCTION boundary in production code.
+`reduce_native_stems_existing_exclusions` consumes the complete owned
+`NativeStemsRecognition`, reaches each terminal per-system SIG in sheet order,
+refreshes its contextual grades, and applies a native port of Java
+`SIGraph.reduceExclusions()`.
+
+The solver snapshots live exclusion relations in insertion order. On each
+iteration it chooses the relation with the largest maximum endpoint best
+grade, using Java's strict comparison so the first relation wins a tie. It
+removes the lower-grade endpoint and removes the target when the two endpoint
+grades are equal. Extensive removal also tombstones a sole-member BeamGroup,
+while returned removal evidence preserves Java's `LinkedHashSet` order
+(weaker first, dying ensemble second). Stable vertex and edge ordinals are
+never compacted. Contextual grades are recomputed after each choice before the
+next relation is selected.
+
+Three source-authenticated regressions cover strongest-first selection,
+target-on-tie, sole-member ensemble death, support-grade refresh, and graph
+tombstones. The focused slice passes 3/3; the complete `audiveris-omr` library
+passes 707/707 with two ignored tests; strict all-target/all-feature workspace
+Clippy, formatting, and diff checks pass.
+
+This is intentionally named `ExistingExclusionsRecognition`, not completed
+REDUCTION. Java first discovers new geometric overlaps, then runs iterative
+foundation checks (`checkStemEndingHeads`, heads, hooks, beams, ledgers, stems,
+and chord/exclusion late consistency), refines stem endpoints, checks beam
+groups, measures free stem length, and cleans glyphs. The dependency-light
+lifecycle already owns the outer order; the immediate production target is
+overlap discovery feeding this now-exact solver.
