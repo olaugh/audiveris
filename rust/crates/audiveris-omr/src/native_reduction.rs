@@ -9,8 +9,8 @@
 //! passes remain later REDUCTION boundaries.
 
 use crate::native_sig::{
-    NativeSigContextualization, NativeSigEdgeId, NativeSigError, NativeSigInterKind,
-    NativeSigRelationKind, NativeSigSystem, NativeSigVertexId,
+    NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigError, NativeSigInterKind,
+    NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSystem, NativeSigVertexId,
 };
 use crate::native_stems::NativeStemsRecognition;
 use crate::stems_step::NativeBeamPortion;
@@ -64,6 +64,57 @@ pub struct NativeReductionBeamPruneTransaction {
 
 /// Java `Grades.minContextualGrade`.
 pub const MIN_REDUCTION_CONTEXTUAL_GRADE: f64 = 0.5;
+
+/// Java `SigReducer.Constants.minIou` broad-phase threshold.
+pub const MIN_REDUCTION_OVERLAP_IOU: f64 = 0.05;
+
+/// Precise geometry which the recognition-owned SIG deliberately does not
+/// flatten into rectangles.
+///
+/// Java's `AbstractInter.overlaps()` dispatches across glyph run tables,
+/// areas, ensembles, staff/pitch-aware heads, and bounds.  The REDUCTION
+/// scheduler owns when these questions are asked; a later adapter can resolve
+/// them from the retained stage products without weakening them to box tests.
+pub trait NativeReductionOverlapGeometry {
+    /// Whether `right` belongs to the mirror entity set built for `left`.
+    fn is_mirror_entity(&mut self, left: NativeSigVertexId, right: NativeSigVertexId) -> bool;
+
+    /// Java's mutual `left.overlaps(right) && right.overlaps(left)` test.
+    fn mutually_overlaps(&mut self, left: NativeSigVertexId, right: NativeSigVertexId) -> bool;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeReductionOverlapDisposition {
+    MirrorAccepted,
+    CompatibleAccepted,
+    BelowIou,
+    BeyondRightEdge,
+    PreciseRejected,
+    StandardHeadStemAccepted,
+    ExistingExclusion,
+    SupportAccepted,
+    ExclusionInserted,
+}
+
+/// One pair visited by Java's stable left-abscissa nested scan.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeReductionOverlapPair {
+    pub left: NativeSigVertexId,
+    pub right: NativeSigVertexId,
+    pub iou: Option<f64>,
+    pub disposition: NativeReductionOverlapDisposition,
+    pub exclusion: Option<NativeSigEdgeId>,
+}
+
+/// Exact scheduling and insertion result of `SigReducer.detectOverlaps()`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionOverlapTransaction {
+    pub system_id: usize,
+    /// Active non-header/non-disabled vertices, stable-sorted by bounds x.
+    pub scan_order: Vec<NativeSigVertexId>,
+    pub pairs: Vec<NativeReductionOverlapPair>,
+    pub inserted_exclusions: Vec<NativeSigEdgeId>,
+}
 
 /// Result of `SigReducer.contextualizeAndPurge()` with `purgeWeaks=true`.
 #[derive(Clone, Debug, PartialEq)]
@@ -279,6 +330,294 @@ pub fn contextualize_and_purge_native_weaks(
     })
 }
 
+/// Port Java `SigReducer.detectOverlaps()` without approximating its precise
+/// geometry dispatch.
+///
+/// This owns the stable abscissa sort, disabled/header filtering, beam-family
+/// compatibility, Java rectangle IOU gate, early break, standard-head/stem
+/// exception, support suppression, and normalized exclusion insertion.  Only
+/// mirror membership and mutual precise overlap are delegated.
+pub fn detect_native_reduction_overlaps(
+    sig: &mut NativeSigSystem,
+    geometry: &mut impl NativeReductionOverlapGeometry,
+) -> Result<NativeReductionOverlapTransaction, NativeSigError> {
+    sig.validate_integrity()?;
+    let mut scan_order = sig
+        .vertices
+        .iter()
+        .filter(|vertex| {
+            vertex.active && !is_overlap_disabled(vertex.kind) && !is_header_inter(vertex.kind)
+        })
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    // Slice sorting is stable, matching Stream.sorted with a comparator which
+    // compares only the left x ordinate.
+    scan_order.sort_by_key(|id| sig.vertices[id.0].bounds.x);
+
+    let mut pairs = Vec::new();
+    let mut inserted_exclusions = Vec::new();
+    for left_index in 0..scan_order.len().saturating_sub(1) {
+        let left = scan_order[left_index];
+        let left_vertex = &sig.vertices[left.0];
+        let left_bounds = left_vertex.bounds;
+        let left_max_x = f64::from(left_bounds.x) + f64::from(left_bounds.width);
+        for &right in &scan_order[left_index + 1..] {
+            if geometry.is_mirror_entity(left, right) {
+                pairs.push(overlap_pair(
+                    left,
+                    right,
+                    None,
+                    NativeReductionOverlapDisposition::MirrorAccepted,
+                    None,
+                ));
+                continue;
+            }
+            if overlap_compatible(sig.vertices[left.0].kind, sig.vertices[right.0].kind) {
+                pairs.push(overlap_pair(
+                    left,
+                    right,
+                    None,
+                    NativeReductionOverlapDisposition::CompatibleAccepted,
+                    None,
+                ));
+                continue;
+            }
+
+            let right_bounds = sig.vertices[right.0].bounds;
+            let iou = java_rectangle_iou(left_bounds, right_bounds);
+            if iou < MIN_REDUCTION_OVERLAP_IOU {
+                let beyond = f64::from(right_bounds.x) > left_max_x;
+                pairs.push(overlap_pair(
+                    left,
+                    right,
+                    Some(iou),
+                    if beyond {
+                        NativeReductionOverlapDisposition::BeyondRightEdge
+                    } else {
+                        NativeReductionOverlapDisposition::BelowIou
+                    },
+                    None,
+                ));
+                if beyond {
+                    break;
+                }
+                continue;
+            }
+            if !geometry.mutually_overlaps(left, right) {
+                pairs.push(overlap_pair(
+                    left,
+                    right,
+                    Some(iou),
+                    NativeReductionOverlapDisposition::PreciseRejected,
+                    None,
+                ));
+                continue;
+            }
+            if is_standard_head_stem_pair(&sig.vertices[left.0], &sig.vertices[right.0]) {
+                pairs.push(overlap_pair(
+                    left,
+                    right,
+                    Some(iou),
+                    NativeReductionOverlapDisposition::StandardHeadStemAccepted,
+                    None,
+                ));
+                continue;
+            }
+
+            let (source, target) = if left.0 < right.0 {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            if let Some(existing) = active_exclusion_between(sig, source, target) {
+                pairs.push(overlap_pair(
+                    left,
+                    right,
+                    Some(iou),
+                    NativeReductionOverlapDisposition::ExistingExclusion,
+                    Some(existing),
+                ));
+                continue;
+            }
+            if has_support_between(sig, source, target) {
+                pairs.push(overlap_pair(
+                    left,
+                    right,
+                    Some(iou),
+                    NativeReductionOverlapDisposition::SupportAccepted,
+                    None,
+                ));
+                continue;
+            }
+
+            let exclusion = NativeSigEdgeId(sig.edges.len());
+            sig.append_edge(NativeSigEdge {
+                ordinal: exclusion.0,
+                active: true,
+                source: source.0,
+                target: target.0,
+                kind: NativeSigRelationKind::Exclusion,
+                origin: NativeSigRelationOrigin::BaselineGraph,
+                support: None,
+                beam_portion: None,
+                stem_extension: None,
+                head_stem: None,
+            })?;
+            inserted_exclusions.push(exclusion);
+            pairs.push(overlap_pair(
+                left,
+                right,
+                Some(iou),
+                NativeReductionOverlapDisposition::ExclusionInserted,
+                Some(exclusion),
+            ));
+        }
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionOverlapTransaction {
+        system_id: sig.system_id,
+        scan_order,
+        pairs,
+        inserted_exclusions,
+    })
+}
+
+fn overlap_pair(
+    left: NativeSigVertexId,
+    right: NativeSigVertexId,
+    iou: Option<f64>,
+    disposition: NativeReductionOverlapDisposition,
+    exclusion: Option<NativeSigEdgeId>,
+) -> NativeReductionOverlapPair {
+    NativeReductionOverlapPair {
+        left,
+        right,
+        iou,
+        disposition,
+        exclusion,
+    }
+}
+
+fn is_overlap_disabled(kind: NativeSigInterKind) -> bool {
+    matches!(
+        kind,
+        NativeSigInterKind::BeamGroup | NativeSigInterKind::Ledger
+    )
+}
+
+fn is_header_inter(kind: NativeSigInterKind) -> bool {
+    matches!(
+        kind,
+        NativeSigInterKind::Clef
+            | NativeSigInterKind::KeyAlter
+            | NativeSigInterKind::Key
+            | NativeSigInterKind::TimeWhole
+            | NativeSigInterKind::TimePair
+    )
+}
+
+fn is_beam_family(kind: NativeSigInterKind) -> bool {
+    matches!(
+        kind,
+        NativeSigInterKind::Beam | NativeSigInterKind::BeamHook | NativeSigInterKind::SmallBeam
+    )
+}
+
+fn overlap_compatible(left: NativeSigInterKind, right: NativeSigInterKind) -> bool {
+    is_beam_family(left) && is_beam_family(right)
+}
+
+fn is_standard_head_stem_pair(
+    left: &crate::native_sig::NativeSigVertex,
+    right: &crate::native_sig::NativeSigVertex,
+) -> bool {
+    let head = if left.kind == NativeSigInterKind::Head && right.kind == NativeSigInterKind::Stem {
+        left
+    } else if right.kind == NativeSigInterKind::Head && left.kind == NativeSigInterKind::Stem {
+        right
+    } else {
+        return false;
+    };
+    head.shape.as_deref().is_some_and(|shape| {
+        !matches!(
+            shape,
+            "NOTEHEAD_BLACK_SMALL" | "NOTEHEAD_VOID_SMALL" | "WHOLE_NOTE_SMALL" | "BREVE_SMALL"
+        )
+    })
+}
+
+fn active_exclusion_between(
+    sig: &NativeSigSystem,
+    source: NativeSigVertexId,
+    target: NativeSigVertexId,
+) -> Option<NativeSigEdgeId> {
+    sig.edges
+        .iter()
+        .find(|edge| {
+            edge.active
+                && edge.source == source.0
+                && edge.target == target.0
+                && edge.kind == NativeSigRelationKind::Exclusion
+        })
+        .map(|edge| NativeSigEdgeId(edge.ordinal))
+}
+
+fn has_support_between(
+    sig: &NativeSigSystem,
+    source: NativeSigVertexId,
+    target: NativeSigVertexId,
+) -> bool {
+    sig.edges.iter().any(|edge| {
+        edge.active
+            && ((edge.source == source.0 && edge.target == target.0)
+                || (edge.source == target.0 && edge.target == source.0))
+            && is_support_relation(edge.kind)
+    })
+}
+
+fn is_support_relation(kind: NativeSigRelationKind) -> bool {
+    matches!(
+        kind,
+        NativeSigRelationKind::NoExclusion
+            | NativeSigRelationKind::BarConnection
+            | NativeSigRelationKind::KeyAlters
+            | NativeSigRelationKind::ClefKey
+            | NativeSigRelationKind::BeamBeam
+            | NativeSigRelationKind::BeamStem
+            | NativeSigRelationKind::BeamHead
+            | NativeSigRelationKind::BeamRest
+            | NativeSigRelationKind::HeadStem
+    )
+}
+
+/// Java `GeoUtil.iou(Rectangle, Rectangle)`, including its signed Rectangle
+/// intersection dimensions rather than clamping them independently.
+fn java_rectangle_iou(
+    one: crate::native_sig::NativeSigBounds,
+    two: crate::native_sig::NativeSigBounds,
+) -> f64 {
+    let inter_left = one.x.max(two.x);
+    let inter_top = one.y.max(two.y);
+    let inter_right = one
+        .x
+        .wrapping_add(one.width)
+        .min(two.x.wrapping_add(two.width));
+    let inter_bottom = one
+        .y
+        .wrapping_add(one.height)
+        .min(two.y.wrapping_add(two.height));
+    let inter_area = inter_right
+        .wrapping_sub(inter_left)
+        .wrapping_mul(inter_bottom.wrapping_sub(inter_top));
+    if inter_area == 0 {
+        return 0.0;
+    }
+    let one_area = one.width.wrapping_mul(one.height);
+    let two_area = two.width.wrapping_mul(two.height);
+    let union_area = one_area.wrapping_add(two_area).wrapping_sub(inter_area);
+    f64::from(inter_area) / f64::from(union_area)
+}
+
 fn prune_beams(
     sig: &mut NativeSigSystem,
     candidates: Vec<NativeSigVertexId>,
@@ -400,6 +739,25 @@ mod tests {
         NativeSigBounds, NativeSigEdge, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertex,
     };
     use crate::stems_step::NativeStemPoint;
+    use std::collections::BTreeSet;
+
+    #[derive(Default)]
+    struct ScriptedOverlapGeometry {
+        mirrors: BTreeSet<(usize, usize)>,
+        overlaps: BTreeSet<(usize, usize)>,
+        precise_calls: Vec<(usize, usize)>,
+    }
+
+    impl NativeReductionOverlapGeometry for ScriptedOverlapGeometry {
+        fn is_mirror_entity(&mut self, left: NativeSigVertexId, right: NativeSigVertexId) -> bool {
+            self.mirrors.contains(&(left.0, right.0))
+        }
+
+        fn mutually_overlaps(&mut self, left: NativeSigVertexId, right: NativeSigVertexId) -> bool {
+            self.precise_calls.push((left.0, right.0));
+            self.overlaps.contains(&(left.0, right.0))
+        }
+    }
 
     fn vertex(ordinal: usize, kind: NativeSigInterKind, grade: f64) -> NativeSigVertex {
         NativeSigVertex {
@@ -457,6 +815,194 @@ mod tests {
             stem_extension: Some(NativeStemPoint { x: 2.0, y: 3.0 }),
             ..edge(ordinal, beam, stem, NativeSigRelationKind::BeamStem)
         }
+    }
+
+    #[test]
+    fn overlap_scan_filters_headers_and_disabled_kinds_and_stably_sorts_by_x() {
+        let mut vertices = vec![
+            vertex(0, NativeSigInterKind::Head, 0.8),
+            vertex(1, NativeSigInterKind::Ledger, 0.8),
+            vertex(2, NativeSigInterKind::Beam, 0.8),
+            vertex(3, NativeSigInterKind::BeamHook, 0.8),
+            vertex(4, NativeSigInterKind::Clef, 0.8),
+            vertex(5, NativeSigInterKind::Stem, 0.8),
+            vertex(6, NativeSigInterKind::BeamGroup, 0.8),
+        ];
+        for &ordinal in &[1, 2, 3, 4, 6] {
+            vertices[ordinal].bounds.x = 0;
+        }
+        vertices[0].bounds.x = 20;
+        vertices[5].bounds.x = 100;
+        let mut sig = NativeSigSystem {
+            system_id: 4,
+            vertices,
+            edges: Vec::new(),
+        };
+        let mut geometry = ScriptedOverlapGeometry::default();
+
+        let result = detect_native_reduction_overlaps(&mut sig, &mut geometry).unwrap();
+
+        assert_eq!(
+            result.scan_order,
+            vec![
+                NativeSigVertexId(2),
+                NativeSigVertexId(3),
+                NativeSigVertexId(0),
+                NativeSigVertexId(5)
+            ]
+        );
+        assert_eq!(
+            result.pairs[0].disposition,
+            NativeReductionOverlapDisposition::CompatibleAccepted
+        );
+        assert!(result.pairs.iter().any(|pair| {
+            pair.left == NativeSigVertexId(0)
+                && pair.right == NativeSigVertexId(5)
+                && pair.disposition == NativeReductionOverlapDisposition::BeyondRightEdge
+        }));
+        assert!(geometry.precise_calls.is_empty());
+        assert!(result.inserted_exclusions.is_empty());
+    }
+
+    #[test]
+    fn overlap_scan_uses_inclusive_java_iou_and_normalizes_new_exclusion_ids() {
+        let mut vertices = vec![
+            vertex(0, NativeSigInterKind::Brace, 0.8),
+            vertex(1, NativeSigInterKind::Barline, 0.8),
+        ];
+        // Intersection 2x10=20, union 200+220-20=400: exactly 0.05.
+        vertices[0].bounds = NativeSigBounds {
+            x: 18,
+            y: 0,
+            width: 22,
+            height: 10,
+        };
+        vertices[1].bounds = NativeSigBounds {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 10,
+        };
+        let mut sig = NativeSigSystem {
+            system_id: 5,
+            vertices,
+            edges: Vec::new(),
+        };
+        let mut geometry = ScriptedOverlapGeometry::default();
+        geometry.overlaps.insert((1, 0));
+
+        let result = detect_native_reduction_overlaps(&mut sig, &mut geometry).unwrap();
+
+        assert_eq!(geometry.precise_calls, vec![(1, 0)]);
+        assert_eq!(result.pairs[0].iou, Some(0.05));
+        assert_eq!(
+            result.pairs[0].disposition,
+            NativeReductionOverlapDisposition::ExclusionInserted
+        );
+        assert_eq!(result.inserted_exclusions, vec![NativeSigEdgeId(0)]);
+        assert_eq!((sig.edges[0].source, sig.edges[0].target), (0, 1));
+        assert_eq!(sig.edges[0].kind, NativeSigRelationKind::Exclusion);
+    }
+
+    #[test]
+    fn overlap_scan_delegates_mirrors_and_precise_rejection_without_mutation() {
+        let mut sig = NativeSigSystem {
+            system_id: 6,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Brace, 0.8),
+                vertex(1, NativeSigInterKind::Barline, 0.8),
+                vertex(2, NativeSigInterKind::Bracket, 0.8),
+            ],
+            edges: Vec::new(),
+        };
+        for item in &mut sig.vertices {
+            item.bounds.x = 0;
+            item.bounds.width = 10;
+        }
+        let mut geometry = ScriptedOverlapGeometry::default();
+        geometry.mirrors.insert((0, 1));
+
+        let result = detect_native_reduction_overlaps(&mut sig, &mut geometry).unwrap();
+
+        assert_eq!(
+            result.pairs[0].disposition,
+            NativeReductionOverlapDisposition::MirrorAccepted
+        );
+        assert_eq!(geometry.precise_calls, vec![(0, 2), (1, 2)]);
+        assert!(result.pairs[1..].iter().all(|pair| {
+            pair.disposition == NativeReductionOverlapDisposition::PreciseRejected
+        }));
+        assert!(sig.edges.is_empty());
+    }
+
+    #[test]
+    fn overlap_exclusion_respects_head_stem_support_and_existing_relation_exceptions() {
+        fn disposition(
+            mut vertices: Vec<NativeSigVertex>,
+            edges: Vec<NativeSigEdge>,
+        ) -> (NativeReductionOverlapDisposition, usize) {
+            for vertex in &mut vertices {
+                vertex.bounds.x = 0;
+                vertex.bounds.width = 10;
+            }
+            let mut sig = NativeSigSystem {
+                system_id: 7,
+                vertices,
+                edges,
+            };
+            let mut geometry = ScriptedOverlapGeometry::default();
+            geometry.overlaps.insert((0, 1));
+            let result = detect_native_reduction_overlaps(&mut sig, &mut geometry).unwrap();
+            (result.pairs[0].disposition, sig.edges.len())
+        }
+
+        let mut head = vertex(0, NativeSigInterKind::Head, 0.8);
+        head.shape = Some("NOTEHEAD_BLACK".to_owned());
+        assert_eq!(
+            disposition(
+                vec![head.clone(), vertex(1, NativeSigInterKind::Stem, 0.8)],
+                Vec::new()
+            ),
+            (
+                NativeReductionOverlapDisposition::StandardHeadStemAccepted,
+                0
+            )
+        );
+        head.shape = Some("NOTEHEAD_BLACK_SMALL".to_owned());
+        assert_eq!(
+            disposition(
+                vec![head, vertex(1, NativeSigInterKind::Stem, 0.8)],
+                Vec::new()
+            )
+            .0,
+            NativeReductionOverlapDisposition::ExclusionInserted
+        );
+
+        let mut support = edge(0, 0, 1, NativeSigRelationKind::NoExclusion);
+        support.support = Some(NativeSigSupport {
+            grade: 1.0,
+            bar_connection_impacts: None,
+        });
+        assert_eq!(
+            disposition(
+                vec![
+                    vertex(0, NativeSigInterKind::Brace, 0.8),
+                    vertex(1, NativeSigInterKind::Barline, 0.8)
+                ],
+                vec![support]
+            ),
+            (NativeReductionOverlapDisposition::SupportAccepted, 1)
+        );
+        assert_eq!(
+            disposition(
+                vec![
+                    vertex(0, NativeSigInterKind::Brace, 0.8),
+                    vertex(1, NativeSigInterKind::Barline, 0.8)
+                ],
+                vec![edge(0, 0, 1, NativeSigRelationKind::Exclusion)]
+            ),
+            (NativeReductionOverlapDisposition::ExistingExclusion, 1)
+        );
     }
 
     #[test]
