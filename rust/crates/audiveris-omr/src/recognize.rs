@@ -1940,6 +1940,29 @@ fn build_peak_graph(
         // the stage evidence, keyed by peak. `buildBraceFilament` starts from
         // exactly those members.
         let mut members_by_peak = std::collections::HashMap::new();
+        // Java's buildBraces can promote an aligned first bar peak to
+        // BRACE_MIDDLE. That peak keeps the BarFilament constructed earlier by
+        // buildBarSticks, so seed the lookup with those members before adding
+        // the separately probed brace portions below.
+        for stick in stick_state.sticks() {
+            let members = stick
+                .members
+                .iter()
+                .map(|id| {
+                    let slice = match id.lag {
+                        audiveris_image::bars_logic::SectionLag::Vertical => &lags.vertical,
+                        audiveris_image::bars_logic::SectionLag::Horizontal => &lags.horizontal,
+                    };
+                    slice
+                        .iter()
+                        .find(|section| section.id() == id.id)
+                        .cloned()
+                        .ok_or_else(|| format!("bar member section {} missing from its lag", id.id))
+                })
+                .collect::<Result<Vec<_>, String>>()
+                .map_err(grid_stage("brace members"))?;
+            members_by_peak.insert(stick.peak, members);
+        }
         for evidence in &brace_stage.filaments {
             let members = evidence
                 .members

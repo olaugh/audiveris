@@ -205,7 +205,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | STEMS third prelinked-head continuation and closure | Boundary 30 reuses `continue_native_stems_head_linking_phase1` for head order 3 (x20 / SIG 65 / Java Inter 1419). LEFT is prelinked and both RIGHT STRICT corners are false; Java returns true and shared Stem 2361 closes x19 LEFT then RIGHT, two ordered false-to-true writes with no unlinked insertion. Native reaches `current_index=4`, `frontier_consumed=true`, before x36 / SIG 69 / Java Inter 1427. Graph, registry, stem, allocator, relation, and linked state remain unchanged apart from the two closed S cells; missing closure topology rejects atomically. This is one further bounded prelinked-success case, not full phase-1 iteration or retry coverage. The current expanded schema-v6 fixture is 16 lines / 12,880 bytes with eleven semantic rows plus summary, SHA-256 `91541fc08786b8d81b6f6c26d68d83214276a3e68bcdd488f5607a135438aff8`; probe, runner, emitted-body, and semantic-pass SHA-256 are `d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf`, `8bdd41abb42b23187f2b7380a39a77d2218d996e6b8edcf6c3697a91dfe1e3b3`, `dedc03783647ab198966cc87d1bfc491e990ad17c66564b3c0fe00a5231ba310`, and `e98f8181cce2d0bae08fda7617d63c313180ad2d8464902d870c189cafe4a398` |
 | STEMS fourth prelinked-head continuation and closure | Boundary 31 reuses `continue_native_stems_head_linking_phase1` for head order 4 (x36 / SIG 69 / Java Inter 1427, grade bits `0x3fe8e37718100f0c`). LEFT is prelinked and both RIGHT STRICT corners are false; Java returns true and shared Stem 2369 closes x35 LEFT then RIGHT, two ordered false-to-true writes, `closedValueChanges=2`, and `unlinkedCount=0`. Native reaches `current_index=5`, `frontier_consumed=true`, before x99 / SIG 61 / Java Inter 1411, grade bits `0x3fe8b9e1faa76070`. Graph, registry, stem, allocator, relation, and linked state remain unchanged apart from the two closed S cells; missing closure topology rejects atomically. This is one further bounded prelinked-success case, not the remaining queue, a later C-link mutation, actually-unlinked/retry behavior, phase-2 append, or broader branch coverage. The schema-v6 fixture is 16 lines / 12,880 bytes with eleven semantic rows plus summary, SHA-256 `91541fc08786b8d81b6f6c26d68d83214276a3e68bcdd488f5607a135438aff8`; probe, runner, emitted-body, and semantic-pass SHA-256 are `d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf`, `8bdd41abb42b23187f2b7380a39a77d2218d996e6b8edcf6c3697a91dfe1e3b3`, `dedc03783647ab198966cc87d1bfc491e990ad17c66564b3c0fe00a5231ba310`, and `e98f8181cce2d0bae08fda7617d63c313180ad2d8464902d870c189cafe4a398` |
 | STEMS fifth prelinked-head continuation and closure | Boundary 32 reuses `continue_native_stems_head_linking_phase1` for head order 5 (x99 / SIG 61 / Java Inter 1411). Java returns true through the prelinked-success path and shared Stem 2365 closes x98 LEFT then RIGHT, two ordered false-to-true writes with no unlinked insertion. Native reaches `current_index=6`, `frontier_consumed=true`, before x22 / SIG 12 / Java Inter 1309. Graph, registry, stem, allocator, relation, and linked state remain unchanged apart from the two closed S cells; missing closure topology rejects atomically. This is one further bounded prelinked-success case, not the remaining queue, a later C-link mutation, actually-unlinked/retry behavior, phase-2 append, or broader branch coverage. The schema-v6 fixture is 16 lines / 12,880 bytes with eleven semantic rows plus summary, SHA-256 `91541fc08786b8d81b6f6c26d68d83214276a3e68bcdd488f5607a135438aff8`; probe, runner, emitted-body, and semantic-pass SHA-256 are `d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf`, `8bdd41abb42b23187f2b7380a39a77d2218d996e6b8edcf6c3697a91dfe1e3b3`, `dedc03783647ab198966cc87d1bfc491e990ad17c66564b3c0fe00a5231ba310`, and `e98f8181cce2d0bae08fda7617d63c313180ad2d8464902d870c189cafe4a398` |
-| Later recognition stages | `STEMS` is complete as a generic headless recognition stage: construction, SIDES/STUMPS, both head phases, `finalizeStems`, `finalizeBeams`, SIG contextualization, and schema-1 publication all run from native products with no page/system/queue identity dispatch. Chula, Allegretto, Batuque, Zizi, Carmen, Cucaracha, Hove, Bach, D039, and both extracted Dichterliebe pages complete the Rust-only path. `REDUCTION` is now in progress: terminal native STEMS SIGs feed the exact existing-exclusion solver with strongest-branch ordering, target-on-tie removal, dying BeamGroup cleanup, stable tombstones, and grade refresh. Overlap discovery and the foundation consistency epochs remain. Frozen measured wrappers remain test-only oracle evidence. Additional score scans are continuing robustness evidence rather than an open STEMS implementation phase. |
+| Later recognition stages | `STEMS` is complete as a generic headless recognition stage: construction, SIDES/STUMPS, both head phases, `finalizeStems`, `finalizeBeams`, SIG contextualization, and schema-1 publication all run from native products with no page/system/queue identity dispatch. Chula, Allegretto, Batuque, Zizi, Carmen, Cucaracha, Hove, Bach, D039, and both extracted Dichterliebe pages complete the Rust-only path. `REDUCTION` is in progress: terminal native STEMS SIGs now feed the exact overlap scheduler, existing-exclusion solver, contextual weak purge, hook validation, and standard-beam validation with Java ordering, stable tombstones, and extensive ensemble cleanup. The concrete glyph/area overlap adapter and remaining foundation epochs remain. Frozen measured wrappers remain test-only oracle evidence. Additional score scans are continuing robustness evidence rather than an open STEMS implementation phase. |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |
 
@@ -6102,3 +6102,93 @@ passes 709/709 with two ignored tests; strict workspace Clippy, formatting,
 and diff checks pass. These primitives are not yet composed as a whole epoch:
 the weak contextual purge Java runs after each check and the earlier geometric
 overlap discovery remain the immediate dependencies.
+
+## Boundary 278: wider-corpus GRID and STEMS recovery
+
+Graceful Ghost Rag pages 3-5 add three valid-input cases beyond the frozen
+corpus. GRID brace construction now supplies an aligned fallback middle with
+the bar filament built for that peak earlier, exactly as Java retains the
+filament on `StaffPeak`. HEADS reconstructs a `BarConnectorInter` from its
+connection peaks rather than requiring both endpoint `BarlineInter`s, preserving
+Java's deliberately retained partial connection.
+
+The terminal STEMS report now distinguishes remembered reusable candidates
+from live bound StemInters. Unattached candidates remain available to the
+recognizer but are excluded from accepted stem arrays and counts; additive
+summary fields publish remembered and unbound totals. All five GGR pages finish
+STEMS with empty stderr, including page 4's two and page 5's one unattached
+candidate.
+
+## Boundary 279: contextual weak purge with owned freeze state
+
+`contextualize_and_purge_native_weaks` now performs Java's fresh SIG
+contextualization, snapshots all live vertices below the 0.5 contextual floor
+in insertion order, exempts frozen identities and all ledgers, and removes the
+snapshot extensively. `NativeSigVertex` now carries the freeze bit: GRID nodes
+copy measured `GridSigNode.frozen`, all selected header inters/members are
+frozen, and later recognition products are not. The Chula assembled-SIG gate
+checks those stage ranges. The extensive remover is complete for the native
+ensemble topology: a dying sole-member group follows its member, and removal
+of a group removes members that have no other active group while preserving
+shared members.
+
+The focused native REDUCTION suite passes 7/7; scoped rustfmt and strict
+`audiveris-omr` library Clippy pass. The next composition requirement is exact
+glyph/area-backed overlap confirmation before wiring the ordered foundation
+epoch around the weak purges and consistency checks.
+
+## Boundary 280: exact overlap scheduling with delegated precise geometry
+
+`detect_native_reduction_overlaps` now owns Java's `SigReducer.detectOverlaps`
+scheduler over the live terminal SIG: header/disabled filtering, stable left-x
+ordering, beam-family compatibility, mirror suppression, exact Java Rectangle
+IOU with the inclusive 0.05 gate, early right-edge termination, standard-head
+versus stem acceptance, support suppression, duplicate exclusion reuse, and
+lower-ID-to-higher-ID insertion. It records every visited pair and new edge in
+deterministic graph order.
+
+The scheduler does not substitute rectangles for Java's precise overlap test.
+An explicit geometry collaborator supplies mirror membership and the mutual
+`left.overlaps(right) && right.overlaps(left)` result; a later adapter will
+resolve glyph run tables, areas, ensembles, and head staff/pitch evidence from
+the recognition products already retained by `NativeStemsRecognition`.
+Focused REDUCTION coverage passes 11/11, the full library passes 715 tests with
+two ignored, scoped formatting is clean, and strict all-target/all-feature
+`audiveris-omr` Clippy passes. The next slice is the production precise-geometry
+adapter, followed by Java-order composition with the exclusion solver and
+foundation epochs.
+
+## Boundary 281: graph-exact orphan head and stem branches
+
+Two more bounded foundation primitives now operate on the live SIG in vertex
+order. `prune_native_foundation_heads_without_stems` ports the `headHasStem`
+failure branch of `checkHeads()`, and
+`prune_native_foundation_stems_without_heads` ports the empty-head branch of
+`checkStems()`. Only a live `HeadStemRelation` qualifies; inactive tombstones
+and unrelated edges do not. Removal uses the same extensive ensemble semantics
+and stable identities as the other REDUCTION primitives.
+
+The names intentionally do not claim the complete Java checks: head-side,
+stem-direction, stem-portion, and invading-link geometry remain. Focused
+REDUCTION coverage passes 13/13, the full library passes 717 tests with two
+ignored, scoped formatting is clean, and strict all-target/all-feature
+`audiveris-omr` Clippy passes. Next remains precise overlap geometry and the
+geometry-bearing head/stem consistency branches.
+
+## Boundary 282: exact wrong-side stem-ending link pruning
+
+`prune_native_foundation_stem_ending_heads` now ports Java
+`checkStemEndingHeads()` and `pruneStemHeads()`. For every live stem in SIG
+order it starts from the terminal median, extends that line with every live
+HeadStem/BeamStem extension point, scans HeadStem relations in insertion order,
+classifies TOP/MIDDLE/BOTTOM with Java's 0.275 head-height margin, removes a
+wrong-side ending link, and restarts with freshly recomputed geometry. An
+invading removed relation (`dx <= 0.05`, `dy <= 0`) inserts the normalized
+overlap exclusion unless an exclusion or support already exists.
+
+The median authority is explicit and missing live-stem geometry fails closed.
+Focused REDUCTION coverage passes 16/16. The concurrently expanded library now
+passes 720 tests with two ignored; scoped formatting and strict
+all-target/all-feature `audiveris-omr` Clippy pass. Percussion heads are not yet
+present in the native HEADS kind set; their Java exemption must be added when
+that shape family enters the SIG.

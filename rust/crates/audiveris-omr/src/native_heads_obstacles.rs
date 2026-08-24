@@ -11,12 +11,10 @@ use std::{error::Error, fmt};
 
 use audiveris_image::{
     bar_alignment::VerticalSide,
-    bars_logic::{
-        ConnectorInterKind, PeakWidthClass, VerticalInterKind, VerticalInterPlan, VerticalMedian,
-    },
+    bars_logic::{ConnectorInterKind, PeakWidthClass, VerticalInterKind},
     beam_structure::Segment,
     grid_sig::{GridInterId, GridSigNode},
-    staff_peak::StaffPeakKey,
+    staff_peak::{StaffPeak, StaffPeakKey},
 };
 
 use crate::{
@@ -165,13 +163,14 @@ pub fn materialize_native_heads_bar_obstacles(
         .sig
         .systems
         .iter()
-        .map(materialize_system)
+        .map(|system| materialize_system(system, grid.scale.scale.line.main))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(NativeHeadsBarObstaclePool { systems })
 }
 
 fn materialize_system(
     system: &HeadlessSystemSigState,
+    foreground_thickness: i32,
 ) -> Result<NativeHeadsBarObstacleSystem, NativeHeadsBarObstacleError> {
     let mut candidates = Vec::new();
     for (inter_id, node) in system.sig.nodes_in_order() {
@@ -203,11 +202,15 @@ fn materialize_system(
                 let ConnectorInterKind::Barline(width_class) = plan.kind else {
                     continue;
                 };
-                let top = connector_endpoint_plan(system, inter_id, VerticalSide::Top, plan.top)?;
+                // Java constructs BarConnectorInter geometry from the
+                // BarConnection's two StaffPeaks before it checks whether both
+                // peaks own published BarlineInters. A brace replacement can
+                // therefore leave a valid orphan connector in the SIG; HEADS
+                // must still use that connector's own geometry.
+                let top = connector_endpoint_peak(system, inter_id, VerticalSide::Top, plan.top)?;
                 let bottom =
-                    connector_endpoint_plan(system, inter_id, VerticalSide::Bottom, plan.bottom)?;
-                let (median, thickness) =
-                    connector_geometry(top.median, top.width, bottom.median, bottom.width);
+                    connector_endpoint_peak(system, inter_id, VerticalSide::Bottom, plan.bottom)?;
+                let (median, thickness) = connector_geometry(top, bottom, foreground_thickness);
                 obstacle(
                     ObstacleIdentity {
                         inter_id,
@@ -242,17 +245,19 @@ fn materialize_system(
 }
 
 fn connector_geometry(
-    top: VerticalMedian,
-    top_width: f64,
-    bottom: VerticalMedian,
-    bottom_width: f64,
+    top: &StaffPeak,
+    bottom: &StaffPeak,
+    foreground_thickness: i32,
 ) -> (Segment, f64) {
+    let top_width = f64::from(top.width());
+    let bottom_width = f64::from(bottom.width());
+    let half_line = f64::from(foreground_thickness) / 2.0;
     (
         Segment {
-            x1: top.x,
-            y1: top.bottom,
-            x2: bottom.x,
-            y2: bottom.top,
+            x1: f64::from(top.start()) + (top_width / 2.0),
+            y1: f64::from(top.bottom()) + half_line + 0.5,
+            x2: f64::from(bottom.start()) + (bottom_width / 2.0),
+            y2: f64::from(bottom.top()) - half_line + 0.5,
         },
         (top_width + bottom_width) / 2.0,
     )
@@ -287,37 +292,23 @@ fn obstacle(
     }
 }
 
-fn connector_endpoint_plan(
+fn connector_endpoint_peak(
     system: &HeadlessSystemSigState,
     connector: GridInterId,
     side: VerticalSide,
     endpoint: StaffPeakKey,
-) -> Result<&VerticalInterPlan, NativeHeadsBarObstacleError> {
-    let Some(endpoint_inter) = system.sig.inter_of(endpoint) else {
-        return Err(NativeHeadsBarObstacleError::MissingConnectorEndpoint {
+) -> Result<&StaffPeak, NativeHeadsBarObstacleError> {
+    system
+        .staff_peaks
+        .iter()
+        .flatten()
+        .find(|peak| peak.key() == endpoint)
+        .ok_or(NativeHeadsBarObstacleError::MissingConnectorEndpoint {
             system_id: system.system_id,
             connector_inter_id: connector.value(),
             side,
             endpoint,
-        });
-    };
-    let Some(GridSigNode::Vertical { plan, .. }) = system.sig.node(endpoint_inter) else {
-        return Err(NativeHeadsBarObstacleError::MissingConnectorEndpoint {
-            system_id: system.system_id,
-            connector_inter_id: connector.value(),
-            side,
-            endpoint,
-        });
-    };
-    if !matches!(plan.kind, VerticalInterKind::Barline { .. }) {
-        return Err(NativeHeadsBarObstacleError::NonBarlineConnectorEndpoint {
-            system_id: system.system_id,
-            connector_inter_id: connector.value(),
-            side,
-            endpoint,
-        });
-    }
-    Ok(plan)
+        })
 }
 
 const fn barline_shape(width: PeakWidthClass) -> NativeHeadsBarShape {
@@ -339,18 +330,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connector_uses_endpoint_barline_geometry_and_average_width() {
-        let top = VerticalMedian {
-            x: 201.5,
-            top: 349.0,
-            bottom: 438.0,
-        };
-        let bottom = VerticalMedian {
-            x: 200.5,
-            top: 591.0,
-            bottom: 679.0,
-        };
-        let (median, thickness) = connector_geometry(top, 3.0, bottom, 3.0);
+    fn connector_uses_connection_peak_geometry_even_without_endpoint_inters() {
+        let top = StaffPeak::new(
+            audiveris_image::bar_column::StaffId::new(1),
+            349,
+            437,
+            200,
+            202,
+        )
+        .expect("top peak");
+        let bottom = StaffPeak::new(
+            audiveris_image::bar_column::StaffId::new(2),
+            591,
+            679,
+            199,
+            201,
+        )
+        .expect("bottom peak");
+        let (median, thickness) = connector_geometry(&top, &bottom, 1);
         let area = VerticalRibbonArea::new(median, thickness);
         assert_eq!(
             median,

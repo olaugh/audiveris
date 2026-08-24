@@ -57,13 +57,18 @@ use crate::native_heads_staff_epilog::{
     NativeHeadsStaffEpilogSystem,
 };
 use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
-use crate::native_sig::{NativeSigInterKind, NativeSigRelationKind};
+use crate::native_sig::{
+    NativeSigInterKind, NativeSigRelationKind, NativeSigVertex, NativeSigVertexId,
+};
 use crate::native_stem_seeds::{
     NativeStemSeedDecision, NativeStemSeedGate, NativeStemSeedGlyph, NativeStemSeedRecognition,
 };
 use crate::native_stems::{NativeStemsHeadPhase1DriveEvent, NativeStemsRecognition};
+use crate::native_stems_beam_sides::NativeStemsHeadPhase1Carrier;
 use crate::native_stems_beam_vlink_head_links::NativeStemsBeamHeadLinkHeadRef;
-use crate::native_stems_beam_vlink_transaction::NativeStemsBeamStemGrade;
+use crate::native_stems_beam_vlink_transaction::{
+    NativeStemsBeamKnownSystemStem, NativeStemsBeamStemGrade,
+};
 use crate::raw_ledger_filter::MaterializedLedgerInter;
 use crate::recognize::{GridLinesRecognition, NativeBeamRecognition, ScaleRecognition};
 use crate::staff_header::{HeaderBounds, StaffHeaderRange};
@@ -1529,8 +1534,35 @@ fn heads_product(json: &mut Json, heads: &NativeHeadsEpilogRecognition) {
 /// Final native STEMS product. Native identities are named explicitly and
 /// scoped by `system`; they are not inserted into the cross-producer `inters`
 /// collection and therefore cannot be mistaken for Java `InterIndex` IDs.
+fn live_stem_inters(
+    carrier: &NativeStemsHeadPhase1Carrier,
+) -> impl Iterator<
+    Item = (
+        &NativeStemsBeamKnownSystemStem,
+        NativeSigVertexId,
+        &NativeSigVertex,
+    ),
+> {
+    let sig = &carrier.beam_state.sig;
+    let bindings = &carrier.beam_state.bindings;
+    carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .filter_map(move |stem| {
+            let vertex_id = bindings.stem_vertices.get(&stem.stem_identity).copied()?;
+            let vertex = sig
+                .vertex(vertex_id.0)
+                .filter(|vertex| vertex.kind == NativeSigInterKind::Stem)?;
+            Some((stem, vertex_id, vertex))
+        })
+}
+
 fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
-    let stem_count = stems
+    let remembered_stem_candidate_count = stems
         .systems
         .iter()
         .map(|system| {
@@ -1544,6 +1576,11 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
                 .known_stems
                 .len()
         })
+        .sum::<usize>();
+    let stem_count = stems
+        .systems
+        .iter()
+        .map(|system| live_stem_inters(&system.transaction.state_after).count())
         .sum::<usize>();
     let head_stem_relation_count = stems
         .systems
@@ -1566,6 +1603,14 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
     json.open('{');
     json.field_integer("system_count", stems.systems.len() as i64);
     json.field_integer("stem_count", stem_count as i64);
+    json.field_integer(
+        "remembered_stem_candidate_count",
+        remembered_stem_candidate_count as i64,
+    );
+    json.field_integer(
+        "unbound_stem_candidate_count",
+        remembered_stem_candidate_count.saturating_sub(stem_count) as i64,
+    );
     json.field_integer(
         "checked_head_count",
         stems
@@ -1634,12 +1679,14 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
         let carrier = &transaction.state_after;
         let sig = &carrier.beam_state.sig;
         let bindings = &carrier.beam_state.bindings;
-        let known_stems = &carrier
+        let remembered_stem_candidate_count = carrier
             .beam_state
             .latest_base_apply
             .transaction_state
             .system_stems
-            .known_stems;
+            .known_stems
+            .len();
+        let live_stems = live_stem_inters(carrier).collect::<Vec<_>>();
         let (continuation_count, linked_count, unlinked_count) =
             system.phase_one_events.iter().fold(
                 (0_usize, 0_usize, 0_usize),
@@ -1672,7 +1719,15 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
         json.field_integer("linked_event_count", linked_count as i64);
         json.field_integer("unlinked_event_count", unlinked_count as i64);
         json.field_integer("phase_two_retry_count", system.retries.len() as i64);
-        json.field_integer("stem_count", known_stems.len() as i64);
+        json.field_integer("stem_count", live_stems.len() as i64);
+        json.field_integer(
+            "remembered_stem_candidate_count",
+            remembered_stem_candidate_count as i64,
+        );
+        json.field_integer(
+            "unbound_stem_candidate_count",
+            remembered_stem_candidate_count.saturating_sub(live_stems.len()) as i64,
+        );
         json.field_integer(
             "head_stem_relation_count",
             sig.edges
@@ -1733,15 +1788,7 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
 
         json.key("stem_inters");
         json.open('[');
-        for stem in known_stems {
-            let vertex_id = bindings
-                .stem_vertices
-                .get(&stem.stem_identity)
-                .expect("final STEMS stem identity must resolve to the terminal SIG");
-            let vertex = sig
-                .vertex(vertex_id.0)
-                .filter(|vertex| vertex.kind == NativeSigInterKind::Stem)
-                .expect("final STEMS binding must resolve to a live Stem vertex");
+        for (stem, vertex_id, vertex) in live_stems {
             json.open('{');
             json.field_integer("identity", stem.stem_identity as i64);
             json.field_integer("sig_ordinal", vertex_id.0 as i64);

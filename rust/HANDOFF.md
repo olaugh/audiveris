@@ -11590,3 +11590,80 @@ Do not compose these checks back-to-back yet without the intervening
 boundary is either native weak-inter purge (which needs frozen-inter ownership)
 or the glyph/area-backed overlap confirmation input; rectangle-only overlap
 would not be parity-correct for heads and glyph-backed inters.
+
+## Boundary 278: Graceful Ghost GRID/STEMS robustness
+
+All five scaled Graceful Ghost Rag pages now complete Rust-only STEMS. Page 3
+exposed two Java-compatible GRID edge cases. An aligned first bar peak promoted
+to `BRACE_MIDDLE` now retains the earlier `buildBarSticks` filament members,
+matching Java's `StaffPeak.getFilament()` ownership. HEADS connector obstacles
+now read the `BarConnection` peak geometry directly, as Java's
+`BarConnectorInter` constructor does, so a connector remains usable when brace
+classification leaves one endpoint without a published `BarlineInter`.
+
+Pages 4 and 5 exposed 2 and 1 remembered, unattached stem candidates. These are
+valid Java `systemStems` reuse entries, not accepted StemInters. Schema-1 now
+publishes only live bound stems in `stem_count`/`stem_inters` and separately
+reports remembered and unbound candidate counts instead of panicking during
+serialization. Final `(live stems, HeadStem, BeamHead)` counts for pages 1-5
+are `(342,1751,1033)`, `(370,1693,1083)`, `(357,1601,1023)`,
+`(350,1601,1038)`, and `(275,1331,948)`; every diagnostic log is empty.
+
+## Boundary 279: contextual weak purge and freeze ownership
+
+Native REDUCTION now carries the real Java `Inter.isFrozen()` authority from
+GRID and selected staff headers into `NativeSigVertex`. The exact
+`contextualizeAndPurge()` primitive refreshes contextual grades, snapshots live
+sub-0.5 vertices in insertion order, exempts frozen identities and ledgers,
+and removes the snapshot extensively. Sole-member groups die with a removed
+member; removing a group also removes members without another active group,
+while shared members survive. Focused REDUCTION coverage passes 7/7 and the
+Chula assembled-SIG gate verifies the frozen stage ranges.
+
+## Boundary 280: Java-order overlap discovery scheduler
+
+`detect_native_reduction_overlaps` ports the exact deterministic scheduling
+around Java's geometry dispatch: filter header, BeamGroup, and Ledger vertices;
+stable-sort by left x; accept beam-family pairs and mirrors; apply Java's
+Rectangle IOU at the inclusive 0.05 threshold and its early right-edge break;
+then enforce the standard-head/stem exception, support suppression, duplicate
+reuse, and lower-ID-to-higher-ID exclusion insertion.
+
+Do not replace the remaining precise test with rectangle overlap. Java requires
+mutual `Inter.overlaps` and can inspect glyph run intersections, areas,
+ensembles, and head staff/pitch geometry. The scheduler therefore takes an
+explicit geometry collaborator; the immediate next boundary is its concrete
+adapter over recognition-owned products. After that, compose overlap discovery,
+existing-exclusion reduction, weak purges, and the foundation checks in Java
+epoch order. Focused coverage is 11/11; the full library is 715 passed and two
+ignored; scoped formatting and strict all-target/all-feature library Clippy are
+clean.
+
+## Boundary 281: bounded orphan head/stem pruning
+
+The graph-only removal branches of Java `checkHeads()` and `checkStems()` are
+now production primitives. In SIG insertion order, a head with no live
+HeadStem edge is removed; independently, a stem with no live HeadStem edge is
+removed. Inactive relation tombstones and exclusions do not count as ownership,
+and removal retains extensive ensemble cleanup and stable ordinals.
+
+Do not compose these as if the two Java checks were complete. Head-side,
+stem-direction, stem-portion, invading-link exclusion, and repeated geometry
+recomputation remain separate work. The REDUCTION gate is 13/13; the full
+library is 717 passed and two ignored; scoped formatting and strict library
+Clippy pass.
+
+## Boundary 282: complete `checkStemEndingHeads` geometry loop
+
+Native REDUCTION now owns Java's remove/recompute/restart stem-ending pass. A
+caller supplies the terminal median for every live StemInter; the primitive
+extends it with live HeadStem and BeamStem connection points, applies the
+0.275-head-height TOP/MIDDLE/BOTTOM test, removes LEFT-at-bottom or RIGHT-at-top
+links, and begins the relation scan again. Invading removed links (`dx <= 0.05`
+and `dy <= 0`) create the usual normalized overlap exclusion unless duplicate
+or support suppression applies. Missing stem medians are typed failures rather
+than guessed geometry.
+
+Focused coverage is 16/16; the full library is 720 passed and two ignored;
+scoped formatting and strict library Clippy are clean. Add the percussion-head
+exemption when percussion shapes enter the native HEADS/SIG domain.

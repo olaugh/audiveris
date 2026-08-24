@@ -207,8 +207,9 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The current STEMS checkpoint is Boundary 275. All eight frozen parity pages,
-D039, and both extracted Dichterliebe PDF pages complete Rust-only schema-1 STEMS publication;
+The current STEMS checkpoint is Boundary 278. All eight frozen parity pages,
+D039, both extracted Dichterliebe PDF pages, and all five scaled Graceful Ghost
+Rag pages complete Rust-only schema-1 STEMS publication;
 the generic driver now owns the rejected SIDES, head retry/no-link, expanded
 C-link, stable JDK25 ordering, phase-two append/no-link, and `finalizeStems`
 paths exercised by those pages. The sheet epilog now also performs Java's
@@ -1031,7 +1032,7 @@ is present but the musical interpretation is not.
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
 | 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, Carmen, Cucaracha, and Hove** | Two hundred and fifty-seven exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; Boundary 207 carries pre-rest beam groups into Bach's post-rest native SIG; Boundary 208 retries rather-good unlinked heads through Java profiles 0-3; Boundary 209 reuses a concrete multi-beam stump without duplicate edges; Boundaries 210-212 reconcile three structurally authenticated prelinked stems; Boundary 213 closes the following no-link head; Boundary 214 reuses another multi-beam stem; Boundary 215 adds a second head relation with exact line rounding; Boundary 216 reconciles one existing stem; Boundary 217 authenticates the zero-change case; Boundary 218 reconciles another existing stem; Boundary 219 authenticates the right-side zero-change case; Boundary 220 authenticates a four-head zero-change case; Boundary 221 authenticates the following three-head zero-change case; Boundary 222 authenticates a rejected active-glyph C-link without mutation; Boundary 223 reuses an existing multi-beam stem after a trailing glyph forces Java's final relation recheck; Boundary 224 rejects the next LEFT C-link before the RIGHT shared-stump undef return; Boundaries 225-226 reconcile two prelinked three-head stems idempotently; Boundary 227 reconciles a right-side four-head stem with two real and four idempotent closure writes; Boundary 228 adds one exact LEFT/TOP HeadStem edge to an existing three-head stem; and Boundary 229 authenticates the following idempotent right-side three-head reconciliation; Boundary 230 closes a two-head existing stem with two value changes; Boundary 231 reconciles the following mixed-side four-head stem with two value changes; Boundary 232 adds the next exact RIGHT/BOTTOM edge to an existing five-head stem; Boundary 233 records the following zero-mutation RIGHT dual-corner undefined return; Boundary 234 reconciles the following right-side four-head stem with two value changes; Boundary 235 closes the following right-side two-head stem with two value changes; Boundary 236 closes the following identity-free no-link head and queues it for phase two; Boundary 237 authenticates the following mixed-side four-head zero-change reconciliation; Boundary 238 authenticates the following left-side four-head zero-change reconciliation; Boundary 239 authenticates the following mixed-side five-head zero-change reconciliation; Boundary 240 closes the following mixed-side five-head stem with two value changes; Boundary 241 adds the terminal RIGHT/BOTTOM edge to an existing stem and exhausts system 2 phase one; Boundary 242 executes the first phase-two retry without mutation; Boundary 243 rejects the next bottom append expansion before mutation; Boundary 244 preserves the next shared-stump undefined side without mutation; Boundary 245 performs the next prelinked idempotent closure; Boundary 246 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 247 rejects the following LEFT/TOP append expansion before mutation; Boundary 248 rejects the next LEFT/TOP append expansion before mutation; Boundary 249 executes the following no-link/no-mutation retry; Boundary 250 adds the first phase-two RIGHT/BOTTOM HeadStem edge by reusing an existing stem; Boundary 251 adds the following RIGHT/BOTTOM edge through a second carried stem; Boundary 252 executes the next no-link/no-mutation retry; Boundary 253 rejects the following LEFT/TOP append expansion before mutation; Boundary 254 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 255 executes the final no-link retry without mutation; Boundary 256 exhausts Bach system-2 phase-two without mutation; Boundary 257 accepts the exhausted carrier through generic native `finalizeStems` with 215 checked heads, one multiple-stem head, 12 no-stem/abnormal heads, and one removed HeadStem relation. | Continue with generic finalizeStems and transactional page publication after the exhausted Bach phase-two queue. |
-| 11 | `REDUCTION` | **In progress** | Dependency-light lifecycle/contracts plus production semantics over terminal STEMS SIGs: exact existing-exclusion reduction, hook side-stem validation, and standard-beam two-side-stem validation, all with Java's extensive dying-ensemble cleanup and stable tombstones. | Overlap discovery; remaining foundation consistency epochs for heads, stems, ledgers, and chords; weak contextual purge integration; endpoint refinement; beam-group checks; stage publication and corpus parity. |
+| 11 | `REDUCTION` | **In progress** | Dependency-light lifecycle/contracts plus production semantics over terminal STEMS SIGs: Java-order overlap scheduling with delegated precise geometry, exact existing-exclusion reduction, contextual weak-inter purge using carried GRID/HEADERS freeze ownership and ledger exemption, hook side-stem validation, and standard-beam two-side-stem validation, all with extensive ensemble/member cleanup and stable tombstones. | Concrete glyph/area/head overlap resolution; remaining foundation consistency epochs for heads, stems, ledgers, and chords; endpoint refinement; beam-group checks; stage publication and corpus parity. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
 | 14 | `MEASURES` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Measure construction and consistency logic. |
@@ -1054,7 +1055,7 @@ is present but the musical interpretation is not.
 | Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 header outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. Bravura's font-derived F-clef area pitch offset is production-wired, and target pitch samples curved staff lines at each clef's centroid x. Bravura black-notehead widths at arbitrary point sizes and Java's head-width-to-point-size secant are exact and production-wired through every graded staff. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. The ART lookup-table math reproduces the measured OpenJDK/HotSpot paths: all 12 frozen key-alter vectors match Java at all 110 inputs, including all 99 ART moments. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
-| CLI, JSON, and live comparison | **JSON published through `STEMS`; completed-stage viewer live** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS -> STEMS in native Java order for applicable JSON targets; GRID keeps its text report. Ordinary `-json` remains schema-1 JSONL. `-stream-json` wraps byte-identical completed-stage payloads in flushed markers without intra-stage streaming. STEMS retains all upstream products and adds terminal native Stem geometry/grades, HeadStem payloads, abnormal/no-stem sets, and undefined sides using explicit system-local identities rather than fabricated Java IDs. |
+| CLI, JSON, and live comparison | **JSON published through `STEMS`; completed-stage viewer live** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS -> STEMS in native Java order for applicable JSON targets; GRID keeps its text report. Ordinary `-json` remains schema-1 JSONL. `-stream-json` wraps byte-identical completed-stage payloads in flushed markers without intra-stage streaming. STEMS retains all upstream products and adds terminal native Stem geometry/grades, HeadStem payloads, abnormal/no-stem sets, and undefined sides using explicit system-local identities rather than fabricated Java IDs. Remembered reusable candidates are counted separately from live bound StemInters. |
 | Manual Java score preview | **Inspection only; not a parity gate** | A separate Score tab explicitly runs one selected Java sheet through PAGE, validates its single local MusicXML/MXL artifact, and renders it with locally installed Verovio to SVG. Sheets requiring sibling multi-page artifacts are rejected rather than guessed. It is not part of recognition streaming, which now stops at STEMS, and it makes no Java/Rust visual or semantic comparison claim. Future Rust MusicXML will use the same renderer path. |
 | MusicXML output | **Rust not ported end to end** | The manual Java preview does not imply Rust PAGE, score assembly, or MusicXML export. The differential export suite remains queued behind semantic page completion. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |
@@ -6703,3 +6704,76 @@ with two ignored tests, and strict all-target/all-feature workspace Clippy,
 formatting, and diff checks remain clean. These are exact standalone
 consistency primitives; Java-order weak contextual purge between them is still
 pending, along with overlap discovery and the remaining foundation checks.
+
+## Boundary 278: Graceful Ghost robustness pass
+
+All five scaled Graceful Ghost Rag pages now complete through STEMS. The wider
+scan fixed two Java-compatible GRID/HEADS seams: an aligned bar peak promoted
+to a brace middle keeps its original bar-filament members, and a retained
+partial bar connector derives geometry from its connection peaks without
+requiring two published endpoint barlines. STEMS reporting also separates live
+StemInters from remembered unattached reuse candidates, avoiding terminal
+serialization failure while preserving those candidates as recognition state.
+
+## Boundary 279: contextual weak purge, freeze ownership, and full ensemble cascade
+
+The native graph now retains Java's `Inter.isFrozen()` state. GRID verticals
+and connectors copy their measured `GridSigNode.frozen` bit; selected staff
+header clefs, keys, key members, and times are frozen by construction; later
+BEAMS/LEDGERS/HEADS/STEMS vertices are not. A Chula assembly gate checks those
+ordinal ranges against the owned stage products.
+
+With that authority, `contextualizeAndPurge()` refreshes all live contextual
+grades, snapshots sub-0.5 vertices in SIG order, skips frozen vertices and
+every ledger exactly as Java does, and removes the snapshot extensively.
+Extensive removal handles both directions: deleting a sole member removes its
+dying ensemble, while deleting an ensemble removes members which belong to no
+other ensemble. Shared members survive. Focused REDUCTION coverage passes 7/7,
+including frozen/ledger exemptions and ensemble-to-member cascade.
+
+## Boundary 280: exact overlap scheduling with delegated precise geometry
+
+Native REDUCTION now owns the deterministic portion of
+`SigReducer.detectOverlaps`: header and disabled-class filtering, stable left-x
+ordering, accepted beam-family pairs, mirror suppression, Java Rectangle IOU
+at the inclusive 0.05 threshold, early right-edge termination, the standard
+head/stem exception, bidirectional support suppression, existing exclusion
+reuse, and normalized exclusion insertion.
+
+The glyph/area decision remains explicit rather than approximated. A geometry
+collaborator answers mirror membership and Java's mutual precise overlap test,
+allowing the next production adapter to use retained glyph run tables, areas,
+ensembles, and head staff/pitch evidence. Eleven focused REDUCTION tests and
+all 715 active library tests pass; two remain ignored. Scoped formatting and
+strict all-target/all-feature `audiveris-omr` Clippy are clean. Next is the
+concrete precise-geometry adapter, then Java-order overlap/exclusion/foundation
+epoch composition.
+
+## Boundary 281: orphan head and stem graph branches
+
+Native REDUCTION now ports two exact graph-only branches from the foundation
+epoch. Heads without any live `HeadStemRelation` are removed in SIG order, as
+are stems whose head set is empty; inactive relation tombstones and unrelated
+relations do not preserve either vertex. Extensive ensemble cleanup and stable
+graph identities remain shared with the other REDUCTION mutations.
+
+These are deliberately sub-primitives of `checkHeads()` and `checkStems()`.
+The head-side, direction, stem-portion, and invading-link geometry is still
+open. Focused coverage is 13/13 and the full library is 717 passed with two
+ignored; scoped formatting and strict all-target/all-feature library Clippy
+pass.
+
+## Boundary 282: stem-ending side geometry
+
+The first complete geometry-bearing foundation check is now native.
+`checkStemEndingHeads()` recomputes each stem's extended line from its terminal
+median and all live connection extension points, applies Java's exact
+TOP/MIDDLE/BOTTOM margin test, removes wrong-side ending HeadStem links in
+relation order, and restarts after each removal. Invading links create a
+normalized overlap exclusion with the normal duplicate/support suppression.
+Missing median evidence fails closed.
+
+Focused REDUCTION coverage is 16/16; the full library is 720 passed with two
+ignored, and scoped formatting plus strict all-target/all-feature library
+Clippy pass. The native HEADS set currently contains only oval pitched heads;
+the percussion exemption remains explicit future shape-family work.
