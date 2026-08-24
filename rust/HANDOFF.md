@@ -11399,3 +11399,16 @@ CLI stream/publication suite, formatting, strict all-target/all-feature
 workspace Clippy, and diff checks pass. Next work is broader out-of-corpus
 scanning and removal of remaining authenticated legacy dispatch wrappers only
 after their generic replacements remain exact.
+
+## Boundary 270: two more real pages complete generic STEMS
+
+Both PNG pages extracted from `Dichterliebe01.pdf` now run through the complete
+Rust-only pipeline and emit one schema-1 STEMS document each without a new
+page-specific dispatch. Page 1 publishes 3 systems, 177 stems, 449 checked
+heads, 413 HeadStem relations, and 66 abnormal heads. Page 2 publishes 4
+systems, 227 stems, 590 checked heads, 544 HeadStem relations, and 81 abnormal
+heads. The exact completion census now covers eleven real pages. The original
+PDF files currently stop earlier in the independent PDF reader on unsupported
+content-stream operators (`G` and `CS`), and the rotated Schubert test image
+stops during SCALE with `NoRegularlySpacedLines`; neither is a STEMS failure.
+The expanded 11-page CLI regression passes in 115.99s.
