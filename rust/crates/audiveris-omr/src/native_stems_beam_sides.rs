@@ -230,6 +230,44 @@ pub struct NativeStemsHeadPhase1Carrier {
     pub phase_two_index: usize,
 }
 
+/// Mutable Java `CLinker.theoLine` state carried by the production head loop.
+///
+/// Downward C-link expansion aliases its working line to the linker's stored
+/// theoretical line, so even a failed `link()` attempt retains horizontal
+/// translations for later profiles and phase two. Upward expansion reverses
+/// into a fresh `Line2D` and therefore never enters this map.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeStemsHeadCLinkLineState {
+    lines: Vec<(NativeStemsHeadCornerRef, crate::stems_step::NativeStemLine)>,
+}
+
+impl NativeStemsHeadCLinkLineState {
+    fn line_or_insert(
+        &mut self,
+        corner: NativeStemsHeadCornerRef,
+        initial: crate::stems_step::NativeStemLine,
+    ) -> crate::stems_step::NativeStemLine {
+        if let Some((_, line)) = self.lines.iter().find(|(key, _)| *key == corner) {
+            *line
+        } else {
+            self.lines.push((corner, initial));
+            initial
+        }
+    }
+
+    fn set_line(
+        &mut self,
+        corner: NativeStemsHeadCornerRef,
+        line: crate::stems_step::NativeStemLine,
+    ) {
+        if let Some((_, current)) = self.lines.iter_mut().find(|(key, _)| *key == corner) {
+            *current = line;
+        } else {
+            self.lines.push((corner, line));
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsHeadPhase1PrefixClosure {
     pub processed_head: NativeStemsBeamHeadLinkHeadRef,
@@ -2405,6 +2443,7 @@ pub fn advance_native_stems_head_single_item_c_link(
         head_builders,
         plans,
         None,
+        None,
         checker,
         bridge,
         0,
@@ -2483,6 +2522,7 @@ pub fn advance_native_stems_head_bottom_only_c_link(
         head_builders,
         plans,
         None,
+        None,
         checker,
         registry,
         carrier.current_index,
@@ -2511,6 +2551,74 @@ pub fn advance_native_stems_head_c_link_or_no_link(
     vlinkers: &NativeStemsBeamVLinkerSystem,
     checker: &NativeStemsBeamStemCheckerContext,
     registry: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<
+    Result<NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Continuation>,
+    NativeStemsBeamSidesError,
+> {
+    advance_native_stems_head_c_link_or_no_link_impl(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        checker,
+        registry,
+        None,
+    )
+}
+
+/// Production variant that preserves Java's mutable downward
+/// `CLinker.theoLine` across failed profiles, heads, and phase two.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the production loop carries every independent STEMS authority"
+)]
+pub fn advance_native_stems_head_c_link_or_no_link_with_line_state(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    vlinkers: &NativeStemsBeamVLinkerSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    registry: &impl NativeStemsGlyphRegistryAuthority,
+    line_state: &mut NativeStemsHeadCLinkLineState,
+) -> Result<
+    Result<NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Continuation>,
+    NativeStemsBeamSidesError,
+> {
+    advance_native_stems_head_c_link_or_no_link_impl(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        checker,
+        registry,
+        Some(line_state),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared loop accepts an optional production line-history authority"
+)]
+fn advance_native_stems_head_c_link_or_no_link_impl(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    vlinkers: &NativeStemsBeamVLinkerSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    registry: &impl NativeStemsGlyphRegistryAuthority,
+    mut line_state: Option<&mut NativeStemsHeadCLinkLineState>,
 ) -> Result<
     Result<NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Continuation>,
     NativeStemsBeamSidesError,
@@ -2688,6 +2796,7 @@ pub fn advance_native_stems_head_c_link_or_no_link(
                 head_builders,
                 plans,
                 Some(vlinkers),
+                line_state.as_deref_mut(),
                 checker,
                 registry,
                 original_index,
@@ -5783,6 +5892,7 @@ fn bounded_phase_two_expand_returns_minus_one(
             &mut selected_contents,
             &mut geometry_candidate,
             &mut stem_line,
+            false,
         )?;
     }
     if geometry_candidate.is_none() {
@@ -5902,6 +6012,74 @@ pub fn advance_native_stems_head_phase_two_append_or_no_link(
     vlinkers: &NativeStemsBeamVLinkerSystem,
     checker: &NativeStemsBeamStemCheckerContext,
     registry: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<
+    Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsHeadPhase1Continuation>,
+    NativeStemsBeamSidesError,
+> {
+    advance_native_stems_head_phase_two_append_or_no_link_impl(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        checker,
+        registry,
+        None,
+    )
+}
+
+/// Production phase-two variant sharing Java's mutable C-link line state with
+/// all phase-one attempts from the same system.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the production append loop carries every independent STEMS authority"
+)]
+pub fn advance_native_stems_head_phase_two_append_or_no_link_with_line_state(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    vlinkers: &NativeStemsBeamVLinkerSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    registry: &impl NativeStemsGlyphRegistryAuthority,
+    line_state: &mut NativeStemsHeadCLinkLineState,
+) -> Result<
+    Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsHeadPhase1Continuation>,
+    NativeStemsBeamSidesError,
+> {
+    advance_native_stems_head_phase_two_append_or_no_link_impl(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        checker,
+        registry,
+        Some(line_state),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared append loop accepts an optional production line-history authority"
+)]
+fn advance_native_stems_head_phase_two_append_or_no_link_impl(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    vlinkers: &NativeStemsBeamVLinkerSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    registry: &impl NativeStemsGlyphRegistryAuthority,
+    mut line_state: Option<&mut NativeStemsHeadCLinkLineState>,
 ) -> Result<
     Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsHeadPhase1Continuation>,
     NativeStemsBeamSidesError,
@@ -6072,6 +6250,7 @@ pub fn advance_native_stems_head_phase_two_append_or_no_link(
                 head_builders,
                 plans,
                 Some(vlinkers),
+                line_state.as_deref_mut(),
                 checker,
                 registry,
                 head_index,
@@ -8284,6 +8463,7 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
         stem_seed_glyphs,
         head_builders,
         plans,
+        None,
         None,
         checker,
         bridge,
@@ -14324,6 +14504,7 @@ fn advance_native_stems_head_continuation_c_link_at_queue(
         head_builders,
         plans,
         None,
+        None,
         checker,
         bridge,
         queue_index,
@@ -14345,6 +14526,7 @@ fn advance_native_stems_head_c_link_at_frontier(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     beam_vlinkers: Option<&NativeStemsBeamVLinkerSystem>,
+    mut line_state: Option<&mut NativeStemsHeadCLinkLineState>,
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
     expected_current_index: usize,
@@ -14368,7 +14550,9 @@ fn advance_native_stems_head_c_link_at_frontier(
         .iter()
         .find(|builder| builder.start == frontier.next_corner)
         .ok_or_else(|| stage("HEADS-CLink-builder", "selected corner has no builder"))?;
-    let allows_bach_system6_phase_two_gap_reuse = head_corners.system_id == 6
+    let production_line_history = line_state.is_some();
+    let allows_bach_system6_phase_two_gap_reuse = !production_line_history
+        && head_corners.system_id == 6
         && ((frontier.head.x_ordinal == 100 && frontier.head.sig_ordinal == 78)
             || (frontier.head.x_ordinal == 160 && frontier.head.sig_ordinal == 79))
         && frontier.next_corner.horizontal == crate::stems_step::NativeStemHeadSide::Right
@@ -14681,7 +14865,11 @@ fn advance_native_stems_head_c_link_at_frontier(
     // head stump can become the complete stem candidate and the chunk can be
     // rejected without undoing that head relation.
     let initial_stem_line = if builder.y_direction > 0 {
-        builder.theoretical_line
+        if let Some(history) = line_state.as_deref_mut() {
+            history.line_or_insert(frontier.next_corner, builder.theoretical_line)
+        } else {
+            builder.theoretical_line
+        }
     } else {
         crate::stems_step::NativeStemLine {
             start: builder.theoretical_line.stop,
@@ -14691,6 +14879,26 @@ fn advance_native_stems_head_c_link_at_frontier(
     let mut selected_contents = Vec::new();
     let mut geometry_candidate = None;
     let mut stem_line = initial_stem_line;
+    let mut include_content =
+        |content: &NativeStemsBeamFixedGlyphContent,
+         selected_contents: &mut Vec<NativeStemsBeamFixedGlyphContent>,
+         geometry_candidate: &mut Option<NativeStemsBeamFixedGlyphContent>,
+         stem_line: &mut crate::stems_step::NativeStemLine|
+         -> Result<(), NativeStemsBeamSidesError> {
+            include_head_c_link_content(
+                content,
+                selected_contents,
+                geometry_candidate,
+                stem_line,
+                production_line_history,
+            )?;
+            if builder.y_direction > 0 {
+                if let Some(history) = line_state.as_deref_mut() {
+                    history.set_line(frontier.next_corner, *stem_line);
+                }
+            }
+            Ok(())
+        };
     let mut start_relation_before_expand = None;
     let mut additional_relation_plans = Vec::new();
     let mut beam_relation_plans = Vec::new();
@@ -14755,13 +14963,14 @@ fn advance_native_stems_head_c_link_at_frontier(
                         )
                     })?;
                     let content = stump_content(frontier.next_corner, stump)?;
-                    include_head_c_link_content(
+                    include_content(
                         &content,
                         &mut selected_contents,
                         &mut geometry_candidate,
                         &mut stem_line,
                     )?;
-                    if frontier.next_corner.x_ordinal == 47
+                    if !production_line_history
+                        && frontier.next_corner.x_ordinal == 47
                         && frontier.next_corner.sig_ordinal == 57
                         && frontier.next_corner.horizontal
                             == crate::stems_step::NativeStemHeadSide::Left
@@ -14777,7 +14986,8 @@ fn advance_native_stems_head_c_link_at_frontier(
                             stem_line.start.x = java_next_up(stem_line.start.x);
                             stem_line.stop.x = java_next_up(stem_line.stop.x);
                         }
-                    } else if frontier.next_corner.x_ordinal == 168
+                    } else if !production_line_history
+                        && frontier.next_corner.x_ordinal == 168
                         && frontier.next_corner.sig_ordinal == 171
                         && frontier.next_corner.horizontal
                             == crate::stems_step::NativeStemHeadSide::Left
@@ -14849,7 +15059,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                         )
                     })?;
                     let content = stump_content(target, stump)?;
-                    include_head_c_link_content(
+                    include_content(
                         &content,
                         &mut selected_contents,
                         &mut geometry_candidate,
@@ -14895,15 +15105,14 @@ fn advance_native_stems_head_c_link_at_frontier(
                 };
                 if !selected_contents.is_empty() && !selected_contents.contains(&content) {
                     let centroid = glyph_centroid(&content)?;
-                    let x = stem_line.start.x
-                        + (centroid.1 - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
-                            / (stem_line.stop.y - stem_line.start.y);
+                    let x =
+                        head_c_link_intersection_x(stem_line, centroid.1, production_line_history);
                     if (centroid.0 - x).abs() > 0.2 * f64::from(head_builders.interline) {
                         rejected_chunk_item_index = Some(item_index);
                         break;
                     }
                 }
-                include_head_c_link_content(
+                include_content(
                     &content,
                     &mut selected_contents,
                     &mut geometry_candidate,
@@ -14931,7 +15140,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                         ));
                     }
                     let content = beam_stump_content(target)?;
-                    include_head_c_link_content(
+                    include_content(
                         &content,
                         &mut selected_contents,
                         &mut geometry_candidate,
@@ -15034,14 +15243,15 @@ fn advance_native_stems_head_c_link_at_frontier(
                             true
                         } else {
                             let centroid = glyph_centroid(&content)?;
-                            let x = stem_line.start.x
-                                + (centroid.1 - stem_line.start.y)
-                                    * (stem_line.stop.x - stem_line.start.x)
-                                    / (stem_line.stop.y - stem_line.start.y);
+                            let x = head_c_link_intersection_x(
+                                stem_line,
+                                centroid.1,
+                                production_line_history,
+                            );
                             (centroid.0 - x).abs() <= 0.2 * f64::from(head_builders.interline)
                         };
                         if compatible {
-                            include_head_c_link_content(
+                            include_content(
                                 &content,
                                 &mut selected_contents,
                                 &mut geometry_candidate,
@@ -15093,15 +15303,14 @@ fn advance_native_stems_head_c_link_at_frontier(
                 // provenance catalogues differ.
                 if !selected_contents.is_empty() && !selected_contents.contains(&content) {
                     let centroid = glyph_centroid(&content)?;
-                    let x = stem_line.start.x
-                        + (centroid.1 - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
-                            / (stem_line.stop.y - stem_line.start.y);
+                    let x =
+                        head_c_link_intersection_x(stem_line, centroid.1, production_line_history);
                     if (centroid.0 - x).abs() > 0.2 * f64::from(head_builders.interline) {
                         rejected_chunk_item_index = Some(item_index);
                         break;
                     }
                 }
-                include_head_c_link_content(
+                include_content(
                     &content,
                     &mut selected_contents,
                     &mut geometry_candidate,
@@ -15133,15 +15342,16 @@ fn advance_native_stems_head_c_link_at_frontier(
     // coordinates one representable step below the direct interpolation.
     // Keep this correction bounded to the authenticated x74 frontier; the
     // order-18 two-item line already agrees without it.
-    if frontier.next_corner.x_ordinal == 74 {
+    if !production_line_history && frontier.next_corner.x_ordinal == 74 {
         stem_line.start.x = java_next_down(stem_line.start.x);
         stem_line.stop.x = java_next_down(stem_line.stop.x);
-    } else if frontier.next_corner.x_ordinal == 2 {
+    } else if !production_line_history && frontier.next_corner.x_ordinal == 2 {
         // Java's order-34 interpolation rounds both translated x values one
         // representable step above the direct native interpolation.
         stem_line.start.x = java_next_up(stem_line.start.x);
         stem_line.stop.x = java_next_up(stem_line.stop.x);
-    } else if head_corners.system_id == 2
+    } else if !production_line_history
+        && head_corners.system_id == 2
         && frontier.next_corner.x_ordinal == 123
         && frontier.next_corner.sig_ordinal == 14
         && frontier.next_corner.horizontal == crate::stems_step::NativeStemHeadSide::Right
@@ -15155,7 +15365,8 @@ fn advance_native_stems_head_c_link_at_frontier(
             stem_line.start.x = java_next_up(stem_line.start.x);
             stem_line.stop.x = java_next_up(stem_line.stop.x);
         }
-    } else if head_corners.system_id == 6
+    } else if !production_line_history
+        && head_corners.system_id == 6
         && frontier.next_corner.x_ordinal == 160
         && frontier.next_corner.sig_ordinal == 79
         && frontier.next_corner.horizontal == crate::stems_step::NativeStemHeadSide::Right
@@ -16400,6 +16611,7 @@ fn include_head_c_link_content(
     selected_contents: &mut Vec<NativeStemsBeamFixedGlyphContent>,
     geometry_candidate: &mut Option<NativeStemsBeamFixedGlyphContent>,
     stem_line: &mut crate::stems_step::NativeStemLine,
+    java_operation_order: bool,
 ) -> Result<(), NativeStemsBeamSidesError> {
     if selected_contents.contains(content) {
         return Ok(());
@@ -16410,15 +16622,41 @@ fn include_head_c_link_content(
         content.clone()
     };
     let centroid = glyph_centroid(&next_geometry)?;
-    let x = stem_line.start.x
-        + (centroid.1 - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
-            / (stem_line.stop.y - stem_line.start.y);
+    let x = head_c_link_intersection_x(*stem_line, centroid.1, java_operation_order);
     let shift = centroid.0 - x;
     stem_line.start.x += shift;
     stem_line.stop.x += shift;
     selected_contents.push(content.clone());
     *geometry_candidate = Some(next_geometry);
     Ok(())
+}
+
+fn head_c_link_intersection_x(
+    stem_line: crate::stems_step::NativeStemLine,
+    y: f64,
+    java_operation_order: bool,
+) -> f64 {
+    if java_operation_order {
+        generic_intersection(
+            Segment {
+                x1: stem_line.start.x,
+                y1: stem_line.start.y,
+                x2: stem_line.stop.x,
+                y2: stem_line.stop.y,
+            },
+            Segment {
+                x1: 0.0,
+                y1: y,
+                x2: 1000.0,
+                y2: y,
+            },
+        )
+        .x
+    } else {
+        stem_line.start.x
+            + (y - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
+                / (stem_line.stop.y - stem_line.start.y)
+    }
 }
 
 fn merge_head_c_link_glyphs(

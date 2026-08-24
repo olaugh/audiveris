@@ -11442,3 +11442,24 @@ census passes in 112.48s, strict all-target/all-feature workspace Clippy passes,
 and formatting/diff checks are clean. Remaining genericity work is the
 stateful C-link theoretical-line history currently represented by a small set
 of bounded ULP/gap compatibility shims; it is not part of `finalizeStems`.
+
+## Boundary 273: production carries Java's mutable C-link line history
+
+The generic page driver now owns one `NativeStemsHeadCLinkLineState` per
+system and carries it from phase one into phase two. Java aliases a downward
+C-link expansion's working `Line2D` to `CLinker.theoLine`, so successful and
+failed glyph translations persist across later profiles and append retries;
+upward expansion still reverses into a fresh line. Rust now preserves that
+distinction and uses Java's general `intersectionAtY` operation order for the
+stateful production path. Consequently production no longer depends on the six
+coordinate-keyed ULP corrections or the two Bach-system-6 wide-gap exemptions.
+The older public measured wrappers retain their frozen arithmetic solely as
+oracle compatibility evidence and are not called by Rust-only recognition.
+
+All eleven pages complete unchanged, the ordinary/stream CLI suite passes 2/2
+in 111.41s, the exact sibling transaction suite passes 35/35 in 262.21s, and
+strict all-target/all-feature workspace Clippy, formatting, and diff checks
+pass. The remaining forecast is now an audit problem rather than a known live
+branch: inspect SIDES/STUMPS and public wrapper reachability for any other
+production identity conditions, then broaden the out-of-corpus scan if usable
+sheet rasters are available.

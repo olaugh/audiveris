@@ -36,11 +36,13 @@ use crate::{
         NativeStemsBeamHookRemovalTransaction, NativeStemsBeamRejectedSidesTransaction,
         NativeStemsBeamSidesAdvance, NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
         NativeStemsBeamSidesTransaction, NativeStemsBeamStumpsTransaction,
-        NativeStemsFinalizeTransaction, NativeStemsHeadCLinkTransaction,
-        NativeStemsHeadPhase1Carrier, NativeStemsHeadPhase1Continuation,
+        NativeStemsFinalizeTransaction, NativeStemsHeadCLinkLineState,
+        NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Carrier,
+        NativeStemsHeadPhase1Continuation,
         advance_native_stems_beam_sides_advance_from_modeled_registry,
         advance_native_stems_head_c_link_or_no_link,
-        advance_native_stems_head_phase_two_append_or_no_link,
+        advance_native_stems_head_c_link_or_no_link_with_line_state,
+        advance_native_stems_head_phase_two_append_or_no_link_with_line_state,
         begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
@@ -249,6 +251,7 @@ pub struct NativeStemsSystemHeadPhase1Drive {
     pub system_id: usize,
     pub registry: NativeStemsModeledGlyphRegistry,
     pub carrier: NativeStemsHeadPhase1Carrier,
+    pub line_state: NativeStemsHeadCLinkLineState,
     pub events: Vec<NativeStemsHeadPhase1DriveEvent>,
 }
 
@@ -1139,6 +1142,7 @@ impl NativeStemsPreparedRecognition {
                 "HEADS phase-1 drive V-linkers",
             )?;
             let mut events = Vec::new();
+            let mut line_state = NativeStemsHeadCLinkLineState::default();
             while carrier.current_index < carrier.heads.len() {
                 if events.len() > carrier.heads.len().saturating_mul(2) {
                     return Err(phase(
@@ -1166,7 +1170,7 @@ impl NativeStemsPreparedRecognition {
                 }
                 let current_index = carrier.current_index;
                 let current_head = carrier.heads[current_index].reference;
-                let outcome = advance_native_stems_head_c_link_or_no_link(
+                let outcome = advance_native_stems_head_c_link_or_no_link_with_line_state(
                     &mut carrier,
                     head_corners,
                     head_reachability,
@@ -1176,6 +1180,7 @@ impl NativeStemsPreparedRecognition {
                     vlinkers,
                     &self.stem_checker,
                     &registry,
+                    &mut line_state,
                 )
                 .map_err(|error| {
                     phase(
@@ -1200,6 +1205,7 @@ impl NativeStemsPreparedRecognition {
                 system_id,
                 registry,
                 carrier,
+                line_state,
                 events,
             });
         }
@@ -1222,6 +1228,7 @@ impl NativeStemsPreparedRecognition {
                 system_id,
                 registry,
                 mut carrier,
+                mut line_state,
                 events,
             } = completed;
             let head_corners = system(
@@ -1269,23 +1276,25 @@ impl NativeStemsPreparedRecognition {
                         "HEADS phase-2 page drive",
                     ));
                 }
-                let outcome = advance_native_stems_head_phase_two_append_or_no_link(
-                    &carrier,
-                    head_corners,
-                    head_reachability,
-                    &seed_glyphs.free_glyphs,
-                    head_builders,
-                    plans,
-                    vlinkers,
-                    &self.stem_checker,
-                    &registry,
-                )
-                .map_err(|error| {
-                    phase(
-                        format!("system {system_id}: {error}"),
-                        "HEADS phase-2 page drive",
+                let outcome =
+                    advance_native_stems_head_phase_two_append_or_no_link_with_line_state(
+                        &carrier,
+                        head_corners,
+                        head_reachability,
+                        &seed_glyphs.free_glyphs,
+                        head_builders,
+                        plans,
+                        vlinkers,
+                        &self.stem_checker,
+                        &registry,
+                        &mut line_state,
                     )
-                })?;
+                    .map_err(|error| {
+                        phase(
+                            format!("system {system_id}: {error}"),
+                            "HEADS phase-2 page drive",
+                        )
+                    })?;
                 let retry = match outcome {
                     Ok(transaction) => transaction.continuation,
                     Err(retry) => retry,
