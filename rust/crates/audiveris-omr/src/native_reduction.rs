@@ -62,6 +62,16 @@ pub struct NativeReductionBeamPruneTransaction {
     pub removed_groups: Vec<NativeSigVertexId>,
 }
 
+/// Ordered orphan removal from the first branch of Java `checkHeads()` or
+/// `checkStems()`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionOrphanPruneTransaction {
+    pub system_id: usize,
+    pub kind: NativeSigInterKind,
+    pub removed_vertices: Vec<NativeSigVertexId>,
+    pub removed_ensembles: Vec<NativeSigVertexId>,
+}
+
 /// Java `Grades.minContextualGrade`.
 pub const MIN_REDUCTION_CONTEXTUAL_GRADE: f64 = 0.5;
 
@@ -282,6 +292,34 @@ pub fn prune_native_foundation_beams(
         });
         has_left && has_right
     })
+}
+
+/// Java `checkHeads()`'s `headHasStem` removal branch.
+///
+/// This is intentionally a sub-primitive rather than the complete check: the
+/// subsequent `checkHeadSide` geometry pass remains a separate boundary.
+pub fn prune_native_foundation_heads_without_stems(
+    sig: &mut NativeSigSystem,
+) -> Result<NativeReductionOrphanPruneTransaction, NativeSigError> {
+    prune_orphans_without_relation(
+        sig,
+        NativeSigInterKind::Head,
+        NativeSigRelationKind::HeadStem,
+    )
+}
+
+/// Java `checkStems()`'s `stem.getHeads().isEmpty()` removal branch.
+///
+/// The later `stemHasSingleHeadEnd` geometry pass is deliberately not claimed
+/// by this graph-only primitive.
+pub fn prune_native_foundation_stems_without_heads(
+    sig: &mut NativeSigSystem,
+) -> Result<NativeReductionOrphanPruneTransaction, NativeSigError> {
+    prune_orphans_without_relation(
+        sig,
+        NativeSigInterKind::Stem,
+        NativeSigRelationKind::HeadStem,
+    )
 }
 
 /// Java `SigReducer.contextualizeAndPurge()` for foundation reduction.
@@ -644,6 +682,44 @@ fn prune_beams(
     })
 }
 
+fn prune_orphans_without_relation(
+    sig: &mut NativeSigSystem,
+    kind: NativeSigInterKind,
+    required_relation: NativeSigRelationKind,
+) -> Result<NativeReductionOrphanPruneTransaction, NativeSigError> {
+    sig.validate_integrity()?;
+    let candidates = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == kind)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut removed_vertices = Vec::new();
+    let mut removed_ensembles = Vec::new();
+    for candidate in candidates {
+        let linked = sig.edges.iter().any(|edge| {
+            edge.active
+                && edge.kind == required_relation
+                && (edge.source == candidate.0 || edge.target == candidate.0)
+        });
+        if !linked {
+            let dying = dying_ensembles(sig, candidate);
+            remove_vertex_extensively(sig, candidate, &dying)?;
+            removed_vertices.push(candidate);
+            for ensemble in dying {
+                push_unique(&mut removed_ensembles, ensemble);
+            }
+        }
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionOrphanPruneTransaction {
+        system_id: sig.system_id,
+        kind,
+        removed_vertices,
+        removed_ensembles,
+    })
+}
+
 fn remove_vertex_extensively(
     sig: &mut NativeSigSystem,
     vertex: NativeSigVertexId,
@@ -736,9 +812,10 @@ fn push_unique(vertices: &mut Vec<NativeSigVertexId>, vertex: NativeSigVertexId)
 mod tests {
     use super::*;
     use crate::native_sig::{
-        NativeSigBounds, NativeSigEdge, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertex,
+        NativeSigBounds, NativeSigEdge, NativeSigHeadStemPayload, NativeSigRelationOrigin,
+        NativeSigSupport, NativeSigVertex,
     };
-    use crate::stems_step::NativeStemPoint;
+    use crate::stems_step::{NativeStemHeadSide, NativeStemPoint};
     use std::collections::BTreeSet;
 
     #[derive(Default)]
@@ -814,6 +891,24 @@ mod tests {
             beam_portion: Some(portion),
             stem_extension: Some(NativeStemPoint { x: 2.0, y: 3.0 }),
             ..edge(ordinal, beam, stem, NativeSigRelationKind::BeamStem)
+        }
+    }
+
+    fn head_stem_edge(ordinal: usize, head: usize, stem: usize) -> NativeSigEdge {
+        NativeSigEdge {
+            support: Some(NativeSigSupport {
+                grade: 0.8,
+                bar_connection_impacts: None,
+            }),
+            head_stem: Some(NativeSigHeadStemPayload {
+                dx: 0.1,
+                dy: 0.2,
+                head_side: NativeStemHeadSide::Left,
+                extension_point: NativeStemPoint { x: 2.0, y: 3.0 },
+                consistency: 1.0,
+                manual: false,
+            }),
+            ..edge(ordinal, head, stem, NativeSigRelationKind::HeadStem)
         }
     }
 
@@ -1003,6 +1098,62 @@ mod tests {
             ),
             (NativeReductionOverlapDisposition::ExistingExclusion, 1)
         );
+    }
+
+    #[test]
+    fn orphan_head_prune_keeps_only_heads_with_a_live_head_stem_relation() {
+        let mut inactive = head_stem_edge(1, 2, 3);
+        inactive.active = false;
+        let mut sig = NativeSigSystem {
+            system_id: 8,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Head, 0.8),
+                vertex(1, NativeSigInterKind::Head, 0.8),
+                vertex(2, NativeSigInterKind::Head, 0.8),
+                vertex(3, NativeSigInterKind::Stem, 0.8),
+            ],
+            edges: vec![head_stem_edge(0, 1, 3), inactive],
+        };
+
+        let result = prune_native_foundation_heads_without_stems(&mut sig).unwrap();
+
+        assert_eq!(result.kind, NativeSigInterKind::Head);
+        assert_eq!(
+            result.removed_vertices,
+            vec![NativeSigVertexId(0), NativeSigVertexId(2)]
+        );
+        assert!(sig.vertex(0).is_none());
+        assert!(sig.vertex(1).is_some());
+        assert!(sig.vertex(2).is_none());
+        assert!(sig.vertex(3).is_some());
+    }
+
+    #[test]
+    fn orphan_stem_prune_snapshots_stem_order_and_ignores_other_relations() {
+        let mut sig = NativeSigSystem {
+            system_id: 9,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Head, 0.8),
+                vertex(1, NativeSigInterKind::Stem, 0.8),
+                vertex(2, NativeSigInterKind::Stem, 0.8),
+                vertex(3, NativeSigInterKind::Stem, 0.8),
+            ],
+            edges: vec![
+                head_stem_edge(0, 0, 2),
+                edge(1, 1, 3, NativeSigRelationKind::Exclusion),
+            ],
+        };
+
+        let result = prune_native_foundation_stems_without_heads(&mut sig).unwrap();
+
+        assert_eq!(result.kind, NativeSigInterKind::Stem);
+        assert_eq!(
+            result.removed_vertices,
+            vec![NativeSigVertexId(1), NativeSigVertexId(3)]
+        );
+        assert!(sig.vertex(1).is_none());
+        assert!(sig.vertex(2).is_some());
+        assert!(sig.vertex(3).is_none());
     }
 
     #[test]
