@@ -8,12 +8,14 @@
 //! algorithm.  Overlap discovery and the foundation-specific consistency
 //! passes remain later REDUCTION boundaries.
 
+use std::{collections::BTreeMap, error::Error, fmt};
+
 use crate::native_sig::{
     NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigError, NativeSigInterKind,
     NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSystem, NativeSigVertexId,
 };
 use crate::native_stems::NativeStemsRecognition;
-use crate::stems_step::NativeBeamPortion;
+use crate::stems_step::{NativeBeamPortion, NativeStemHeadSide, NativeStemLine, NativeStemPoint};
 
 /// One selected exclusion and the branch Java removed from it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -70,6 +72,58 @@ pub struct NativeReductionOrphanPruneTransaction {
     pub kind: NativeSigInterKind,
     pub removed_vertices: Vec<NativeSigVertexId>,
     pub removed_ensembles: Vec<NativeSigVertexId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionStemEndingPrune {
+    pub stem: NativeSigVertexId,
+    pub removed_head_stem_edges: Vec<NativeSigEdgeId>,
+    pub added_exclusions: Vec<NativeSigEdgeId>,
+}
+
+/// Result of Java `checkStemEndingHeads()` in stem insertion order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionStemEndingTransaction {
+    pub system_id: usize,
+    /// Only stems for which at least one wrong-side ending link was removed.
+    pub modified_stems: Vec<NativeReductionStemEndingPrune>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NativeReductionStemEndingError {
+    Graph(NativeSigError),
+    MissingStemMedian {
+        system_id: usize,
+        stem: NativeSigVertexId,
+    },
+}
+
+impl fmt::Display for NativeReductionStemEndingError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Graph(source) => write!(formatter, "REDUCTION stem-ending graph: {source}"),
+            Self::MissingStemMedian { system_id, stem } => write!(
+                formatter,
+                "REDUCTION system {system_id} stem {} has no terminal median",
+                stem.0
+            ),
+        }
+    }
+}
+
+impl Error for NativeReductionStemEndingError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Graph(source) => Some(source),
+            Self::MissingStemMedian { .. } => None,
+        }
+    }
+}
+
+impl From<NativeSigError> for NativeReductionStemEndingError {
+    fn from(source: NativeSigError) -> Self {
+        Self::Graph(source)
+    }
 }
 
 /// Java `Grades.minContextualGrade`.
@@ -320,6 +374,166 @@ pub fn prune_native_foundation_stems_without_heads(
         NativeSigInterKind::Stem,
         NativeSigRelationKind::HeadStem,
     )
+}
+
+/// Port Java `checkStemEndingHeads()` / `pruneStemHeads()`.
+///
+/// `stem_medians` is the exact `StemInter.median` authority retained by the
+/// terminal STEMS system-stem registry. Each removal restarts the relation
+/// scan after recomputing the extended line from the still-live connection
+/// extension points, exactly like Java's labeled `do/while` loop.
+pub fn prune_native_foundation_stem_ending_heads(
+    sig: &mut NativeSigSystem,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+) -> Result<NativeReductionStemEndingTransaction, NativeReductionStemEndingError> {
+    sig.validate_integrity()?;
+    let stems = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Stem)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut modified_stems = Vec::new();
+    for stem in stems {
+        let &median =
+            stem_medians
+                .get(&stem)
+                .ok_or(NativeReductionStemEndingError::MissingStemMedian {
+                    system_id: sig.system_id,
+                    stem,
+                })?;
+        let mut removed_head_stem_edges = Vec::new();
+        let mut added_exclusions = Vec::new();
+        loop {
+            let extended = extended_stem_line(sig, stem, median);
+            let links = sig
+                .edges
+                .iter()
+                .filter(|edge| {
+                    edge.active
+                        && edge.kind == NativeSigRelationKind::HeadStem
+                        && edge.target == stem.0
+                })
+                .map(|edge| NativeSigEdgeId(edge.ordinal))
+                .collect::<Vec<_>>();
+            let mut removed = false;
+            for link_id in links {
+                let edge = sig.edges[link_id.0];
+                let Some(payload) = edge.head_stem else {
+                    continue;
+                };
+                let head = NativeSigVertexId(edge.source);
+                let portion = head_stem_portion(
+                    sig.vertices[head.0].bounds.height,
+                    extended,
+                    payload.extension_point.y,
+                );
+                let wrong_side = matches!(
+                    (portion, payload.head_side),
+                    (NativeReductionStemPortion::Bottom, NativeStemHeadSide::Left)
+                        | (NativeReductionStemPortion::Top, NativeStemHeadSide::Right)
+                );
+                if !wrong_side {
+                    continue;
+                }
+
+                sig.remove_edge(link_id)?;
+                removed_head_stem_edges.push(link_id);
+                if payload.dx <= 0.05
+                    && payload.dy <= 0.0
+                    && let Some(exclusion) = insert_native_overlap_exclusion(sig, head, stem)?
+                {
+                    push_unique_edge(&mut added_exclusions, exclusion);
+                }
+                removed = true;
+                break;
+            }
+            if !removed {
+                break;
+            }
+        }
+        if !removed_head_stem_edges.is_empty() {
+            modified_stems.push(NativeReductionStemEndingPrune {
+                stem,
+                removed_head_stem_edges,
+                added_exclusions,
+            });
+        }
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionStemEndingTransaction {
+        system_id: sig.system_id,
+        modified_stems,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeReductionStemPortion {
+    Top,
+    Middle,
+    Bottom,
+}
+
+fn head_stem_portion(
+    head_height: i32,
+    stem_line: NativeStemLine,
+    extension_y: f64,
+) -> NativeReductionStemPortion {
+    let (top, bottom) = ordered_stem_points(stem_line);
+    let margin = f64::from(head_height) * 0.275;
+    let middle = (top.y + bottom.y) / 2.0;
+    if extension_y >= middle {
+        if extension_y > bottom.y - margin {
+            NativeReductionStemPortion::Bottom
+        } else {
+            NativeReductionStemPortion::Middle
+        }
+    } else if extension_y < top.y + margin {
+        NativeReductionStemPortion::Top
+    } else {
+        NativeReductionStemPortion::Middle
+    }
+}
+
+fn extended_stem_line(
+    sig: &NativeSigSystem,
+    stem: NativeSigVertexId,
+    median: NativeStemLine,
+) -> NativeStemLine {
+    let (mut top, mut bottom) = ordered_stem_points(median);
+    for edge in sig.edges.iter().filter(|edge| {
+        edge.active
+            && edge.target == stem.0
+            && matches!(
+                edge.kind,
+                NativeSigRelationKind::HeadStem | NativeSigRelationKind::BeamStem
+            )
+    }) {
+        let extension = edge
+            .head_stem
+            .map(|payload| payload.extension_point)
+            .or(edge.stem_extension);
+        if let Some(extension) = extension {
+            if extension.y < top.y {
+                top = extension;
+            }
+            if extension.y > bottom.y {
+                bottom = extension;
+            }
+        }
+    }
+    NativeStemLine {
+        start: top,
+        stop: bottom,
+    }
+}
+
+fn ordered_stem_points(line: NativeStemLine) -> (NativeStemPoint, NativeStemPoint) {
+    if line.start.y <= line.stop.y {
+        (line.start, line.stop)
+    } else {
+        (line.stop, line.start)
+    }
 }
 
 /// Java `SigReducer.contextualizeAndPurge()` for foundation reduction.
@@ -600,6 +814,37 @@ fn active_exclusion_between(
         .map(|edge| NativeSigEdgeId(edge.ordinal))
 }
 
+fn insert_native_overlap_exclusion(
+    sig: &mut NativeSigSystem,
+    one: NativeSigVertexId,
+    two: NativeSigVertexId,
+) -> Result<Option<NativeSigEdgeId>, NativeSigError> {
+    let (source, target) = if one.0 < two.0 {
+        (one, two)
+    } else {
+        (two, one)
+    };
+    if active_exclusion_between(sig, source, target).is_some()
+        || has_support_between(sig, source, target)
+    {
+        return Ok(None);
+    }
+    let exclusion = NativeSigEdgeId(sig.edges.len());
+    sig.append_edge(NativeSigEdge {
+        ordinal: exclusion.0,
+        active: true,
+        source: source.0,
+        target: target.0,
+        kind: NativeSigRelationKind::Exclusion,
+        origin: NativeSigRelationOrigin::BaselineGraph,
+        support: None,
+        beam_portion: None,
+        stem_extension: None,
+        head_stem: None,
+    })?;
+    Ok(Some(exclusion))
+}
+
 fn has_support_between(
     sig: &NativeSigSystem,
     source: NativeSigVertexId,
@@ -805,6 +1050,12 @@ fn dying_ensembles(sig: &NativeSigSystem, member: NativeSigVertexId) -> Vec<Nati
 fn push_unique(vertices: &mut Vec<NativeSigVertexId>, vertex: NativeSigVertexId) {
     if !vertices.contains(&vertex) {
         vertices.push(vertex);
+    }
+}
+
+fn push_unique_edge(edges: &mut Vec<NativeSigEdgeId>, edge: NativeSigEdgeId) {
+    if !edges.contains(&edge) {
+        edges.push(edge);
     }
 }
 
@@ -1154,6 +1405,114 @@ mod tests {
         assert!(sig.vertex(1).is_none());
         assert!(sig.vertex(2).is_some());
         assert!(sig.vertex(3).is_none());
+    }
+
+    #[test]
+    fn stem_ending_prune_removes_wrong_bottom_side_restarts_and_adds_invading_exclusion() {
+        let mut wrong = head_stem_edge(0, 0, 2);
+        wrong.head_stem = Some(NativeSigHeadStemPayload {
+            dx: 0.05,
+            dy: 0.0,
+            head_side: NativeStemHeadSide::Left,
+            extension_point: NativeStemPoint { x: 5.0, y: 99.0 },
+            consistency: 1.0,
+            manual: false,
+        });
+        let mut correct = head_stem_edge(1, 1, 2);
+        correct.head_stem = Some(NativeSigHeadStemPayload {
+            dx: 0.2,
+            dy: 0.0,
+            head_side: NativeStemHeadSide::Right,
+            extension_point: NativeStemPoint { x: 5.0, y: 98.0 },
+            consistency: 1.0,
+            manual: false,
+        });
+        let mut sig = NativeSigSystem {
+            system_id: 10,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Head, 0.8),
+                vertex(1, NativeSigInterKind::Head, 0.8),
+                vertex(2, NativeSigInterKind::Stem, 0.8),
+            ],
+            edges: vec![wrong, correct],
+        };
+        let medians = BTreeMap::from([(
+            NativeSigVertexId(2),
+            NativeStemLine {
+                start: NativeStemPoint { x: 5.0, y: 10.0 },
+                stop: NativeStemPoint { x: 5.0, y: 90.0 },
+            },
+        )]);
+
+        let result = prune_native_foundation_stem_ending_heads(&mut sig, &medians).unwrap();
+
+        assert_eq!(result.modified_stems.len(), 1);
+        assert_eq!(
+            result.modified_stems[0].removed_head_stem_edges,
+            vec![NativeSigEdgeId(0)]
+        );
+        assert_eq!(
+            result.modified_stems[0].added_exclusions,
+            vec![NativeSigEdgeId(2)]
+        );
+        assert!(!sig.edges[0].active);
+        assert!(sig.edges[1].active);
+        assert_eq!(sig.edges[2].kind, NativeSigRelationKind::Exclusion);
+        assert_eq!((sig.edges[2].source, sig.edges[2].target), (0, 2));
+    }
+
+    #[test]
+    fn stem_ending_prune_keeps_middle_and_correct_top() {
+        let mut top_left = head_stem_edge(0, 0, 3);
+        top_left.head_stem.as_mut().unwrap().extension_point.y = 1.0;
+        let mut middle_right = head_stem_edge(1, 1, 3);
+        middle_right.head_stem.as_mut().unwrap().head_side = NativeStemHeadSide::Right;
+        middle_right.head_stem.as_mut().unwrap().extension_point.y = 50.0;
+        let missing_median = head_stem_edge(2, 2, 4);
+        let mut sig = NativeSigSystem {
+            system_id: 11,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Head, 0.8),
+                vertex(1, NativeSigInterKind::Head, 0.8),
+                vertex(2, NativeSigInterKind::Head, 0.8),
+                vertex(3, NativeSigInterKind::Stem, 0.8),
+                vertex(4, NativeSigInterKind::Stem, 0.8),
+            ],
+            edges: vec![top_left, middle_right, missing_median],
+        };
+        let median = NativeStemLine {
+            start: NativeStemPoint { x: 5.0, y: 10.0 },
+            stop: NativeStemPoint { x: 5.0, y: 90.0 },
+        };
+        let medians = BTreeMap::from([
+            (NativeSigVertexId(3), median),
+            (NativeSigVertexId(4), median),
+        ]);
+
+        let result = prune_native_foundation_stem_ending_heads(&mut sig, &medians).unwrap();
+
+        assert!(result.modified_stems.is_empty());
+        assert!(sig.edges.iter().all(|edge| edge.active));
+    }
+
+    #[test]
+    fn stem_ending_prune_fails_closed_when_a_live_stem_lacks_its_median() {
+        let mut sig = NativeSigSystem {
+            system_id: 12,
+            vertices: vec![vertex(0, NativeSigInterKind::Stem, 0.8)],
+            edges: Vec::new(),
+        };
+
+        let error = prune_native_foundation_stem_ending_heads(&mut sig, &BTreeMap::new())
+            .expect_err("missing geometry must not be guessed");
+
+        assert_eq!(
+            error,
+            NativeReductionStemEndingError::MissingStemMedian {
+                system_id: 12,
+                stem: NativeSigVertexId(0)
+            }
+        );
     }
 
     #[test]
