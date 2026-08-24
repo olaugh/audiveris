@@ -7320,6 +7320,54 @@ pub fn advance_native_stems_head_phase_two_append_c_link_bach_system6_order4(
     )
 }
 
+/// Execute Bach system 6's measured queue-12 reused-stem append.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bounded Java-authenticated phase-two seam"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_bach_system6_order12(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 6,
+            queue_index: 12,
+            x_ordinal: 11,
+            sig_ordinal: 145,
+            grade_bits: 0x3fcd_f32a_128a_5700,
+            can_link: (true, false, false, true),
+            left_top_returns_minus_one: true,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 2,
+            max_index: 2,
+            selected_glyph_id: 544,
+            candidate_stem_identity: 39,
+            stem_identity: 39,
+            stem_vertex: 351,
+            relation_grade_bits: 0x3fe6_7200_9724_3538,
+            relation_dx_bits: 0xbfca_02a8_1328_834b,
+            append_reuse_source: None,
+            additional_relations: &[(16, 146, 402), (10, 204, 535)],
+        },
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"

@@ -5903,6 +5903,19 @@ runner, and transform hashes are `0c3f02c4bab1e0280b294dd84887d8ae6667acd3d02bb3
 and `94a7a3f6c334bcd31b226d38c83fe6a9e8b7b818fca21ed50313f3c65d168ed8`.
 The next live Bach frontier is system 6 queue 12 x11/SIG145.
 
+## Boundary 266: Bach system-6 queue-12 multi-head reuse append
+
+Bach system 6 queue 12 x11/SIG145/Inter5635 resolves RIGHT/BOTTOM after a
+terminating LEFT/TOP attempt. Java reuses StemInter9377 / glyph883, carries
+two crossed-head relations, adds edge 557→558, and preserves allocator 9413 /
+74 stems. Native maps this to glyph 544 / stem 39 / vertex 351 plus
+x16/SIG146 edge 402 and x10/SIG204 edge 535; exact grade/dx bits are
+`3fe6720097243538` / `bfca02a81328834b`. Deterministic fixture, runner, and
+transform hashes are `bd6f9163f911617263276b74dd6cf3fae0dc8b3f6919348af8238692c220dd32`,
+`4e1728765c8114709fb9a79a1ef141cf2f0cadf0ea2f10de1cff60c5f73df9b5`,
+and `cb561ee03a1bf59a9d61fc40283bca118086dba322132dbf45ef36a8583a50da`.
+The next live frontier is system 6 queue 25 x72/SIG27.
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 reuses Java StemInter 7366 on

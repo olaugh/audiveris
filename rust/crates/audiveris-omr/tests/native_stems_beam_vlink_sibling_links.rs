@@ -775,6 +775,12 @@ const BACH_SYSTEM6_PHASE_TWO_ORDER4_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system6-order4.sh");
 const BACH_SYSTEM6_PHASE_TWO_ORDER4_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system6-order4.transform.awk");
+const BACH_SYSTEM6_PHASE_TWO_ORDER12_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-bach-system6-order12.txt");
+const BACH_SYSTEM6_PHASE_TWO_ORDER12_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system6-order12.sh");
+const BACH_SYSTEM6_PHASE_TWO_ORDER12_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system6-order12.transform.awk");
 const BACH_SYSTEM2_PHASE_TWO_ORDER10_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-bach-system2-order10.txt");
 const BACH_SYSTEM2_PHASE_TWO_ORDER10_RUNNER: &[u8] =
@@ -2311,7 +2317,7 @@ fn bach_page_driver_carries_system6_carried_reuse_stem_appends() {
         .expect_err("Bach still has a later unported phase-two append");
     let detail = error.to_string();
     assert!(detail.contains("system 6"), "{detail}");
-    assert!(detail.contains("queue 12 head x11/SIG145"), "{detail}");
+    assert!(detail.contains("queue 25 head x72/SIG27"), "{detail}");
 }
 
 #[test]
@@ -2376,6 +2382,39 @@ fn bach_system6_phase_two_order4_oracle_is_strict_and_complete() {
         assert!(
             BACH_SYSTEM6_PHASE_TWO_ORDER4_FIXTURE.contains(exact),
             "missing Bach system-6 phase-two queue-4 oracle fragment: {exact}"
+        );
+    }
+}
+
+#[test]
+fn bach_system6_phase_two_order12_oracle_is_strict_and_complete() {
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER12_FIXTURE.as_bytes()),
+        "bd6f9163f911617263276b74dd6cf3fae0dc8b3f6919348af8238692c220dd32"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER12_RUNNER),
+        "4e1728765c8114709fb9a79a1ef141cf2f0cadf0ea2f10de1cff60c5f73df9b5"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER12_TRANSFORM),
+        "cb561ee03a1bf59a9d61fc40283bca118086dba322132dbf45ef36a8583a50da"
+    );
+    for exact in [
+        "queueIndex 12 headX 11 headSig 145 headInterId 5635 grade 3fcdf32a128a5700 append true",
+        "corner BR hSide RIGHT vSide BOTTOM",
+        "lastIndex 2 maxIndex 2 relations 3",
+        "candidate id883:275:2354:5:56:weight241 candidateIdBefore 883 existingStem id9377",
+        "sourceHeadId 5637 sourceCorner BL sourceSide LEFT relationGrade 3fea548b52c6c003 stem id9377",
+        "reusedExisting true applied grade3fe6720097243538:dxbfca02a81328834b:dy0",
+        "sigVerticesBefore 389 sigVerticesAfter 389 sigEdgesBefore 557 sigEdgesAfter 558 systemStemsBefore 74 systemStemsAfter 74 allocatorBefore 9413 allocatorAfter 9413",
+        "freshRuns 2 freshRunsByteIdentical true",
+        "nativeScope BachSystem6PhaseTwoOrder12MultiHeadReuseStemAppend",
+        "javaEvidence ReturnedBeforeSystem6RetryIndex13",
+    ] {
+        assert!(
+            BACH_SYSTEM6_PHASE_TWO_ORDER12_FIXTURE.contains(exact),
+            "missing Bach system-6 phase-two queue-12 oracle fragment: {exact}"
         );
     }
 }

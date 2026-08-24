@@ -11304,6 +11304,24 @@ fixture/runner/transform SHA-256 values are
 and `94a7a3f6c334bcd31b226d38c83fe6a9e8b7b818fca21ed50313f3c65d168ed8`.
 The production Bach driver now reaches system 6 queue 12 x11/SIG145.
 
+## Boundary 266: Bach system-6 queue-12 multi-head reuse append
+
+Bach system 6 queue 12 x11/SIG145/Inter5635 tries LEFT/TOP first, then
+RIGHT/BOTTOM reuses Java StemInter9377 / glyph883 through Inter5637's LEFT
+relation. The expansion also carries Inter5755, so Java records three ordered
+HeadStem relation rows while adding only x11's missing edge (557→558).
+Allocator 9413 and 74 system stems remain unchanged. Native maps the selected
+stem to glyph 544 / identity 39 / vertex 351 and the crossed heads to
+x16/SIG146 edge 402 and x10/SIG204 edge 535. The main relation matches Java
+directly at grade/dx bits `3fe6720097243538` / `bfca02a81328834b`.
+
+The JDK25 fixture is byte-identical across two fresh passes. Exact
+fixture/runner/transform SHA-256 values are
+`bd6f9163f911617263276b74dd6cf3fae0dc8b3f6919348af8238692c220dd32`,
+`4e1728765c8114709fb9a79a1ef141cf2f0cadf0ea2f10de1cff60c5f73df9b5`,
+and `cb561ee03a1bf59a9d61fc40283bca118086dba322132dbf45ef36a8583a50da`.
+The production Bach driver now reaches system 6 queue 25 x72/SIG27.
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 is another measured RIGHT/BOTTOM
