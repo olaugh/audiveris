@@ -5916,6 +5916,24 @@ transform hashes are `bd6f9163f911617263276b74dd6cf3fae0dc8b3f6919348af8238692c2
 and `cb561ee03a1bf59a9d61fc40283bca118086dba322132dbf45ef36a8583a50da`.
 The next live frontier is system 6 queue 25 x72/SIG27.
 
+## Boundary 267: Bach system-6 terminal reuse append and full-page finalize
+
+Bach system 6 queue 25 x72/SIG27/Inter5389 reuses Java StemInter9367 / glyph846
+through Inter5419's LEFT relation and adds only edge 558→559. Native maps it to
+glyph 507 / stem identity 29 / vertex 341 and crossed x73/SIG39 edge 370; exact
+main grade/dx bits are `3fe5453e7e3d92c5` / `bfcc940d06edf788`. Allocator
+9413 and 74 stems remain unchanged.
+
+This terminal mutating retry lets the generic page driver exhaust phase two on
+all six Bach systems and pass page-wide generic `finalizeStems`. Deterministic
+fixture, runner, and transform hashes are
+`385485d73cb23e4c5551836a334edec3868f009b451fc911f729bcbd3b4343e9`,
+`92ec574cf30a1d8442d9adff4e59bc3ccfcf6537b5dd174e6513d937b9b5fdfa`,
+and `34ecc365cc19983e725afdbc9295dd248e4dc83b77c45faee0549f0af858d679`.
+The focused regression, full 35-test sibling suite, formatting, strict
+workspace Clippy, and diff checks pass. The remaining generic STEMS work is a
+corpus-wide transactional/publication audit, not another Bach queue frontier.
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 reuses Java StemInter 7366 on

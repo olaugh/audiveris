@@ -781,6 +781,12 @@ const BACH_SYSTEM6_PHASE_TWO_ORDER12_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system6-order12.sh");
 const BACH_SYSTEM6_PHASE_TWO_ORDER12_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system6-order12.transform.awk");
+const BACH_SYSTEM6_PHASE_TWO_ORDER25_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-bach-system6-order25.txt");
+const BACH_SYSTEM6_PHASE_TWO_ORDER25_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system6-order25.sh");
+const BACH_SYSTEM6_PHASE_TWO_ORDER25_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system6-order25.transform.awk");
 const BACH_SYSTEM2_PHASE_TWO_ORDER10_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-bach-system2-order10.txt");
 const BACH_SYSTEM2_PHASE_TWO_ORDER10_RUNNER: &[u8] =
@@ -2299,7 +2305,7 @@ fn bach_system3_phase_two_reuses_existing_stems_orders3_and5() {
 }
 
 #[test]
-fn bach_page_driver_carries_system6_carried_reuse_stem_appends() {
+fn bach_page_driver_completes_system6_carried_reuse_stem_appends() {
     let path = repo_root().join("data/examples/BachInvention5.jpg");
     let grid = recognize_grid_lines(path).expect("Bach GRID recognition");
     let headers = recognize_native_headers(&grid).expect("Bach HEADERS recognition");
@@ -2312,12 +2318,34 @@ fn bach_page_driver_carries_system6_carried_reuse_stem_appends() {
         .expect("Bach HEADS recognition");
     let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
         .expect("Bach native STEMS preparation");
-    let error = prepared
+    let driven = prepared
         .drive_all_system_head_linking_phase2()
-        .expect_err("Bach still has a later unported phase-two append");
-    let detail = error.to_string();
-    assert!(detail.contains("system 6"), "{detail}");
-    assert!(detail.contains("queue 25 head x72/SIG27"), "{detail}");
+        .expect("Bach phase-two page drive");
+    assert_eq!(driven.systems.len(), 6);
+    for system in &driven.systems {
+        assert_eq!(
+            system.carrier.phase_two_index,
+            system.carrier.unlinked_heads.len(),
+            "system {} phase-two queue",
+            system.system_id
+        );
+    }
+    let system6 = &driven.systems[5];
+    assert_eq!(system6.system_id, 6);
+    assert_eq!(system6.carrier.phase_two_index, 27);
+    assert_eq!(system6.retries.len(), 27);
+    assert_eq!(system6.retries[25].processed_head.x_ordinal, 72);
+    assert_eq!(system6.retries[25].processed_head.sig_ordinal, 27);
+    assert_eq!(system6.retries[25].returned_linked, Some(true));
+
+    let finalized = prepared
+        .finalize_all_system_stems()
+        .expect("Bach generic finalizeStems page drive");
+    assert_eq!(finalized.systems.len(), 6);
+    assert!(finalized.systems.iter().all(|system| {
+        system.transaction.state_after.phase_two_index
+            == system.transaction.state_after.unlinked_heads.len()
+    }));
 }
 
 #[test]
@@ -2415,6 +2443,39 @@ fn bach_system6_phase_two_order12_oracle_is_strict_and_complete() {
         assert!(
             BACH_SYSTEM6_PHASE_TWO_ORDER12_FIXTURE.contains(exact),
             "missing Bach system-6 phase-two queue-12 oracle fragment: {exact}"
+        );
+    }
+}
+
+#[test]
+fn bach_system6_phase_two_order25_oracle_is_strict_and_complete() {
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER25_FIXTURE.as_bytes()),
+        "385485d73cb23e4c5551836a334edec3868f009b451fc911f729bcbd3b4343e9"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER25_RUNNER),
+        "92ec574cf30a1d8442d9adff4e59bc3ccfcf6537b5dd174e6513d937b9b5fdfa"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER25_TRANSFORM),
+        "34ecc365cc19983e725afdbc9295dd248e4dc83b77c45faee0549f0af858d679"
+    );
+    for exact in [
+        "queueIndex 25 headX 72 headSig 27 headInterId 5389 grade 3fc52d7836d009f7 append true",
+        "corner BR hSide RIGHT vSide BOTTOM",
+        "lastIndex 2 maxIndex 2 relations 2",
+        "candidate id0:702:2184:5:66:weight242 candidateIdBefore 0 existingStem id9367",
+        "sourceHeadId 5419 sourceCorner BL sourceSide LEFT relationGrade 3fe85cf016b99d08 stem id9367",
+        "reusedExisting true applied grade3fe5453e7e3d92c5:dxbfcc940d06edf788:dy0",
+        "sigVerticesBefore 389 sigVerticesAfter 389 sigEdgesBefore 558 sigEdgesAfter 559 systemStemsBefore 74 systemStemsAfter 74 allocatorBefore 9413 allocatorAfter 9413",
+        "freshRuns 2 freshRunsByteIdentical true",
+        "nativeScope BachSystem6PhaseTwoOrder25ReuseStemAppend",
+        "javaEvidence ReturnedBeforeSystem6RetryIndex26",
+    ] {
+        assert!(
+            BACH_SYSTEM6_PHASE_TWO_ORDER25_FIXTURE.contains(exact),
+            "missing Bach system-6 phase-two queue-25 oracle fragment: {exact}"
         );
     }
 }

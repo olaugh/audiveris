@@ -7368,6 +7368,54 @@ pub fn advance_native_stems_head_phase_two_append_c_link_bach_system6_order12(
     )
 }
 
+/// Execute Bach system 6's measured queue-25 reused-stem append.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bounded Java-authenticated phase-two seam"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_bach_system6_order25(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 6,
+            queue_index: 25,
+            x_ordinal: 72,
+            sig_ordinal: 27,
+            grade_bits: 0x3fc5_2d78_36d0_09f7,
+            can_link: (false, false, false, true),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 2,
+            max_index: 2,
+            selected_glyph_id: 507,
+            candidate_stem_identity: 29,
+            stem_identity: 29,
+            stem_vertex: 341,
+            relation_grade_bits: 0x3fe5_453e_7e3d_92c5,
+            relation_dx_bits: 0xbfcc_940d_06ed_f788,
+            append_reuse_source: None,
+            additional_relations: &[(73, 39, 370)],
+        },
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"
