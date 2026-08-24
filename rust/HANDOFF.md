@@ -11426,3 +11426,19 @@ transaction module as executable oracle gates, but production uses only
 eleven-page ordinary/stream gate passes in 118.27s through this generic-only
 path. The 35/35 measured sibling suite passes in 274.89s, and strict workspace
 Clippy remains clean. No known page-specific head-link dispatch remains.
+
+## Boundary 272: `finalizeStems` is generic-only
+
+`finalize_native_stems` no longer detects Chula system 1 from its system ID,
+head/phase-two counts, live SIG census, and stem count in order to invoke a
+second page-shaped authenticator. The generic terminal already validates the
+completed two-phase carrier, SIG, bindings, every live HeadStem relation,
+canonical sharing partitions, relation removals, and abnormal-head mutations;
+the removed 184-line specialization duplicated those checks for one frozen
+state and had no semantic authority on other pages. Frozen Java evidence stays
+in the transaction tests rather than the production branch. The focused full
+native-carrier transaction gate passes, the eleven-page Rust-only completion
+census passes in 112.48s, strict all-target/all-feature workspace Clippy passes,
+and formatting/diff checks are clean. Remaining genericity work is the
+stateful C-link theoretical-line history currently represented by a small set
+of bounded ULP/gap compatibility shims; it is not part of `finalizeStems`.
