@@ -11489,3 +11489,47 @@ forecast is now scope-based: finish the remaining legacy-public-wrapper and
 invalid-state reachability classification, then run any additional usable
 score rasters found; this should require only audit/cleanup slices unless a new
 scan exposes another Java branch.
+
+## Boundary 275: complete `StemsStep` epilog and close generic STEMS
+
+The Rust-only stage now executes Java's sheet epilog after every system's
+generic `finalizeStems`. `finalizeBeams` removes cross-system orphan beams and
+their newly empty `BeamGroupInter`s, adds every good-beam-side
+`BeamHeadRelation` at the exact mean BeamStem/HeadStem grade, then each live
+SIG is contextualized with Java support coefficients, compatible-partner
+partitions, head/stem concurrency, and BeamGroup mean-member best grades. The
+schema-1 STEMS summary publishes those mutations and every final Stem now
+carries its contextual grade.
+
+Fresh JDK25 evidence is byte-identical across two runs. Chula systems 1-3
+remove 4/3/5 orphan beams and 4/3/5 empty groups, add 123/109/110 BeamHead
+relations, and contextualize 259/233/274 live vertices. All three BeamHead
+grade SHA-256 values match Java exactly:
+`0f5d270e4fa00c861645e77257f2fa79325b8a0ad3ace617a86da8578d2769f1`,
+`e14c28b3700ac34023baa529788df9c02cca8d6567e9df0237ca9c1a02619755`,
+and `f9d268028846f675aade61a319af4f4ff4be5012639c42227498053932c0f057`.
+System 1's complete contextual vector is bit-identical at FNV-1a-64
+`ba83426ee73b2b10`. Per-vertex comparison proves the only system-2/system-3
+differences are four already-inherited HEADERS values and two already-inherited
+LEDGERS one-ULP values; every STEMS-owned contextual result is identical.
+Rust therefore pins the honest resulting digests `125acaf46320d86e` and
+`21bda55a2a32d2c4` rather than adding stage-local corrections.
+
+The frozen fixture SHA-256 is
+`0620c5834555fe2197d6ce5bb7b47baa99003201f6412b39f6184210a4e20852`;
+probe, runner, init script, and emitted-body SHA-256 are
+`48b052f3f75863f4e3aa8e0041776e49efd5b7c09fc8a4df16af9ce1cc90a8da`,
+`f30e73acb180623bdb274b77bcef76ab99a19517b66c3ed5e50f7dd37edb07fa`,
+`b3480ff44a38cd9ce0a778676a792394ccb9cbac622b13613dc3532e3c2b846c`,
+and `c387fded8024e420f9c3038642338dd5d937bc095d5c94dc69d533735b4bede9`.
+Four epilog units, the focused carrier, the eleven-page CLI census, ordinary /
+stream byte identity, the full 35/35 sibling suite (154.35s), strict
+all-target/all-feature workspace Clippy, formatting, and diff checks pass.
+
+The closing production-reachability audit finds no authenticated
+page/system/queue/head dispatch, no call from production into the many frozen
+order-specific wrapper gates, and no remaining valid-input fail-closed branch;
+the surviving `Unsupported*` errors validate malformed or upstream-impossible
+inputs. Generic headless STEMS is therefore complete. Further score scans are
+robustness expansion, while implementation work moves downstream to REDUCTION
+and the remaining prerequisites for SYMBOLS.

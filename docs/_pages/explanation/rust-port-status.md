@@ -207,12 +207,14 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The current STEMS checkpoint is Boundary 273. All eight frozen parity pages,
+The current STEMS checkpoint is Boundary 275. All eight frozen parity pages,
 D039, and both extracted Dichterliebe PDF pages complete Rust-only schema-1 STEMS publication;
 the generic driver now owns the rejected SIDES, head retry/no-link, expanded
 C-link, stable JDK25 ordering, phase-two append/no-link, and `finalizeStems`
-paths exercised by those pages. D039 is a completion regression, not yet a
-frozen Java terminal-parity oracle. The detailed historical paragraph below
+paths exercised by those pages. The sheet epilog now also performs Java's
+orphan-beam/empty-group purge, BeamHead boosts, and complete SIG
+contextualization. D039 is a completion regression, not yet a frozen Java
+terminal-parity oracle. The detailed historical paragraph below
 records the chain through Boundary 258; Boundaries 259-273 are summarized in
 the later boundary log.
 
@@ -6641,3 +6643,25 @@ the stump worklist. The forced-rejection carrier regression, 35/35 sibling
 suite, eleven-page census, strict workspace Clippy, formatting, and diff checks
 all pass. No reproduced STEMS failure remains; the remaining work is
 reachability classification of legacy measured APIs and wider scan coverage.
+
+## Boundary 275: the complete STEMS sheet epilog
+
+The native stage now runs Java's post-system epilog as well as generic
+`finalizeStems`. It removes cross-system orphan beams and empty beam groups,
+adds BeamHead support relations for good beam sides, and recomputes every live
+SIG contextual grade, including BeamGroup mean-member grades. Chula removes
+12 beams and 12 groups, adds 342 BeamHead relations, and contextualizes 766
+vertices. All BeamHead grade vectors match Java exactly; system 1's entire
+contextual vector is bit-identical. The six remaining grade-bit differences
+are traced to four upstream HEADERS values and two upstream LEDGERS ULPs, not
+to STEMS behavior.
+
+The deterministic Java fixture SHA-256 is
+`0620c5834555fe2197d6ce5bb7b47baa99003201f6412b39f6184210a4e20852`;
+probe, runner, init, and body hashes are `48b052f3…`, `f30e73ac…`,
+`b3480ff4…`, and `c387fded…`. The eleven-page ordinary/stream CLI gate, 35/35
+transaction suite, strict workspace Clippy, formatting, and diff checks pass.
+A final reachability audit finds no page/system/queue-specific production
+dispatch and no valid-input fail-closed branch. Generic headless STEMS is now
+complete; further port work moves to REDUCTION and downstream SYMBOLS
+prerequisites, while more score scans remain useful robustness evidence.

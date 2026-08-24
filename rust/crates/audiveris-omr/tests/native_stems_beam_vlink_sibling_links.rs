@@ -27,7 +27,8 @@ use audiveris_omr::{
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems::{
         NativeStemsHeadPhase1DriveEvent, NativeStemsHeadPhase1ProgressStatus,
-        NativeStemsSystemHeadPhase1FirstOutcome, prepare_native_stems, recognize_native_stems,
+        NativeStemsSystemFinalizeDrive, NativeStemsSystemHeadPhase1FirstOutcome,
+        prepare_native_stems, recognize_native_stems,
     },
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
@@ -224,6 +225,37 @@ use audiveris_omr::{
         NativeStemVerticalSide,
     },
 };
+
+fn assert_generic_finalize_prefix_eq(
+    actual: &[NativeStemsSystemFinalizeDrive],
+    expected: &[NativeStemsSystemFinalizeDrive],
+) {
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(actual.system_id, expected.system_id);
+        assert_eq!(actual.registry, expected.registry);
+        assert_eq!(actual.phase_one_events, expected.phase_one_events);
+        assert_eq!(actual.retries, expected.retries);
+        assert_eq!(
+            (
+                actual.transaction.checked_heads,
+                &actual.transaction.multiple_stem_heads,
+                &actual.transaction.no_stem_heads,
+                &actual.transaction.abnormal_heads,
+                &actual.transaction.removed_head_stem_relations,
+                actual.transaction.abnormal_value_changes,
+            ),
+            (
+                expected.transaction.checked_heads,
+                &expected.transaction.multiple_stem_heads,
+                &expected.transaction.no_stem_heads,
+                &expected.transaction.abnormal_heads,
+                &expected.transaction.removed_head_stem_relations,
+                expected.transaction.abnormal_value_changes,
+            )
+        );
+    }
+}
 
 #[path = "common/b15_hydration.rs"]
 mod b15_hydration;
@@ -8682,7 +8714,7 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Batuque transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
-    assert_eq!(recognized.systems, page_finalized.systems);
+    assert_generic_finalize_prefix_eq(&recognized.systems, &page_finalized.systems);
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(
@@ -8882,7 +8914,7 @@ fn chula_page_drive_completes_all_systems_multi_head_reuses_atomically() {
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Chula transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
-    assert_eq!(recognized.systems, finalized.systems);
+    assert_generic_finalize_prefix_eq(&recognized.systems, &finalized.systems);
 }
 
 /// Direct atomic gate at the first real Java competing-hook checkpoint.
@@ -13164,7 +13196,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Allegretto transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
-    assert_eq!(recognized.systems, finalized.systems);
+    assert_generic_finalize_prefix_eq(&recognized.systems, &finalized.systems);
 }
 
 /// Zizi's first wider-corpus gap links the same sibling head through two
@@ -15452,7 +15484,7 @@ fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Carmen transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
-    assert_eq!(recognized.systems, finalized.systems);
+    assert_generic_finalize_prefix_eq(&recognized.systems, &finalized.systems);
 }
 
 /// Java treats a null `StemBuilder.createStem` result as an ordinary false
@@ -18097,7 +18129,7 @@ fn cucaracha_order56_no_link_and_all_system_stems_complete() {
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Cucaracha transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
-    assert_eq!(recognized.systems, finalized.systems);
+    assert_generic_finalize_prefix_eq(&recognized.systems, &finalized.systems);
 }
 
 /// A rather-good phase-1 head retries all four Java stem profiles before it
@@ -24594,7 +24626,7 @@ fn hove_system5_queue1_reuses_the_terminal_stem_and_completes_the_page() {
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Hove transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
-    assert_eq!(recognized.systems, finalized.systems);
+    assert_generic_finalize_prefix_eq(&recognized.systems, &finalized.systems);
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and

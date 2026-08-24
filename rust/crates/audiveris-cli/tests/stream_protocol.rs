@@ -4,6 +4,8 @@
 
 use std::{path::PathBuf, process::Command};
 
+const STEMS_EPILOG_ORACLE: &str = include_str!("../../../oracle/stems-epilog-chula.txt");
+
 fn binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_audiveris-cli")
         .map(PathBuf::from)
@@ -262,5 +264,38 @@ fn stems_json_completes_the_parity_corpus_and_beyond_corpus_scan() {
             stems,
             "{page} publishes every final native Stem exactly once"
         );
+
+        if page == "chula.png" {
+            for exact in [
+                "\"removed_orphan_beam_count\":12",
+                "\"removed_empty_beam_group_count\":12",
+                "\"beam_head_relation_count\":342",
+                "\"contextualized_inter_count\":766",
+                "\"contextual_grade_digest\":\"ba83426ee73b2b10\"",
+                // The remaining system-2/system-3 digest differences are exactly
+                // four inherited HEADERS values and two inherited LEDGERS ULPs;
+                // every STEMS-owned contextual result is Java-identical.
+                "\"contextual_grade_digest\":\"125acaf46320d86e\"",
+                "\"contextual_grade_digest\":\"21bda55a2a32d2c4\"",
+            ] {
+                assert!(
+                    payload.contains(exact),
+                    "Chula STEMS epilog is missing {exact}"
+                );
+            }
+            for exact in [
+                "beamHeadCount 123 beamHeadGradeSha256 0f5d270e4fa00c861645e77257f2fa79325b8a0ad3ace617a86da8578d2769f1",
+                "beamHeadCount 109 beamHeadGradeSha256 e14c28b3700ac34023baa529788df9c02cca8d6567e9df0237ca9c1a02619755",
+                "beamHeadCount 110 beamHeadGradeSha256 f9d268028846f675aade61a319af4f4ff4be5012639c42227498053932c0f057",
+                "contextualGradeFnv64 ba83426ee73b2b10",
+                "freshRuns 2 freshRunsByteIdentical true",
+                "nativeScope GenericFinalizeBeamsAndContextualization",
+            ] {
+                assert!(
+                    STEMS_EPILOG_ORACLE.contains(exact),
+                    "frozen Java epilog fixture is missing {exact}"
+                );
+            }
+        }
     }
 }

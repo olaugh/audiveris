@@ -1583,12 +1583,54 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
             .map(|system| system.transaction.abnormal_heads.len())
             .sum::<usize>() as i64,
     );
+    json.field_integer(
+        "removed_orphan_beam_count",
+        stems
+            .beam_finalizations
+            .iter()
+            .map(|transaction| transaction.removed_orphan_beams.len())
+            .sum::<usize>() as i64,
+    );
+    json.field_integer(
+        "removed_empty_beam_group_count",
+        stems
+            .beam_finalizations
+            .iter()
+            .map(|transaction| transaction.removed_empty_beam_groups.len())
+            .sum::<usize>() as i64,
+    );
+    json.field_integer(
+        "beam_head_relation_count",
+        stems
+            .beam_finalizations
+            .iter()
+            .map(|transaction| transaction.added_beam_head_relations.len())
+            .sum::<usize>() as i64,
+    );
+    json.field_integer(
+        "contextualized_inter_count",
+        stems
+            .contextualizations
+            .iter()
+            .map(|transaction| transaction.contextualized_vertices)
+            .sum::<usize>() as i64,
+    );
     json.close('}');
 
     json.key("systems");
     json.open('[');
     for system in &stems.systems {
         let transaction = &system.transaction;
+        let beam_finalization = stems
+            .beam_finalizations
+            .iter()
+            .find(|candidate| candidate.system_id == system.system_id)
+            .expect("final STEMS system has its beam epilog transaction");
+        let contextualization = stems
+            .contextualizations
+            .iter()
+            .find(|candidate| candidate.system_id == system.system_id)
+            .expect("final STEMS system has its contextualization transaction");
         let carrier = &transaction.state_after;
         let sig = &carrier.beam_state.sig;
         let bindings = &carrier.beam_state.bindings;
@@ -1656,6 +1698,30 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
             transaction.abnormal_value_changes as i64,
         );
         json.field_integer(
+            "removed_orphan_beam_count",
+            beam_finalization.removed_orphan_beams.len() as i64,
+        );
+        json.field_integer(
+            "removed_empty_beam_group_count",
+            beam_finalization.removed_empty_beam_groups.len() as i64,
+        );
+        json.field_integer(
+            "beam_head_relation_count",
+            beam_finalization.added_beam_head_relations.len() as i64,
+        );
+        json.field_integer(
+            "contextualized_inter_count",
+            contextualization.contextualized_vertices as i64,
+        );
+        json.field_integer(
+            "contextual_grade_changes",
+            contextualization.changed_values as i64,
+        );
+        json.field_string(
+            "contextual_grade_digest",
+            &format!("{:016x}", contextualization.contextual_grade_digest),
+        );
+        json.field_integer(
             "sig_vertex_count",
             sig.vertices.iter().filter(|v| v.active).count() as i64,
         );
@@ -1690,6 +1756,11 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
             json.close('}');
             json.field_number("thickness", stem.geometry.mean_thickness);
             json.field_number("grade", stem.grade.grade());
+            json.key("contextual_grade");
+            match vertex.contextual_grade {
+                Some(grade) => json.number(grade),
+                None => json.null(),
+            }
             json.field_string(
                 "grade_source",
                 match stem.grade {
@@ -1747,6 +1818,25 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
                 None => json.null(),
             }
             json.field_boolean("manual", payload.manual);
+            json.close('}');
+        }
+        json.close(']');
+
+        json.key("beam_head_relations");
+        json.open('[');
+        for edge_id in &beam_finalization.added_beam_head_relations {
+            let edge = &sig.edges[edge_id.0];
+            json.open('{');
+            json.field_integer("sig_ordinal", edge.ordinal as i64);
+            json.field_integer("beam_sig_ordinal", edge.source as i64);
+            json.field_integer("head_sig_ordinal", edge.target as i64);
+            json.field_number(
+                "grade",
+                edge.support
+                    .expect("final BeamHead relation retains support")
+                    .grade,
+            );
+            json.field_boolean("on_beam_side", true);
             json.close('}');
         }
         json.close(']');

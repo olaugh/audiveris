@@ -1654,6 +1654,7 @@ pub fn apply_native_stems_beam_vlink_base_transaction_to_native_sig(
                     kind: NativeSigInterKind::Stem,
                     shape: Some("STEM".to_owned()),
                     grade,
+                    contextual_grade: None,
                     bounds: NativeSigBounds {
                         x: bounds.x,
                         y: bounds.y,
@@ -3655,6 +3656,7 @@ fn native_relation_class(kind: NativeSigRelationKind) -> &'static str {
         NativeSigRelationKind::Exclusion => "org.audiveris.omr.sig.relation.Exclusion",
         NativeSigRelationKind::BeamBeam => "org.audiveris.omr.sig.relation.BeamBeamRelation",
         NativeSigRelationKind::BeamStem => "org.audiveris.omr.sig.relation.BeamStemRelation",
+        NativeSigRelationKind::BeamHead => "org.audiveris.omr.sig.relation.BeamHeadRelation",
         NativeSigRelationKind::BeamRest => "org.audiveris.omr.sig.relation.BeamRestRelation",
         NativeSigRelationKind::HeadStem => "org.audiveris.omr.sig.relation.HeadStemRelation",
         NativeSigRelationKind::ChordStem => "org.audiveris.omr.sig.relation.ChordStemRelation",

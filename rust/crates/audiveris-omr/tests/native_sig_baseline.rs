@@ -884,6 +884,7 @@ fn assembled_sig_rebuilds_javas_structural_hashes() {
                     NativeSigRelationKind::Exclusion => "Exclusion",
                     NativeSigRelationKind::BeamBeam => "BeamBeamRelation",
                     NativeSigRelationKind::BeamStem => "BeamStemRelation",
+                    NativeSigRelationKind::BeamHead => "BeamHeadRelation",
                     NativeSigRelationKind::BeamRest => "BeamRestRelation",
                     NativeSigRelationKind::HeadStem => "HeadStemRelation",
                     NativeSigRelationKind::ChordStem => "ChordStemRelation",
@@ -1040,6 +1041,7 @@ fn native_sig_carries_the_first_stem_and_relation_append() {
             kind: audiveris_omr::native_sig::NativeSigInterKind::Stem,
             shape: Some("STEM".to_owned()),
             grade: 1.0,
+            contextual_grade: None,
             bounds: audiveris_omr::native_sig::NativeSigBounds {
                 x: 0,
                 y: 0,
@@ -1543,6 +1545,7 @@ fn native_edge_token(edge: &NativeSigEdge) -> String {
         NativeSigRelationKind::Exclusion => "Exclusion",
         NativeSigRelationKind::BeamBeam => "BeamBeamRelation",
         NativeSigRelationKind::BeamStem => "BeamStemRelation",
+        NativeSigRelationKind::BeamHead => "BeamHeadRelation",
         NativeSigRelationKind::BeamRest => "BeamRestRelation",
         NativeSigRelationKind::HeadStem => "HeadStemRelation",
         NativeSigRelationKind::ChordStem => "ChordStemRelation",

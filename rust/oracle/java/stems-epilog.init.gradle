@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) return
+    def repoRoot = providers.gradleProperty('rustPortRepo').get()
+    def outputDir = app.layout.buildDirectory.dir('rust-stems-epilog/classes')
+    app.tasks.register('compileStemsEpilogProbe', JavaCompile) {
+        source = file("${repoRoot}/rust/oracle/java/StemsEpilogProbe.java")
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+    app.tasks.register('stemsEpilogProbe', JavaExec) {
+        dependsOn 'compileStemsEpilogProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.StemsEpilogProbe'
+        workingDir = app.projectDir
+        maxHeapSize = '48g'
+        systemProperty 'logback.configurationFile',
+                "${repoRoot}/rust/oracle/java/logback-quiet.xml"
+        args = [providers.gradleProperty('stemsEpilogImage').get()]
+    }
+}

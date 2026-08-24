@@ -133,6 +133,8 @@ pub struct NativeSigVertex {
     /// Java `Shape.name()`, or `None` for shape-less ensembles.
     pub shape: Option<String>,
     pub grade: f64,
+    /// Java `Inter.contextualGrade`, recomputed by the STEMS sheet epilog.
+    pub contextual_grade: Option<f64>,
     pub bounds: NativeSigBounds,
     pub abnormal: bool,
     pub beam_geometry: Option<NativeSigBeamGeometry>,
@@ -149,6 +151,7 @@ pub enum NativeSigRelationKind {
     Exclusion,
     BeamBeam,
     BeamStem,
+    BeamHead,
     BeamRest,
     HeadStem,
     ChordStem,
@@ -413,6 +416,76 @@ impl NativeSigSystem {
         Ok(())
     }
 
+    /// Java `SIGraph.contextualize()`: compute every live inter's contextual
+    /// grade from intrinsic partner grades and support/exclusion topology.
+    pub fn contextualize(&mut self) -> NativeSigContextualization {
+        let before = self
+            .vertices
+            .iter()
+            .map(|vertex| vertex.contextual_grade)
+            .collect::<Vec<_>>();
+        let grades = self
+            .vertices
+            .iter()
+            .map(|vertex| vertex.grade)
+            .collect::<Vec<_>>();
+        let active = self
+            .vertices
+            .iter()
+            .map(|vertex| vertex.active)
+            .collect::<Vec<_>>();
+        let kinds = self
+            .vertices
+            .iter()
+            .map(|vertex| vertex.kind)
+            .collect::<Vec<_>>();
+        let mut contextual = (0..self.vertices.len())
+            .map(|focus| {
+                active[focus]
+                    .then(|| contextual_grade(self, focus, &grades, &active, &kinds))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+
+        // BeamGroupInter overrides AbstractInter#getContextualGrade(): its visible
+        // value is the arithmetic mean of the best grades of its live contained
+        // beams, rather than the intrinsic grade stored by SIGraph.contextualize().
+        // Apply that ensemble view only after every ordinary vertex has its fresh
+        // contextual grade, matching EnsembleHelper.computeMeanContextualGrade().
+        for group in 0..self.vertices.len() {
+            if !active[group] || kinds[group] != NativeSigInterKind::BeamGroup {
+                continue;
+            }
+            let mut sum = 0.0;
+            let mut count = 0_usize;
+            for edge in self.edges.iter().filter(|edge| {
+                edge.active
+                    && edge.kind == NativeSigRelationKind::Containment
+                    && edge.source == group
+                    && active.get(edge.target).copied().unwrap_or(false)
+            }) {
+                sum += contextual[edge.target].unwrap_or(grades[edge.target]);
+                count += 1;
+            }
+            contextual[group] = (count > 0).then_some(sum / count as f64);
+        }
+        for (vertex, grade) in self.vertices.iter_mut().zip(&contextual) {
+            if vertex.active {
+                vertex.contextual_grade = *grade;
+            }
+        }
+        NativeSigContextualization {
+            system_id: self.system_id,
+            contextualized_vertices: active.into_iter().filter(|active| *active).count(),
+            changed_values: before
+                .iter()
+                .zip(&contextual)
+                .filter(|(before, after)| before != after)
+                .count(),
+            contextual_grade_digest: contextual_grade_digest(&contextual),
+        }
+    }
+
     fn require_vertex(&self, ordinal: usize) -> Result<(), NativeSigError> {
         if self.vertex(ordinal).is_some() {
             Ok(())
@@ -423,6 +496,166 @@ impl NativeSigSystem {
             })
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeSigContextualization {
+    pub system_id: usize,
+    pub contextualized_vertices: usize,
+    pub changed_values: usize,
+    /// FNV-1a-64 over sorted live contextual-grade IEEE-754 big-endian bits.
+    pub contextual_grade_digest: u64,
+}
+
+fn contextual_grade_digest(grades: &[Option<f64>]) -> u64 {
+    let mut bits = grades
+        .iter()
+        .filter_map(|grade| grade.map(f64::to_bits))
+        .collect::<Vec<_>>();
+    bits.sort_unstable();
+    let mut digest = 0xcbf2_9ce4_8422_2325_u64;
+    for value in bits {
+        for byte in value.to_be_bytes() {
+            digest ^= u64::from(byte);
+            digest = digest.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    digest
+}
+
+fn contextual_grade(
+    sig: &NativeSigSystem,
+    focus: usize,
+    grades: &[f64],
+    active: &[bool],
+    kinds: &[NativeSigInterKind],
+) -> Option<f64> {
+    let mut partners = Vec::new();
+    let mut contributions = BTreeMap::new();
+    for edge in sig.edges.iter().filter(|edge| edge.active) {
+        let Some(support) = edge.support else {
+            continue;
+        };
+        let (partner, ratio) = if edge.target == focus {
+            (edge.source, native_support_ratio(edge, false))
+        } else if edge.source == focus {
+            (edge.target, native_support_ratio(edge, true))
+        } else {
+            continue;
+        };
+        if ratio > 1.0 && active.get(partner).copied().unwrap_or(false) {
+            partners.push(partner);
+            contributions.insert(partner, grades[partner] * (ratio - 1.0));
+        }
+        let _ = support;
+    }
+    partners.sort_by(|left, right| grades[*right].total_cmp(&grades[*left]));
+    let n = partners.len();
+    let mut concurrent_sets = vec![BTreeSet::new(); n];
+    let mut conflict = false;
+    for i in 0..n {
+        let partner = partners[i];
+        for edge in sig.edges.iter().filter(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::Exclusion
+                && (edge.source == partner || edge.target == partner)
+        }) {
+            let other = if edge.source == partner {
+                edge.target
+            } else {
+                edge.source
+            };
+            if let Some(index) = partners.iter().position(|candidate| *candidate == other)
+                && index > i
+            {
+                concurrent_sets[i].insert(index);
+                conflict = true;
+            }
+        }
+        if kinds[focus] == NativeSigInterKind::Head && kinds[partner] == NativeSigInterKind::Stem {
+            for stem in partners
+                .iter()
+                .copied()
+                .filter(|candidate| kinds[*candidate] == NativeSigInterKind::Stem)
+            {
+                if let Some(index) = partners.iter().position(|candidate| *candidate == stem)
+                    && index > i
+                {
+                    concurrent_sets[i].insert(index);
+                    conflict = true;
+                }
+            }
+        }
+    }
+
+    let partitions = if conflict {
+        let mut sequences = vec![vec![0_i8; n]];
+        for i in 0..n {
+            let stop = sequences.len();
+            for index in 0..stop {
+                if sequences[index][i] == -1 {
+                    continue;
+                }
+                sequences[index][i] = 1;
+                if !concurrent_sets[i].is_empty() {
+                    let mut without = sequences[index].clone();
+                    without[i] = 0;
+                    sequences.push(without);
+                    for &other in &concurrent_sets[i] {
+                        sequences[index][other] = -1;
+                    }
+                }
+            }
+        }
+        sequences
+    } else {
+        vec![vec![1_i8; n]]
+    };
+    let mut best = 0.0_f64;
+    for partition in partitions {
+        let contribution = partition
+            .iter()
+            .enumerate()
+            .filter(|(_, selected)| **selected == 1)
+            .map(|(index, _)| contributions[&partners[index]])
+            .sum::<f64>();
+        best = best.max(audiveris_core::grade::contextual(
+            grades[focus],
+            contribution,
+        ));
+    }
+    Some(best)
+}
+
+fn native_support_ratio(edge: &NativeSigEdge, focus_is_source: bool) -> f64 {
+    let grade = edge.support.map_or(0.0, |support| support.grade);
+    let coefficient = match edge.kind {
+        NativeSigRelationKind::BarConnection
+        | NativeSigRelationKind::KeyAlters
+        | NativeSigRelationKind::ClefKey => 5.0,
+        NativeSigRelationKind::BeamBeam => 3.0,
+        NativeSigRelationKind::BeamStem if focus_is_source => 4.0,
+        NativeSigRelationKind::BeamStem => {
+            if edge.beam_portion == Some(NativeBeamPortion::Center) {
+                3.0
+            } else {
+                10.0
+            }
+        }
+        NativeSigRelationKind::HeadStem if focus_is_source => {
+            4.0 * edge.head_stem.map_or(1.0, |payload| payload.consistency)
+        }
+        NativeSigRelationKind::HeadStem => 10.0,
+        NativeSigRelationKind::BeamHead if focus_is_source => 0.0,
+        NativeSigRelationKind::BeamHead => 1.0,
+        NativeSigRelationKind::NoExclusion
+        | NativeSigRelationKind::BarGroup
+        | NativeSigRelationKind::Containment
+        | NativeSigRelationKind::Exclusion
+        | NativeSigRelationKind::BeamRest
+        | NativeSigRelationKind::ChordStem => 0.0,
+    };
+    1.0 + coefficient * grade
 }
 
 fn valid_edge_payload(edge: &NativeSigEdge) -> bool {
@@ -446,6 +679,12 @@ fn valid_edge_payload(edge: &NativeSigEdge) -> bool {
             edge.support.is_some()
                 && edge.beam_portion.is_some()
                 && edge.stem_extension.is_some()
+                && edge.head_stem.is_none()
+        }
+        NativeSigRelationKind::BeamHead => {
+            edge.support.is_some()
+                && edge.beam_portion.is_none()
+                && edge.stem_extension.is_none()
                 && edge.head_stem.is_none()
         }
         NativeSigRelationKind::BeamRest => {
@@ -873,6 +1112,7 @@ fn push_edge(
         | NativeSigRelationKind::Containment
         | NativeSigRelationKind::Exclusion
         | NativeSigRelationKind::BeamStem
+        | NativeSigRelationKind::BeamHead
         | NativeSigRelationKind::BeamRest
         | NativeSigRelationKind::HeadStem
         | NativeSigRelationKind::ChordStem => None,
@@ -975,6 +1215,7 @@ fn append_grid(
                 kind: NativeSigInterKind::Brace,
                 shape: Some("BRACE".to_owned()),
                 grade: brace.grade,
+                contextual_grade: None,
                 bounds: NativeSigBounds {
                     x,
                     y: y1,
@@ -1074,6 +1315,7 @@ fn append_grid(
                 kind,
                 shape: Some(shape.to_owned()),
                 grade: node.intrinsic_grade(),
+                contextual_grade: None,
                 bounds,
                 abnormal: false,
                 beam_geometry: None,
@@ -1283,6 +1525,7 @@ fn push_header_vertex(
             kind,
             shape: shape.map(str::to_owned),
             grade,
+            contextual_grade: None,
             bounds: NativeSigBounds {
                 x: bounds.x,
                 y: bounds.y,
@@ -1471,6 +1714,7 @@ fn append_beams(
                 kind: NativeSigInterKind::BeamGroup,
                 shape: None,
                 grade: 1.0,
+                contextual_grade: None,
                 bounds,
                 abnormal: false,
                 beam_geometry: None,
@@ -1575,6 +1819,7 @@ fn push_beam_vertex(graph: &mut NativeSigSystem, beam: &RawBeam) -> usize {
             },
             shape: Some(beam.kind.shape().to_owned()),
             grade: beam.grade,
+            contextual_grade: None,
             bounds: NativeSigBounds {
                 x: bounds.x,
                 y: bounds.y,
@@ -1619,6 +1864,7 @@ fn append_ledgers(
                 kind: NativeSigInterKind::Ledger,
                 shape: Some("LEDGER".to_owned()),
                 grade: inter.grade,
+                contextual_grade: None,
                 bounds: NativeSigBounds {
                     x: left as i32,
                     y: top as i32,
@@ -1670,6 +1916,7 @@ fn append_heads(
                     .to_owned(),
                 ),
                 grade: f64::from_bits(head.grade_bits),
+                contextual_grade: None,
                 bounds: NativeSigBounds {
                     x: head.bounds.x,
                     y: head.bounds.y,

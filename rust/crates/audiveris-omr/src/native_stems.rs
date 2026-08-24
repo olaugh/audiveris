@@ -8,14 +8,18 @@
 //! transaction: later boundaries can replace the remaining identity
 //! authorities without rebuilding or fixture-hydrating the predecessor.
 
-use std::{error::Error, fmt};
+use std::{collections::BTreeSet, error::Error, fmt};
 
 use crate::{
     beam_inters::MIN_INTER_GRADE,
     native_headers::NativeHeaderRecognition,
     native_heads::NativeHeadsRecognition,
     native_ledgers::NativeLedgerRecognition,
-    native_sig::{NativeSigRecognition, assemble_native_sig},
+    native_sig::{
+        NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigRecognition,
+        NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
+        assemble_native_sig,
+    },
     native_stem_seeds::STEM_SEEDS_BELT_MARGIN_RATIO,
     native_stem_seeds::{NativeStemSeedGlyph, NativeStemSeedRecognition},
     native_stems_beam_builders::{
@@ -52,7 +56,8 @@ use crate::{
         remove_native_stems_beam_competing_hook_and_resume,
     },
     native_stems_beam_stumps::{
-        NativeStemsBeamStumpRecognition, materialize_native_stems_beam_stumps,
+        NativeStemsBeamSource, NativeStemsBeamStumpRecognition,
+        materialize_native_stems_beam_stumps,
     },
     native_stems_beam_vlink_base_apply::NativeStemsBeamSheetEditState,
     native_stems_beam_vlink_transaction::{
@@ -80,7 +85,10 @@ use crate::{
     },
     recognize::{GridLinesRecognition, NativeBeamRecognition},
     stem_seeds_step::NativeStemCheckerParameters,
+    stems_step::NativeBeamPortion,
 };
+
+const GOOD_BEAM_GRADE: f64 = 0.35;
 
 /// Java `StemsRetriever.Constants.artificialStemGrade`.
 const ARTIFICIAL_STEM_GRADE: f64 = 0.4;
@@ -294,6 +302,15 @@ pub struct NativeStemsPageFinalizeDrive {
     pub systems: Vec<NativeStemsSystemFinalizeDrive>,
 }
 
+/// Java `StemsRetriever.Finalizer` mutations for one system.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeStemsBeamFinalizationTransaction {
+    pub system_id: usize,
+    pub removed_orphan_beams: Vec<NativeSigVertexId>,
+    pub removed_empty_beam_groups: Vec<NativeSigVertexId>,
+    pub added_beam_head_relations: Vec<NativeSigEdgeId>,
+}
+
 /// Complete owned native STEMS result after every page system has finalized.
 ///
 /// Construction products remain available for diagnostics and later
@@ -303,6 +320,8 @@ pub struct NativeStemsPageFinalizeDrive {
 pub struct NativeStemsRecognition {
     pub components: NativeStemsComponentRecognition,
     pub systems: Vec<NativeStemsSystemFinalizeDrive>,
+    pub beam_finalizations: Vec<NativeStemsBeamFinalizationTransaction>,
+    pub contextualizations: Vec<NativeSigContextualization>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1355,6 +1374,291 @@ impl NativeStemsPreparedRecognition {
     }
 }
 
+#[derive(Clone)]
+struct NativeStemsEpilogBeam {
+    system_index: usize,
+    system_id: usize,
+    vertex: NativeSigVertexId,
+    source: NativeStemsBeamSource,
+    glyph: crate::beam_inters::RegisteredBeamGlyph,
+    center_x: i32,
+    center_y: i32,
+    has_stem: bool,
+}
+
+fn beam_glyph(
+    beams: &NativeBeamRecognition,
+    source: NativeStemsBeamSource,
+) -> Option<&crate::beam_inters::RegisteredBeamGlyph> {
+    match source {
+        NativeStemsBeamSource::RawBeam(ordinal) => {
+            beams.raw_beam_glyphs.get(ordinal).map(|(_, glyph)| glyph)
+        }
+        NativeStemsBeamSource::Hook(ordinal) => {
+            beams.hook_glyphs.get(ordinal).map(|(_, glyph)| glyph)
+        }
+    }
+}
+
+fn native_beam_has_stem(sig: &crate::native_sig::NativeSigSystem, beam: NativeSigVertexId) -> bool {
+    sig.edges.iter().any(|edge| {
+        edge.active && edge.kind == NativeSigRelationKind::BeamStem && edge.source == beam.0
+    })
+}
+
+fn boost_native_stems_beam_sides(
+    sig: &mut crate::native_sig::NativeSigSystem,
+) -> Result<Vec<NativeSigEdgeId>, NativeStemsPreparationError> {
+    let mut boosts = Vec::new();
+    for beam in sig.vertices.iter().filter(|vertex| {
+        vertex.active
+            && matches!(
+                vertex.kind,
+                crate::native_sig::NativeSigInterKind::Beam
+                    | crate::native_sig::NativeSigInterKind::BeamHook
+            )
+            && vertex.grade >= GOOD_BEAM_GRADE
+    }) {
+        for beam_stem in sig.edges.iter().filter(|edge| {
+            edge.active
+                && edge.source == beam.ordinal
+                && edge.kind == NativeSigRelationKind::BeamStem
+                && edge.beam_portion != Some(NativeBeamPortion::Center)
+        }) {
+            let Some(beam_support) = beam_stem.support else {
+                continue;
+            };
+            for head_stem in sig.edges.iter().filter(|edge| {
+                edge.active
+                    && edge.target == beam_stem.target
+                    && edge.kind == NativeSigRelationKind::HeadStem
+            }) {
+                let Some(head_support) = head_stem.support else {
+                    continue;
+                };
+                boosts.push((
+                    beam.ordinal,
+                    head_stem.source,
+                    0.5 * (beam_support.grade + head_support.grade),
+                ));
+            }
+        }
+    }
+    let mut added = Vec::with_capacity(boosts.len());
+    for (beam, head, grade) in boosts {
+        let edge = NativeSigEdge {
+            ordinal: sig.edges.len(),
+            active: true,
+            source: beam,
+            target: head,
+            kind: NativeSigRelationKind::BeamHead,
+            origin: NativeSigRelationOrigin::BaselineGraph,
+            support: Some(NativeSigSupport {
+                grade,
+                bar_connection_impacts: None,
+            }),
+            beam_portion: None,
+            stem_extension: None,
+            head_stem: None,
+        };
+        let id = NativeSigEdgeId(edge.ordinal);
+        sig.append_edge(edge)
+            .map_err(|error| phase(error, "finalizeBeams boost"))?;
+        added.push(id);
+    }
+    Ok(added)
+}
+
+fn vertically_neighboring_systems(
+    grid: &GridLinesRecognition,
+    system_id: usize,
+    above: bool,
+) -> BTreeSet<usize> {
+    let Some(index) = grid
+        .system_bounds
+        .iter()
+        .position(|bounds| bounds.system_id == system_id)
+    else {
+        return BTreeSet::new();
+    };
+    let current = grid.system_bounds[index];
+    let indices: Box<dyn Iterator<Item = usize>> = if above {
+        Box::new((0..index).rev())
+    } else {
+        Box::new((index + 1)..grid.system_bounds.len())
+    };
+    let Some(first) = indices.into_iter().find(|&candidate| {
+        let other = grid.system_bounds[candidate];
+        current.left <= other.right && other.left <= current.right
+    }) else {
+        return BTreeSet::new();
+    };
+    let row = grid.system_bounds[first];
+    grid.system_bounds
+        .iter()
+        .filter(|candidate| candidate.top <= row.bottom && row.top <= candidate.bottom)
+        .map(|candidate| candidate.system_id)
+        .collect()
+}
+
+fn system_staff_extremes(
+    grid: &GridLinesRecognition,
+    system_id: usize,
+) -> Option<(
+    &crate::recognize::StaffLineGeometry,
+    &crate::recognize::StaffLineGeometry,
+)> {
+    let system = grid
+        .peak_graph
+        .sig
+        .systems
+        .iter()
+        .find(|system| system.system_id == system_id)?;
+    let first = *system.staff_ids.first()?;
+    let last = *system.staff_ids.last()?;
+    Some((
+        grid.staff_lines
+            .iter()
+            .find(|staff| staff.staff_id == first)?,
+        grid.staff_lines
+            .iter()
+            .find(|staff| staff.staff_id == last)?,
+    ))
+}
+
+/// Execute Java's page epilog `StemsRetriever.finalizeBeams()` over every
+/// already-finalized live native SIG.
+fn finalize_native_stems_beams(
+    grid: &GridLinesRecognition,
+    beams: &NativeBeamRecognition,
+    systems: &mut [NativeStemsSystemFinalizeDrive],
+) -> Result<Vec<NativeStemsBeamFinalizationTransaction>, NativeStemsPreparationError> {
+    let mut beam_rows = Vec::new();
+    for (system_index, system) in systems.iter().enumerate() {
+        let carrier = &system.transaction.state_after;
+        for (&source, &vertex) in &carrier.beam_state.bindings.beam_vertices {
+            let inter = carrier
+                .beam_state
+                .sig
+                .vertex(vertex.0)
+                .ok_or_else(|| phase("beam binding is not live", "finalizeBeams catalogue"))?;
+            if !matches!(
+                inter.kind,
+                crate::native_sig::NativeSigInterKind::Beam
+                    | crate::native_sig::NativeSigInterKind::BeamHook
+            ) {
+                continue;
+            }
+            let glyph = beam_glyph(beams, source)
+                .ok_or_else(|| phase("beam glyph is missing", "finalizeBeams catalogue"))?
+                .clone();
+            beam_rows.push(NativeStemsEpilogBeam {
+                system_index,
+                system_id: system.system_id,
+                vertex,
+                source,
+                glyph,
+                center_x: inter.bounds.x + inter.bounds.width / 2,
+                center_y: inter.bounds.y + inter.bounds.height / 2,
+                has_stem: native_beam_has_stem(&carrier.beam_state.sig, vertex),
+            });
+        }
+    }
+
+    let mut transactions = systems
+        .iter()
+        .map(|system| NativeStemsBeamFinalizationTransaction {
+            system_id: system.system_id,
+            removed_orphan_beams: Vec::new(),
+            removed_empty_beam_groups: Vec::new(),
+            added_beam_head_relations: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+
+    for row in beam_rows.iter().filter(|row| !row.has_stem) {
+        let (first_staff, last_staff) = system_staff_extremes(grid, row.system_id)
+            .ok_or_else(|| phase("system staff geometry is missing", "finalizeBeams purge"))?;
+        let above = row.center_y < first_staff.first_line_y_at_ext(row.center_x);
+        let below = row.center_y > last_staff.last_line_y_at_ext(row.center_x);
+        let neighbors = if above {
+            vertically_neighboring_systems(grid, row.system_id, true)
+        } else if below {
+            vertically_neighboring_systems(grid, row.system_id, false)
+        } else {
+            BTreeSet::new()
+        };
+        let has_linked_counterpart = beam_rows.iter().any(|other| {
+            other.has_stem && neighbors.contains(&other.system_id) && other.glyph == row.glyph
+        });
+        if has_linked_counterpart {
+            let system = &mut systems[row.system_index];
+            let carrier = &mut system.transaction.state_after;
+            let emptied_groups = carrier
+                .beam_state
+                .sig
+                .edges
+                .iter()
+                .filter(|edge| {
+                    edge.active
+                        && edge.kind == NativeSigRelationKind::Containment
+                        && edge.target == row.vertex.0
+                })
+                .filter_map(|membership| {
+                    let has_other_member = carrier.beam_state.sig.edges.iter().any(|edge| {
+                        edge.active
+                            && edge.kind == NativeSigRelationKind::Containment
+                            && edge.source == membership.source
+                            && edge.target != row.vertex.0
+                    });
+                    (!has_other_member).then_some(NativeSigVertexId(membership.source))
+                })
+                .collect::<Vec<_>>();
+            carrier
+                .beam_state
+                .sig
+                .remove_vertex(row.vertex)
+                .map_err(|error| phase(error, "finalizeBeams purge"))?;
+            carrier
+                .beam_state
+                .bindings
+                .beam_vertices
+                .remove(&row.source);
+            transactions[row.system_index]
+                .removed_orphan_beams
+                .push(row.vertex);
+            for group in emptied_groups {
+                carrier
+                    .beam_state
+                    .sig
+                    .remove_vertex(group)
+                    .map_err(|error| phase(error, "finalizeBeams empty group"))?;
+                carrier
+                    .beam_state
+                    .bindings
+                    .beam_group_vertices
+                    .retain(|_, vertex| *vertex != group);
+                transactions[row.system_index]
+                    .removed_empty_beam_groups
+                    .push(group);
+            }
+        }
+    }
+
+    for (system_index, system) in systems.iter_mut().enumerate() {
+        let carrier = &mut system.transaction.state_after;
+        let sig = &mut carrier.beam_state.sig;
+        transactions[system_index].added_beam_head_relations = boost_native_stems_beam_sides(sig)?;
+        sig.validate_integrity()
+            .map_err(|error| phase(error, "finalizeBeams result"))?;
+        carrier
+            .beam_state
+            .bindings
+            .validate_against(sig)
+            .map_err(|error| phase(error, "finalizeBeams bindings"))?;
+    }
+    Ok(transactions)
+}
+
 /// Compose every read-only STEMS construction product in Java order.
 ///
 /// This boundary does not require a complete mutable SIG, so it remains useful
@@ -1544,9 +1848,269 @@ pub fn recognize_native_stems(
         heads,
         inspect_profile,
     )?;
-    let finalized = prepared.finalize_all_system_stems()?;
+    let mut finalized = prepared.finalize_all_system_stems()?;
+    let beam_finalizations = finalize_native_stems_beams(grid, beams, &mut finalized.systems)?;
+    let contextualizations = finalized
+        .systems
+        .iter_mut()
+        .map(|system| {
+            system
+                .transaction
+                .state_after
+                .beam_state
+                .sig
+                .contextualize()
+        })
+        .collect();
     Ok(NativeStemsRecognition {
         components: prepared.components,
         systems: finalized.systems,
+        beam_finalizations,
+        contextualizations,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        native_sig::{
+            NativeSigBounds, NativeSigHeadStemPayload, NativeSigInterKind, NativeSigSystem,
+            NativeSigVertex,
+        },
+        stems_step::{NativeStemHeadSide, NativeStemPoint},
+    };
+
+    fn vertex(ordinal: usize, kind: NativeSigInterKind, grade: f64) -> NativeSigVertex {
+        NativeSigVertex {
+            ordinal,
+            active: true,
+            removed: false,
+            kind,
+            shape: None,
+            grade,
+            contextual_grade: None,
+            bounds: NativeSigBounds {
+                x: ordinal as i32 * 10,
+                y: 10,
+                width: 5,
+                height: 10,
+            },
+            abnormal: false,
+            beam_geometry: None,
+        }
+    }
+
+    fn support(grade: f64) -> Option<NativeSigSupport> {
+        Some(NativeSigSupport {
+            grade,
+            bar_connection_impacts: None,
+        })
+    }
+
+    #[test]
+    fn finalize_beams_boosts_each_head_on_a_good_beam_side() {
+        let mut sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Beam, GOOD_BEAM_GRADE),
+                vertex(1, NativeSigInterKind::Stem, 0.8),
+                vertex(2, NativeSigInterKind::Head, 0.7),
+            ],
+            edges: vec![
+                NativeSigEdge {
+                    ordinal: 0,
+                    active: true,
+                    source: 0,
+                    target: 1,
+                    kind: NativeSigRelationKind::BeamStem,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: support(0.6),
+                    beam_portion: Some(NativeBeamPortion::Left),
+                    stem_extension: Some(NativeStemPoint { x: 10.0, y: 10.0 }),
+                    head_stem: None,
+                },
+                NativeSigEdge {
+                    ordinal: 1,
+                    active: true,
+                    source: 2,
+                    target: 1,
+                    kind: NativeSigRelationKind::HeadStem,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: support(0.8),
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: Some(NativeSigHeadStemPayload {
+                        dx: 0.0,
+                        dy: 0.0,
+                        head_side: NativeStemHeadSide::Left,
+                        extension_point: NativeStemPoint { x: 20.0, y: 10.0 },
+                        consistency: 1.0,
+                        manual: false,
+                    }),
+                },
+            ],
+        };
+
+        let added = boost_native_stems_beam_sides(&mut sig).expect("valid beam boost");
+        assert_eq!(added, [NativeSigEdgeId(2)]);
+        let edge = &sig.edges[2];
+        assert_eq!((edge.source, edge.target), (0, 2));
+        assert_eq!(edge.kind, NativeSigRelationKind::BeamHead);
+        assert_eq!(
+            edge.support.expect("support").grade.to_bits(),
+            0.7_f64.to_bits()
+        );
+
+        let contextual = sig.contextualize();
+        assert_eq!(contextual.contextualized_vertices, 3);
+        assert_eq!(
+            sig.vertices[0].contextual_grade,
+            Some(audiveris_core::grade::contextual(0.35, 0.8 * 2.4))
+        );
+        assert_eq!(
+            sig.vertices[1].contextual_grade,
+            Some(audiveris_core::grade::contextual(
+                0.8,
+                (0.35 * 6.0) + (0.7 * 8.0)
+            ))
+        );
+        assert_eq!(
+            sig.vertices[2].contextual_grade,
+            Some(audiveris_core::grade::contextual(
+                0.7,
+                (0.8 * 3.2) + (0.35 * 0.7)
+            ))
+        );
+    }
+
+    #[test]
+    fn finalize_beams_skips_center_stems_and_weak_beams() {
+        let mut sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Beam, GOOD_BEAM_GRADE - f64::EPSILON),
+                vertex(1, NativeSigInterKind::Stem, 0.8),
+                vertex(2, NativeSigInterKind::Head, 0.7),
+            ],
+            edges: Vec::new(),
+        };
+        assert!(boost_native_stems_beam_sides(&mut sig).unwrap().is_empty());
+        assert!(sig.edges.is_empty());
+    }
+
+    #[test]
+    fn contextualization_selects_best_mutually_exclusive_partner_partition() {
+        let mut sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Beam, 0.2),
+                vertex(1, NativeSigInterKind::Beam, 0.5),
+                vertex(2, NativeSigInterKind::Beam, 0.8),
+            ],
+            edges: vec![
+                NativeSigEdge {
+                    ordinal: 0,
+                    active: true,
+                    source: 0,
+                    target: 1,
+                    kind: NativeSigRelationKind::BeamBeam,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: support(1.0),
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: None,
+                },
+                NativeSigEdge {
+                    ordinal: 1,
+                    active: true,
+                    source: 0,
+                    target: 2,
+                    kind: NativeSigRelationKind::BeamBeam,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: support(1.0),
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: None,
+                },
+                NativeSigEdge {
+                    ordinal: 2,
+                    active: true,
+                    source: 1,
+                    target: 2,
+                    kind: NativeSigRelationKind::Exclusion,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: None,
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: None,
+                },
+            ],
+        };
+        sig.contextualize();
+        assert_eq!(
+            sig.vertices[0].contextual_grade,
+            Some(audiveris_core::grade::contextual(0.2, 0.8 * 3.0))
+        );
+    }
+
+    #[test]
+    fn contextualization_reports_beam_group_mean_member_best_grade() {
+        let mut sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::BeamGroup, 1.0),
+                vertex(1, NativeSigInterKind::Beam, 0.4),
+                vertex(2, NativeSigInterKind::Beam, 0.8),
+            ],
+            edges: vec![
+                NativeSigEdge {
+                    ordinal: 0,
+                    active: true,
+                    source: 0,
+                    target: 1,
+                    kind: NativeSigRelationKind::Containment,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: None,
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: None,
+                },
+                NativeSigEdge {
+                    ordinal: 1,
+                    active: true,
+                    source: 0,
+                    target: 2,
+                    kind: NativeSigRelationKind::Containment,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: None,
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: None,
+                },
+                NativeSigEdge {
+                    ordinal: 2,
+                    active: true,
+                    source: 1,
+                    target: 2,
+                    kind: NativeSigRelationKind::BeamBeam,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: support(1.0),
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: None,
+                },
+            ],
+        };
+
+        sig.contextualize();
+        let first = audiveris_core::grade::contextual(0.4, 0.8 * 3.0);
+        let second = audiveris_core::grade::contextual(0.8, 0.4 * 3.0);
+        assert_eq!(sig.vertices[1].contextual_grade, Some(first));
+        assert_eq!(sig.vertices[2].contextual_grade, Some(second));
+        assert_eq!(
+            sig.vertices[0].contextual_grade,
+            Some((first + second) / 2.0)
+        );
+    }
 }

@@ -12748,6 +12748,7 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
                 kind: NativeSigInterKind::Stem,
                 shape: Some("STEM".to_owned()),
                 grade,
+                contextual_grade: None,
                 bounds: crate::native_sig::NativeSigBounds {
                     x: bounds.x,
                     y: bounds.y,
@@ -15886,6 +15887,7 @@ fn advance_native_stems_head_c_link_at_frontier(
             kind: NativeSigInterKind::Stem,
             shape: Some("STEM".to_owned()),
             grade,
+            contextual_grade: None,
             bounds: crate::native_sig::NativeSigBounds {
                 x: bounds.x,
                 y: bounds.y,
@@ -17282,6 +17284,7 @@ mod tests {
             kind,
             shape: None,
             grade: 1.0,
+            contextual_grade: None,
             bounds: NativeSigBounds {
                 x: 0,
                 y: 0,
@@ -17469,6 +17472,7 @@ mod tests {
             kind,
             shape: None,
             grade: 1.0,
+            contextual_grade: None,
             bounds: NativeSigBounds {
                 x: 0,
                 y: 0,
