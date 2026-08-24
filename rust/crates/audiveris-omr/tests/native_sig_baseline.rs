@@ -810,6 +810,33 @@ fn assembled_sig_rebuilds_javas_structural_hashes() {
         .iter()
         .find(|system| system.system_id == 1)
         .unwrap();
+    let grid_system = grid
+        .peak_graph
+        .sig
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("GRID system 1");
+    assert!(!system.vertices[0].frozen, "the brace is not frozen");
+    for (index, (_, node)) in grid_system.sig.nodes_in_order().enumerate() {
+        let expected = match node {
+            GridSigNode::Vertical { frozen, .. } | GridSigNode::Connector { frozen, .. } => *frozen,
+        };
+        assert_eq!(
+            system.vertices[index + 1].frozen,
+            expected,
+            "GRID frozen bit at native SIG ordinal {}",
+            index + 1
+        );
+    }
+    assert!(
+        system.vertices[33..43].iter().all(|vertex| vertex.frozen),
+        "StaffHeader.freeze must cover every selected clef/key/time member"
+    );
+    assert!(
+        system.vertices[43..].iter().all(|vertex| !vertex.frozen),
+        "BEAMS and later baseline products are not frozen before REDUCTION"
+    );
     let text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-sig-snapshot-chula-system1.txt"),
     )
@@ -1038,6 +1065,7 @@ fn native_sig_carries_the_first_stem_and_relation_append() {
             ordinal: stem_ordinal,
             active: true,
             removed: false,
+            frozen: false,
             kind: audiveris_omr::native_sig::NativeSigInterKind::Stem,
             shape: Some("STEM".to_owned()),
             grade: 1.0,

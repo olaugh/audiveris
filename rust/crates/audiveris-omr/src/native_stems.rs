@@ -1886,6 +1886,7 @@ mod tests {
             ordinal,
             active: true,
             removed: false,
+            frozen: false,
             kind,
             shape: None,
             grade,

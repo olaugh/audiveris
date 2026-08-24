@@ -1651,6 +1651,7 @@ pub fn apply_native_stems_beam_vlink_base_transaction_to_native_sig(
                     ordinal: vertex.0,
                     active: true,
                     removed: false,
+                    frozen: false,
                     kind: NativeSigInterKind::Stem,
                     shape: Some("STEM".to_owned()),
                     grade,

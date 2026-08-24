@@ -62,6 +62,20 @@ pub struct NativeReductionBeamPruneTransaction {
     pub removed_groups: Vec<NativeSigVertexId>,
 }
 
+/// Java `Grades.minContextualGrade`.
+pub const MIN_REDUCTION_CONTEXTUAL_GRADE: f64 = 0.5;
+
+/// Result of `SigReducer.contextualizeAndPurge()` with `purgeWeaks=true`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionWeakPurgeTransaction {
+    pub system_id: usize,
+    pub contextualization: NativeSigContextualization,
+    /// Weak vertices snapshotted in SIG order before any removal.
+    pub removed_vertices: Vec<NativeSigVertexId>,
+    /// Additional unique ensemble members removed by extensive cascade.
+    pub cascaded_members: Vec<NativeSigVertexId>,
+}
+
 /// Consume terminal native STEMS state and reduce every exclusion which is
 /// already present, in sheet system order.
 ///
@@ -219,6 +233,52 @@ pub fn prune_native_foundation_beams(
     })
 }
 
+/// Java `SigReducer.contextualizeAndPurge()` for foundation reduction.
+///
+/// Frozen ownership is carried by the terminal native SIG from GRID and
+/// HEADERS. Ledgers are never removed by this generic grade floor; Java
+/// handles them in `checkLedgers()`.
+pub fn contextualize_and_purge_native_weaks(
+    sig: &mut NativeSigSystem,
+) -> Result<NativeReductionWeakPurgeTransaction, NativeSigError> {
+    sig.validate_integrity()?;
+    let contextualization = sig.contextualize();
+    let removed_vertices = sig
+        .vertices
+        .iter()
+        .filter(|vertex| {
+            vertex.active
+                && vertex.kind != NativeSigInterKind::Ledger
+                && !vertex.frozen
+                && vertex
+                    .contextual_grade
+                    .is_some_and(|grade| grade < MIN_REDUCTION_CONTEXTUAL_GRADE)
+        })
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut cascaded_members = Vec::new();
+    for &vertex in &removed_vertices {
+        if sig.vertex(vertex.0).is_none() {
+            continue;
+        }
+        let dying = dying_ensembles(sig, vertex);
+        let cascaded = unique_ensemble_members(sig, vertex);
+        remove_vertex_extensively(sig, vertex, &dying)?;
+        for member in cascaded {
+            if !removed_vertices.contains(&member) {
+                push_unique(&mut cascaded_members, member);
+            }
+        }
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionWeakPurgeTransaction {
+        system_id: sig.system_id,
+        contextualization,
+        removed_vertices,
+        cascaded_members,
+    })
+}
+
 fn prune_beams(
     sig: &mut NativeSigSystem,
     candidates: Vec<NativeSigVertexId>,
@@ -250,10 +310,50 @@ fn remove_vertex_extensively(
     vertex: NativeSigVertexId,
     dying_ensembles: &[NativeSigVertexId],
 ) -> Result<(), NativeSigError> {
+    let unique_members = unique_ensemble_members(sig, vertex);
     for &ensemble in dying_ensembles {
         sig.remove_vertex(ensemble)?;
     }
-    sig.remove_vertex(vertex)
+    for member in unique_members {
+        if sig.vertex(member.0).is_some() {
+            // Java removes unique members with `extensive=false`.
+            sig.remove_vertex(member)?;
+        }
+    }
+    if sig.vertex(vertex.0).is_some() {
+        sig.remove_vertex(vertex)?;
+    }
+    Ok(())
+}
+
+fn unique_ensemble_members(
+    sig: &NativeSigSystem,
+    ensemble: NativeSigVertexId,
+) -> Vec<NativeSigVertexId> {
+    if sig
+        .vertex(ensemble.0)
+        .is_none_or(|vertex| vertex.kind != NativeSigInterKind::BeamGroup)
+    {
+        return Vec::new();
+    }
+    sig.edges
+        .iter()
+        .filter(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::Containment
+                && edge.source == ensemble.0
+        })
+        .filter_map(|edge| {
+            let other_ensemble = sig.edges.iter().any(|candidate| {
+                candidate.active
+                    && candidate.kind == NativeSigRelationKind::Containment
+                    && candidate.target == edge.target
+                    && candidate.source != ensemble.0
+                    && sig.vertices[candidate.source].active
+            });
+            (!other_ensemble).then_some(NativeSigVertexId(edge.target))
+        })
+        .collect()
 }
 
 fn best_grade_of(sig: &NativeSigSystem, ordinal: usize) -> f64 {
@@ -306,6 +406,7 @@ mod tests {
             ordinal,
             active: true,
             removed: false,
+            frozen: false,
             kind,
             shape: None,
             grade,
@@ -505,5 +606,50 @@ mod tests {
         assert!(sig.vertices[0].active);
         assert!(sig.vertices[3].removed);
         assert!(sig.vertices[5].active);
+    }
+
+    #[test]
+    fn weak_purge_skips_frozen_and_ledgers() {
+        let mut sig = NativeSigSystem {
+            system_id: 6,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Head, 0.2),
+                vertex(1, NativeSigInterKind::Clef, 0.1),
+                vertex(2, NativeSigInterKind::Ledger, 0.1),
+            ],
+            edges: vec![],
+        };
+        sig.vertices[1].frozen = true;
+
+        let result = contextualize_and_purge_native_weaks(&mut sig).unwrap();
+
+        assert_eq!(result.removed_vertices, vec![NativeSigVertexId(0)]);
+        assert!(result.cascaded_members.is_empty());
+        assert!(sig.vertices[0].removed);
+        assert!(sig.vertices[1].active);
+        assert!(sig.vertices[2].active);
+    }
+
+    #[test]
+    fn excluding_an_ensemble_cascades_only_uniquely_owned_members() {
+        let mut sig = NativeSigSystem {
+            system_id: 8,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::BeamGroup, 0.1),
+                vertex(1, NativeSigInterKind::Beam, 0.9),
+                vertex(2, NativeSigInterKind::Head, 0.8),
+            ],
+            edges: vec![
+                edge(0, 0, 1, NativeSigRelationKind::Containment),
+                edge(1, 0, 2, NativeSigRelationKind::Exclusion),
+            ],
+        };
+
+        let result = reduce_native_sig_exclusions(&mut sig).unwrap();
+
+        assert_eq!(result.removed_vertices, vec![NativeSigVertexId(0)]);
+        assert!(sig.vertices[0].removed);
+        assert!(sig.vertices[1].removed);
+        assert!(sig.vertices[2].active);
     }
 }

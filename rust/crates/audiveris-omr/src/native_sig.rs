@@ -129,6 +129,9 @@ pub struct NativeSigVertex {
     /// Live graph membership. Removal never renumbers this stable slot.
     pub active: bool,
     pub removed: bool,
+    /// Java `Inter.isFrozen()`. GRID supplies its measured frozen bit and all
+    /// selected header inters are frozen by `StaffHeader.freeze()`.
+    pub frozen: bool,
     pub kind: NativeSigInterKind,
     /// Java `Shape.name()`, or `None` for shape-less ensembles.
     pub shape: Option<String>,
@@ -1212,6 +1215,7 @@ fn append_grid(
                 ordinal: 0,
                 active: true,
                 removed: false,
+                frozen: false,
                 kind: NativeSigInterKind::Brace,
                 shape: Some("BRACE".to_owned()),
                 grade: brace.grade,
@@ -1231,6 +1235,9 @@ fn append_grid(
     let base = graph.vertices.len();
     let ordered = system.sig.nodes_in_order().collect::<Vec<_>>();
     for (_, node) in &ordered {
+        let frozen = match node {
+            GridSigNode::Vertical { frozen, .. } | GridSigNode::Connector { frozen, .. } => *frozen,
+        };
         let (kind, shape, bounds) = match node {
             GridSigNode::Vertical { plan, .. } => {
                 let half = plan.width / 2.0;
@@ -1312,6 +1319,7 @@ fn append_grid(
                 ordinal: 0,
                 active: true,
                 removed: false,
+                frozen,
                 kind,
                 shape: Some(shape.to_owned()),
                 grade: node.intrinsic_grade(),
@@ -1522,6 +1530,7 @@ fn push_header_vertex(
             ordinal: 0,
             active: true,
             removed: false,
+            frozen: true,
             kind,
             shape: shape.map(str::to_owned),
             grade,
@@ -1711,6 +1720,7 @@ fn append_beams(
                 ordinal: 0,
                 active: true,
                 removed: false,
+                frozen: false,
                 kind: NativeSigInterKind::BeamGroup,
                 shape: None,
                 grade: 1.0,
@@ -1812,6 +1822,7 @@ fn push_beam_vertex(graph: &mut NativeSigSystem, beam: &RawBeam) -> usize {
             ordinal: 0,
             active: true,
             removed: false,
+            frozen: false,
             kind: match beam.kind {
                 BeamKind::Beam => NativeSigInterKind::Beam,
                 BeamKind::Hook => NativeSigInterKind::BeamHook,
@@ -1861,6 +1872,7 @@ fn append_ledgers(
                 ordinal: 0,
                 active: true,
                 removed: false,
+                frozen: false,
                 kind: NativeSigInterKind::Ledger,
                 shape: Some("LEDGER".to_owned()),
                 grade: inter.grade,
@@ -1905,6 +1917,7 @@ fn append_heads(
                 ordinal: 0,
                 active: true,
                 removed: false,
+                frozen: false,
                 kind: NativeSigInterKind::Head,
                 shape: Some(
                     match head.shape {
