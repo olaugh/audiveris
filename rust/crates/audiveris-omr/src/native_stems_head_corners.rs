@@ -459,7 +459,12 @@ fn source_head_glyph(
             .systems
             .iter()
             .find(|system| system.system_id == system_id)
-            .and_then(|system| system.staffs.iter().find(|staff| staff.staff_id == staff_id))
+            .and_then(|system| {
+                system
+                    .staffs
+                    .iter()
+                    .find(|staff| staff.staff_id == staff_id)
+            })
             .and_then(|staff| staff.heads.iter().find(|source| source.ordinal == ordinal))
             .map(|source| &source.glyph),
         NativeHeadStaffEpilogOrigin::Range(ordinal) => heads
@@ -467,7 +472,12 @@ fn source_head_glyph(
             .systems
             .iter()
             .find(|system| system.system_id == system_id)
-            .and_then(|system| system.staffs.iter().find(|staff| staff.staff_id == staff_id))
+            .and_then(|system| {
+                system
+                    .staffs
+                    .iter()
+                    .find(|staff| staff.staff_id == staff_id)
+            })
             .and_then(|staff| staff.heads.iter().find(|source| source.ordinal == ordinal))
             .map(|source| &source.glyph),
     }

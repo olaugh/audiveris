@@ -11687,3 +11687,27 @@ formatting and strict all-target/all-feature Clippy are clean. This boundary is
 the resolver kernel and evidence retention, not yet the terminal-SIG adapter:
 next bind each live GRID/beam/head/stem vertex to its glyph and ribbon/serif
 area, then run the existing scheduler with the concrete resolver.
+
+## Boundary 284: production lossless overlap epoch
+
+The terminal native SIG now owns the exact evidence consumed by Boundary
+283's resolver. `NativeSigSystemBindings` carries per-vertex geometry for GRID,
+BEAMS, and HEADS; the production adapter adds every live terminal StemInter
+from the owned STEMS carrier and rejects an incomplete active scan domain.
+Registered barline/bracket pixels are frozen directly after `buildBarSticks`
+because subsequent GRID cleanup may remove their source sections. Connector,
+barline, beam, and stem areas are exact median ribbons. Brackets additionally
+carry Bravura's upper and lower serif rectangles, and their SIG bounds are the
+integer bounds of the full Java area. Heads retain registered run tables,
+staff identity, and rounded pitch.
+
+`detect_native_stems_reduction_overlaps` constructs that resolver and runs the
+existing deterministic overlap scheduler against the owned terminal graph. A
+full Batuque regression executes the path for every system, rather than only
+testing synthetic geometry. Focused REDUCTION coverage is 21/21, the new
+bracket-area regression and all 14 music-font tests pass, the Batuque carrier
+passes, and the complete library is 726 passed with two ignored. Formatting,
+strict all-target/all-feature workspace Clippy, and diff checks pass. Next,
+compose overlap discovery with the exact exclusion solver, contextual weak
+purges, and foundation checks in Java epoch order, then finish the remaining
+head, ledger, stem, and beam-group branches.

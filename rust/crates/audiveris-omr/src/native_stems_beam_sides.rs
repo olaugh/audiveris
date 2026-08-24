@@ -17340,6 +17340,7 @@ mod tests {
                 (other_ref, NativeSigVertexId(0)),
                 (current_ref, NativeSigVertexId(1)),
             ]),
+            overlap_geometry: BTreeMap::new(),
         };
         let current_head = heads[0].clone();
         let (writes, changes) = close_heads_sharing_prelinked_stems(
@@ -17516,6 +17517,7 @@ mod tests {
             beam_group_vertices: BTreeMap::from([(7, NativeSigVertexId(0))]),
             stem_vertices: BTreeMap::new(),
             head_vertices: BTreeMap::new(),
+            overlap_geometry: BTreeMap::new(),
         };
         assert_eq!(
             live_group_member_sources(&sig, &bindings, NativeSigVertexId(0))

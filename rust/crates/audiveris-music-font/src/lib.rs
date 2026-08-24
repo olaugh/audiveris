@@ -173,6 +173,8 @@ pub fn codepoint(family: MusicFamily, shape: &str) -> Option<u32> {
         "FLAT" => Some(0xE260),
         "NATURAL" => Some(0xE261),
         "SHARP" => Some(0xE262),
+        "BRACKET_UPPER_SERIF" => Some(0xE003),
+        "BRACKET_LOWER_SERIF" => Some(0xE004),
         // `BravuraSymbols`: the filled oval that `BlackHeadSizer` measures when deriving the
         // sheet's head-specific music-font scale.
         "NOTEHEAD_BLACK" => Some(0xE0A4),

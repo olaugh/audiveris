@@ -245,6 +245,9 @@ pub struct PeakGraphReport {
     pub stickless_peak_count: usize,
     /// Exact registered bar-filament members retained for GRID glyph overlap.
     pub bar_sticks: Vec<BarStick>,
+    /// Fixed glyphs built from each registered bar filament before lag-owned
+    /// sections are consumed by later GRID cleanup.
+    pub bar_glyphs: Vec<RegisteredBarGlyph>,
     /// Accepted detached brace-portion filaments in Java system/staff/probe
     /// order. Their member identities are retained for the later full brace
     /// glyph/SIG promotion boundary.
@@ -283,6 +286,14 @@ pub struct PeakGraphReport {
     /// The horizontal lag after `StaffLineCleaner` rebuilt it from NO_STAFF.
     /// `VerticalsBuilder` considers its one-pixel-wide members as stickers.
     pub horizontal_sections: Vec<Section>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredBarGlyph {
+    pub peak: StaffPeakKey,
+    pub left: usize,
+    pub top: usize,
+    pub run_table: RunTable,
 }
 
 /// Tallies from Java `LinesRetriever.completeLines`.
@@ -1752,6 +1763,12 @@ fn build_peak_graph(
     .map_err(grid_stage("bar sticks"))?;
     let stick_count = stick_state.sticks().len();
     let stickless_peak_count = stick_state.removed_peaks().len();
+    let bar_glyphs = stick_state
+        .sticks()
+        .iter()
+        .map(|stick| registered_bar_glyph(stick, &lags.vertical, &lags.horizontal))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(grid_stage("bar glyphs"))?;
 
     // Java `PeakGraph.findConnections` promotes an alignment when the
     // inter-staff corridor is mostly ink: gap within one interline and white
@@ -2185,6 +2202,7 @@ fn build_peak_graph(
         stick_count,
         stickless_peak_count,
         bar_sticks: stick_state.sticks().to_vec(),
+        bar_glyphs,
         brace_filaments: brace_stage.filaments,
         brace_promotions,
         brace_sig,
@@ -2196,6 +2214,55 @@ fn build_peak_graph(
         completion,
         vertical_sections,
         horizontal_sections,
+    })
+}
+
+fn registered_bar_glyph(
+    stick: &BarStick,
+    vertical: &[Section],
+    horizontal: &[Section],
+) -> Result<RegisteredBarGlyph, RunTableError> {
+    let width = stick.bounds.width;
+    let height = stick.bounds.height;
+    let mut pixels = vec![audiveris_image::run_table::BACKGROUND; width.saturating_mul(height)];
+    for member in &stick.members {
+        let source = match member.lag {
+            audiveris_image::bars_logic::SectionLag::Vertical => vertical,
+            audiveris_image::bars_logic::SectionLag::Horizontal => horizontal,
+        };
+        let section = source
+            .iter()
+            .find(|section| section.id() == member.id)
+            .expect("registered bar stick members remain in their source lag");
+        for (offset, run) in section.runs().iter().enumerate() {
+            match section.orientation() {
+                Orientation::Horizontal => {
+                    let y = section.first_pos() + offset;
+                    for x in run.start..=run.stop() {
+                        pixels[(y - stick.bounds.y) * width + (x - stick.bounds.x)] =
+                            audiveris_image::run_table::FOREGROUND;
+                    }
+                }
+                Orientation::Vertical => {
+                    let x = section.first_pos() + offset;
+                    for y in run.start..=run.stop() {
+                        pixels[(y - stick.bounds.y) * width + (x - stick.bounds.x)] =
+                            audiveris_image::run_table::FOREGROUND;
+                    }
+                }
+            }
+        }
+    }
+    let orientation = if width > height {
+        Orientation::Horizontal
+    } else {
+        Orientation::Vertical
+    };
+    Ok(RegisteredBarGlyph {
+        peak: stick.peak,
+        left: stick.bounds.x,
+        top: stick.bounds.y,
+        run_table: RunTable::from_pixels(orientation, width, height, &pixels)?,
     })
 }
 

@@ -17,6 +17,7 @@ use audiveris_image::{
     bars_logic::{BracketKind, ConnectorInterKind, PeakWidthClass, VerticalInterKind},
     grid_sig::{GridInterId, GridSigNode, GridSigRelation},
 };
+use audiveris_music_font::{MusicFamily, layout_bounds};
 
 use crate::{
     beam_inters::{BeamKind, RawBeam, beam_bounds},
@@ -27,6 +28,10 @@ use crate::{
     native_heads::NativeHeadsRecognition,
     native_heads_staff_epilog::NativeHeadStaffEpilogRef,
     native_ledgers::NativeLedgerRecognition,
+    native_reduction::{
+        NativeReductionAreaGeometry, NativeReductionAreaPoint, NativeReductionGlyphGeometry,
+        NativeReductionInterGeometry,
+    },
     native_stems_beam_stumps::NativeStemsBeamSource,
     recognize::{GridLinesRecognition, NativeBeamRecognition},
     stems_step::{NativeBeamPortion, NativeStemHeadSide, NativeStemPoint},
@@ -717,13 +722,16 @@ pub struct NativeSigRecognition {
     pub bindings: Vec<NativeSigSystemBindings>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NativeSigSystemBindings {
     pub system_id: usize,
     pub beam_vertices: BTreeMap<NativeStemsBeamSource, NativeSigVertexId>,
     pub beam_group_vertices: BTreeMap<usize, NativeSigVertexId>,
     pub stem_vertices: BTreeMap<usize, NativeSigVertexId>,
     pub head_vertices: BTreeMap<NativeHeadStaffEpilogRef, NativeSigVertexId>,
+    /// Exact immutable overlap evidence for vertices published before STEMS.
+    /// Dynamic StemInter entries are joined from the terminal stem registry.
+    pub overlap_geometry: BTreeMap<NativeSigVertexId, NativeReductionInterGeometry>,
 }
 
 impl NativeSigSystemBindings {
@@ -846,6 +854,8 @@ pub enum NativeSigError {
     MissingLedgerGlyph(usize),
     MissingHeadsSystem(usize),
     MissingBraceGlyph(usize),
+    MissingGridGlyph(audiveris_image::staff_peak::StaffPeakKey),
+    MissingBracketFontGeometry,
     MissingStaffLine(usize),
     MissingSelected(&'static str, usize),
     MissingBeamGroup(usize),
@@ -922,6 +932,16 @@ impl fmt::Display for NativeSigError {
             }
             Self::MissingHeadsSystem(id) => write!(formatter, "missing HEADS system {id}"),
             Self::MissingBraceGlyph(id) => write!(formatter, "missing brace glyph {id}"),
+            Self::MissingGridGlyph(peak) => write!(
+                formatter,
+                "missing GRID glyph for staff {} peak {}..{}",
+                peak.staff_id().value(),
+                peak.start(),
+                peak.stop()
+            ),
+            Self::MissingBracketFontGeometry => {
+                formatter.write_str("missing Bravura bracket-serif geometry")
+            }
             Self::MissingStaffLine(id) => write!(formatter, "missing staff-line geometry {id}"),
             Self::MissingSelected(kind, staff) => {
                 write!(formatter, "missing selected {kind} for staff {staff}")
@@ -1056,8 +1076,9 @@ pub fn assemble_native_sig(
             beam_group_vertices: BTreeMap::new(),
             stem_vertices: BTreeMap::new(),
             head_vertices: BTreeMap::new(),
+            overlap_geometry: BTreeMap::new(),
         };
-        append_grid(grid, grid_system, &mut graph)?;
+        append_grid(grid, grid_system, &mut graph, &mut system_bindings)?;
         append_headers(header_system.staffs.as_slice(), &mut graph)?;
         append_beams(
             beams,
@@ -1068,6 +1089,7 @@ pub fn assemble_native_sig(
         )?;
         append_ledgers(ledgers, system_id, &mut graph)?;
         append_heads(
+            heads,
             head_system,
             staff_head_system,
             &mut graph,
@@ -1163,6 +1185,7 @@ fn append_grid(
     grid: &GridLinesRecognition,
     system: &crate::grid_executor::HeadlessSystemSigState,
     graph: &mut NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
 ) -> Result<(), NativeSigError> {
     for brace in grid
         .peak_graph
@@ -1209,7 +1232,7 @@ fn append_grid(
             .last_line
             .y_at_x_ext(f64::from(x_right))
             .round_ties_even() as i32;
-        push_vertex(
+        let vertex = NativeSigVertexId(push_vertex(
             graph,
             NativeSigVertex {
                 ordinal: 0,
@@ -1228,6 +1251,23 @@ fn append_grid(
                 },
                 abnormal: false,
                 beam_geometry: None,
+            },
+        ));
+        bindings.overlap_geometry.insert(
+            vertex,
+            NativeReductionInterGeometry {
+                bounds: graph.vertices[vertex.0].bounds,
+                core_bounds: graph.vertices[vertex.0].bounds,
+                implicit: false,
+                glyph: Some(NativeReductionGlyphGeometry {
+                    left: x,
+                    top: i32::try_from(glyph.y)
+                        .map_err(|_| NativeSigError::MissingBraceGlyph(brace.glyph.value()))?,
+                    run_table: glyph.runs.clone(),
+                }),
+                area: None,
+                head: None,
+                ensemble_members: Vec::new(),
             },
         );
     }
@@ -1268,7 +1308,7 @@ fn append_grid(
                             BracketKind::Bottom => "BRACKET_BOTTOM",
                             BracketKind::Both => "BRACKET",
                         },
-                        bounds,
+                        area_integer_bounds(&bracket_area(plan, grid.scale.scale.interline.main)?),
                     ),
                 }
             }
@@ -1313,7 +1353,7 @@ fn append_grid(
                 }
             }
         };
-        push_vertex(
+        let vertex = NativeSigVertexId(push_vertex(
             graph,
             NativeSigVertex {
                 ordinal: 0,
@@ -1328,7 +1368,10 @@ fn append_grid(
                 abnormal: false,
                 beam_geometry: None,
             },
-        );
+        ));
+        if let Some(geometry) = grid_overlap_geometry(grid, system, node, bounds)? {
+            bindings.overlap_geometry.insert(vertex, geometry);
+        }
     }
     for edge in system.sig.edges() {
         let ordinal = |id: GridInterId| {
@@ -1404,6 +1447,215 @@ fn append_grid(
         }
     }
     Ok(())
+}
+
+fn grid_overlap_geometry(
+    grid: &GridLinesRecognition,
+    system: &crate::grid_executor::HeadlessSystemSigState,
+    node: &GridSigNode,
+    bounds: NativeSigBounds,
+) -> Result<Option<NativeReductionInterGeometry>, NativeSigError> {
+    match node {
+        GridSigNode::Vertical { plan, .. } => {
+            let exact = grid
+                .peak_graph
+                .bar_glyphs
+                .iter()
+                .find(|glyph| glyph.peak == plan.peak);
+            // Brace/bracket peak replacement transfers Java's existing
+            // filament object while changing the StaffPeak key. The retained
+            // source sticks precede that mutation, so recover the transferred
+            // object only when its staff and x-span identify one candidate.
+            let mut transferred = grid.peak_graph.bar_glyphs.iter().filter(|glyph| {
+                glyph.peak.staff_id() == plan.peak.staff_id()
+                    && i32::try_from(glyph.left).is_ok_and(|left| left <= plan.peak.stop())
+                    && i32::try_from(glyph.left.saturating_add(glyph.run_table.width()))
+                        .is_ok_and(|right| right > plan.peak.start())
+            });
+            let transferred_first = transferred.next();
+            let glyph = exact
+                .or_else(|| transferred_first.filter(|_| transferred.next().is_none()))
+                .ok_or(NativeSigError::MissingGridGlyph(plan.peak))?;
+            let glyph = NativeReductionGlyphGeometry {
+                left: i32::try_from(glyph.left)
+                    .map_err(|_| NativeSigError::MissingGridGlyph(plan.peak))?,
+                top: i32::try_from(glyph.top)
+                    .map_err(|_| NativeSigError::MissingGridGlyph(plan.peak))?,
+                run_table: glyph.run_table.clone(),
+            };
+            let area = match plan.kind {
+                VerticalInterKind::Bracket(_) => {
+                    bracket_area(plan, grid.scale.scale.interline.main)?
+                }
+                VerticalInterKind::Barline { .. } => vertical_ribbon_area(
+                    plan.median.x,
+                    plan.median.top,
+                    plan.median.x,
+                    plan.median.bottom,
+                    plan.width,
+                ),
+            };
+            Ok(Some(NativeReductionInterGeometry {
+                bounds,
+                core_bounds: bounds,
+                implicit: false,
+                glyph: Some(glyph),
+                area: Some(area),
+                head: None,
+                ensemble_members: Vec::new(),
+            }))
+        }
+        GridSigNode::Connector { plan, .. } => {
+            let peak = |key| {
+                system
+                    .staff_peaks
+                    .iter()
+                    .flatten()
+                    .find(|peak| peak.key() == key)
+            };
+            let top = peak(plan.top).ok_or(NativeSigError::MissingGridGlyph(plan.top))?;
+            let bottom = peak(plan.bottom).ok_or(NativeSigError::MissingGridGlyph(plan.bottom))?;
+            let x1 = f64::from(top.start()) + (f64::from(top.width()) / 2.0);
+            let x2 = f64::from(bottom.start()) + (f64::from(bottom.width()) / 2.0);
+            let half_line = f64::from(grid.scale.scale.line.main) / 2.0;
+            let y1 = f64::from(top.bottom()) + half_line + 0.5;
+            let y2 = f64::from(bottom.top()) - half_line + 0.5;
+            let width = f64::from(top.width() + bottom.width()) / 2.0;
+            Ok(Some(NativeReductionInterGeometry {
+                bounds,
+                core_bounds: bounds,
+                implicit: false,
+                glyph: None,
+                area: Some(vertical_ribbon_area(x1, y1, x2, y2, width)),
+                head: None,
+                ensemble_members: Vec::new(),
+            }))
+        }
+    }
+}
+
+fn bracket_area(
+    plan: &audiveris_image::bars_logic::VerticalInterPlan,
+    interline: i32,
+) -> Result<NativeReductionAreaGeometry, NativeSigError> {
+    let mut area = vertical_ribbon_area(
+        plan.median.x,
+        plan.median.top,
+        plan.median.x,
+        plan.median.bottom,
+        plan.width,
+    );
+    let VerticalInterKind::Bracket(kind) = plan.kind else {
+        return Ok(area);
+    };
+    let upper = layout_bounds(MusicFamily::Bravura, "BRACKET_UPPER_SERIF", interline)
+        .map_err(|_| NativeSigError::MissingBracketFontGeometry)?
+        .ok_or(NativeSigError::MissingBracketFontGeometry)?;
+    let lower = layout_bounds(MusicFamily::Bravura, "BRACKET_LOWER_SERIF", interline)
+        .map_err(|_| NativeSigError::MissingBracketFontGeometry)?
+        .ok_or(NativeSigError::MissingBracketFontGeometry)?;
+    if matches!(kind, BracketKind::Top | BracketKind::Both) {
+        area.components.push(rectangle_area(
+            plan.median.x - (plan.width / 2.0),
+            plan.median.top - upper.height,
+            upper.width,
+            upper.height,
+        ));
+    }
+    if matches!(kind, BracketKind::Bottom | BracketKind::Both) {
+        area.components.push(rectangle_area(
+            plan.median.x - (plan.width / 2.0),
+            plan.median.bottom,
+            lower.width,
+            lower.height,
+        ));
+    }
+    Ok(area)
+}
+
+fn area_integer_bounds(area: &NativeReductionAreaGeometry) -> NativeSigBounds {
+    let minimum_x = area
+        .components
+        .iter()
+        .flatten()
+        .map(|point| point.x)
+        .fold(f64::INFINITY, f64::min);
+    let maximum_x = area
+        .components
+        .iter()
+        .flatten()
+        .map(|point| point.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let minimum_y = area
+        .components
+        .iter()
+        .flatten()
+        .map(|point| point.y)
+        .fold(f64::INFINITY, f64::min);
+    let maximum_y = area
+        .components
+        .iter()
+        .flatten()
+        .map(|point| point.y)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let left = minimum_x.floor() as i32;
+    let top = minimum_y.floor() as i32;
+    let right = maximum_x.ceil() as i32;
+    let bottom = maximum_y.ceil() as i32;
+    NativeSigBounds {
+        x: left,
+        y: top,
+        width: right.saturating_sub(left),
+        height: bottom.saturating_sub(top),
+    }
+}
+
+fn rectangle_area(x: f64, y: f64, width: f64, height: f64) -> Vec<NativeReductionAreaPoint> {
+    vec![
+        NativeReductionAreaPoint { x, y },
+        NativeReductionAreaPoint { x: x + width, y },
+        NativeReductionAreaPoint {
+            x: x + width,
+            y: y + height,
+        },
+        NativeReductionAreaPoint { x, y: y + height },
+    ]
+}
+
+fn vertical_ribbon_area(
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    width: f64,
+) -> NativeReductionAreaGeometry {
+    let dx = width / 2.0;
+    NativeReductionAreaGeometry {
+        components: vec![vec![
+            NativeReductionAreaPoint { x: x1 - dx, y: y1 },
+            NativeReductionAreaPoint { x: x2 - dx, y: y2 },
+            NativeReductionAreaPoint { x: x2 + dx, y: y2 },
+            NativeReductionAreaPoint { x: x1 + dx, y: y1 },
+        ]],
+    }
+}
+
+fn horizontal_ribbon_area(
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    height: f64,
+) -> NativeReductionAreaGeometry {
+    let dy = height / 2.0;
+    NativeReductionAreaGeometry {
+        components: vec![vec![
+            NativeReductionAreaPoint { x: x1, y: y1 - dy },
+            NativeReductionAreaPoint { x: x2, y: y2 - dy },
+            NativeReductionAreaPoint { x: x2, y: y2 + dy },
+            NativeReductionAreaPoint { x: x1, y: y1 + dy },
+        ]],
+    }
 }
 
 fn append_headers(
@@ -1639,6 +1891,35 @@ fn append_beams(
         if bindings.beam_vertices.insert(source, vertex).is_some() {
             return Err(NativeSigError::DuplicateBeamBinding { system_id, source });
         }
+        let glyph = match source {
+            NativeStemsBeamSource::RawBeam(ordinal) => beams.raw_beam_glyphs.get(ordinal),
+            NativeStemsBeamSource::Hook(ordinal) => beams.hook_glyphs.get(ordinal),
+        }
+        .filter(|(owner, _)| *owner == system_id)
+        .map(|(_, glyph)| glyph)
+        .ok_or(NativeSigError::InvalidBeamSourceBinding { system_id })?;
+        bindings.overlap_geometry.insert(
+            vertex,
+            NativeReductionInterGeometry {
+                bounds: graph.vertices[vertex.0].bounds,
+                core_bounds: graph.vertices[vertex.0].bounds,
+                implicit: false,
+                glyph: Some(NativeReductionGlyphGeometry {
+                    left: glyph.bounds.x,
+                    top: glyph.bounds.y,
+                    run_table: glyph.run_table.clone(),
+                }),
+                area: Some(horizontal_ribbon_area(
+                    beam.item.median.x1,
+                    beam.item.median.y1,
+                    beam.item.median.x2,
+                    beam.item.median.y2,
+                    beam.item.height,
+                )),
+                head: None,
+                ensemble_members: Vec::new(),
+            },
+        );
     }
     let live_indices = created
         .iter()
@@ -1892,6 +2173,7 @@ fn append_ledgers(
 }
 
 fn append_heads(
+    heads: &NativeHeadsRecognition,
     system: &crate::native_heads_epilog::NativeHeadsEpilogSystem,
     staff_system: &crate::native_heads_staff_epilog::NativeHeadsStaffEpilogSystem,
     graph: &mut NativeSigSystem,
@@ -1947,6 +2229,27 @@ fn append_heads(
             },
             NativeSigVertexId(vertex),
         )?;
+        let glyph = source_head_glyph(
+            heads,
+            system.system_id,
+            staff_system.staffs[staff].staff_id,
+            head.origin,
+        )
+        .ok_or(NativeSigError::MissingHeadsSystem(system.system_id))?;
+        let bounds = graph.vertices[vertex].bounds;
+        bindings.overlap_geometry.insert(
+            NativeSigVertexId(vertex),
+            NativeReductionInterGeometry::head(
+                bounds,
+                NativeReductionGlyphGeometry {
+                    left: glyph.glyph_bounds.x,
+                    top: glyph.glyph_bounds.y,
+                    run_table: glyph.run_table.clone(),
+                },
+                Some(staff_system.staffs[staff].staff_id),
+                f64::from_bits(head.pitch_bits).round_ties_even() as i32,
+            ),
+        );
     }
     let ordinal_of = survivors
         .iter()
@@ -1964,4 +2267,99 @@ fn append_heads(
         }
     }
     Ok(())
+}
+
+fn source_head_glyph(
+    heads: &NativeHeadsRecognition,
+    system_id: usize,
+    staff_id: usize,
+    origin: crate::native_heads_staff_epilog::NativeHeadStaffEpilogOrigin,
+) -> Option<&crate::head_glyph_retrieval::RetrievedHeadGlyph> {
+    use crate::native_heads_staff_epilog::NativeHeadStaffEpilogOrigin;
+
+    match origin {
+        NativeHeadStaffEpilogOrigin::Seed(ordinal) => heads
+            .seed_glyphs
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .and_then(|system| {
+                system
+                    .staffs
+                    .iter()
+                    .find(|staff| staff.staff_id == staff_id)
+            })
+            .and_then(|staff| staff.heads.iter().find(|source| source.ordinal == ordinal))
+            .map(|source| &source.glyph),
+        NativeHeadStaffEpilogOrigin::Range(ordinal) => heads
+            .range_glyphs
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .and_then(|system| {
+                system
+                    .staffs
+                    .iter()
+                    .find(|staff| staff.staff_id == staff_id)
+            })
+            .and_then(|staff| staff.heads.iter().find(|source| source.ordinal == ordinal))
+            .map(|source| &source.glyph),
+    }
+}
+
+#[cfg(test)]
+mod overlap_geometry_tests {
+    use super::*;
+    use audiveris_image::{
+        bar_column::StaffId,
+        bars_logic::{VerticalInterPlan, VerticalMedian},
+        staff_peak::StaffPeak,
+    };
+
+    #[test]
+    fn bracket_area_and_bounds_include_both_bravura_serifs() {
+        let peak = StaffPeak::new(StaffId::new(1), 20, 80, 98, 101).expect("valid peak");
+        let plan = VerticalInterPlan {
+            peak: peak.key(),
+            median: VerticalMedian {
+                x: 100.0,
+                top: 20.0,
+                bottom: 80.0,
+            },
+            width: 4.0,
+            impacts: None,
+            kind: VerticalInterKind::Bracket(BracketKind::Both),
+        };
+        let interline = 20;
+
+        let area = bracket_area(&plan, interline).expect("Bravura serif geometry");
+        assert_eq!(area.components.len(), 3, "ribbon plus two serifs");
+
+        let upper = layout_bounds(MusicFamily::Bravura, "BRACKET_UPPER_SERIF", interline)
+            .expect("Bravura parses")
+            .expect("upper serif exists");
+        let lower = layout_bounds(MusicFamily::Bravura, "BRACKET_LOWER_SERIF", interline)
+            .expect("Bravura parses")
+            .expect("lower serif exists");
+        let left = 98.0_f64;
+        let expected_left = left.floor() as i32;
+        let expected_top = (20.0 - upper.height).min(20.0).floor() as i32;
+        let expected_right = 102.0_f64
+            .max(left + upper.width)
+            .max(left + lower.width)
+            .ceil() as i32;
+        let expected_bottom = 80.0_f64.max(80.0 + lower.height).ceil() as i32;
+        assert_eq!(
+            area_integer_bounds(&area),
+            NativeSigBounds {
+                x: expected_left,
+                y: expected_top,
+                width: expected_right - expected_left,
+                height: expected_bottom - expected_top,
+            }
+        );
+        assert!(expected_top < 20, "upper serif expands above the ribbon");
+        assert!(expected_right > 102, "serifs expand right of the ribbon");
+        assert!(expected_bottom > 80, "lower serif expands below the ribbon");
+    }
 }

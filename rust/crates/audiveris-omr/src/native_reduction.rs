@@ -247,7 +247,12 @@ impl NativeReductionInterGeometry {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NativeReductionOverlapGeometryError {
+    MissingSystem(usize),
     MissingGeometry(NativeSigVertexId),
+    MissingStemGeometry {
+        system_id: usize,
+        stem: NativeSigVertexId,
+    },
     InvalidArea {
         vertex: NativeSigVertexId,
         component: usize,
@@ -261,6 +266,9 @@ pub enum NativeReductionOverlapGeometryError {
 impl fmt::Display for NativeReductionOverlapGeometryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MissingSystem(system_id) => {
+                write!(formatter, "missing terminal STEMS system {system_id}")
+            }
             Self::MissingGeometry(vertex) => {
                 write!(
                     formatter,
@@ -268,6 +276,11 @@ impl fmt::Display for NativeReductionOverlapGeometryError {
                     vertex.0
                 )
             }
+            Self::MissingStemGeometry { system_id, stem } => write!(
+                formatter,
+                "terminal STEMS system {system_id} has no geometry for stem {}",
+                stem.0
+            ),
             Self::InvalidArea { vertex, component } => write!(
                 formatter,
                 "vertex {} has invalid overlap area component {component}",
@@ -442,6 +455,139 @@ impl NativeReductionOverlapGeometry for NativeReductionLosslessOverlapResolver {
         right: NativeSigVertexId,
     ) -> Result<bool, NativeReductionOverlapGeometryError> {
         Ok(self.directional_overlaps(left, right)? && self.directional_overlaps(right, left)?)
+    }
+}
+
+/// Join terminal STEMS identities to every exact overlap artifact retained by
+/// its immutable predecessor products and mutable stem registry.
+pub fn native_stems_lossless_overlap_resolver(
+    stems: &NativeStemsRecognition,
+    system_id: usize,
+) -> Result<NativeReductionLosslessOverlapResolver, NativeReductionOverlapGeometryError> {
+    let system = stems
+        .systems
+        .iter()
+        .find(|system| system.system_id == system_id)
+        .ok_or(NativeReductionOverlapGeometryError::MissingSystem(
+            system_id,
+        ))?;
+    let carrier = &system.transaction.state_after;
+    let sig = &carrier.beam_state.sig;
+    let bindings = &carrier.beam_state.bindings;
+    let known_stems = &carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems;
+    let mut geometry = bindings.overlap_geometry.clone();
+    for (&stem_identity, &vertex) in &bindings.stem_vertices {
+        let stem = known_stems
+            .iter()
+            .find(|stem| stem.stem_identity == stem_identity && stem.sig_attached)
+            .ok_or(NativeReductionOverlapGeometryError::MissingStemGeometry {
+                system_id,
+                stem: vertex,
+            })?;
+        let bounds = sig
+            .vertex(vertex.0)
+            .ok_or(NativeReductionOverlapGeometryError::MissingStemGeometry {
+                system_id,
+                stem: vertex,
+            })?
+            .bounds;
+        geometry.insert(
+            vertex,
+            NativeReductionInterGeometry {
+                bounds,
+                core_bounds: bounds,
+                implicit: false,
+                glyph: Some(NativeReductionGlyphGeometry {
+                    left: i32::try_from(stem.glyph_content.bounds.x).map_err(|_| {
+                        NativeReductionOverlapGeometryError::MissingStemGeometry {
+                            system_id,
+                            stem: vertex,
+                        }
+                    })?,
+                    top: i32::try_from(stem.glyph_content.bounds.y).map_err(|_| {
+                        NativeReductionOverlapGeometryError::MissingStemGeometry {
+                            system_id,
+                            stem: vertex,
+                        }
+                    })?,
+                    run_table: stem.glyph_content.run_table.clone(),
+                }),
+                area: Some(vertical_line_area(
+                    stem.geometry.median.start.x,
+                    stem.geometry.median.start.y,
+                    stem.geometry.median.stop.x,
+                    stem.geometry.median.stop.y,
+                    stem.geometry.mean_thickness,
+                )),
+                head: None,
+                ensemble_members: Vec::new(),
+            },
+        );
+    }
+
+    for vertex in sig.vertices.iter().filter(|vertex| {
+        vertex.active && !is_overlap_disabled(vertex.kind) && !is_header_inter(vertex.kind)
+    }) {
+        let id = NativeSigVertexId(vertex.ordinal);
+        if !geometry.contains_key(&id) {
+            return Err(NativeReductionOverlapGeometryError::MissingGeometry(id));
+        }
+    }
+
+    let mut resolver = NativeReductionLosslessOverlapResolver::new(geometry);
+    for edge in sig
+        .edges
+        .iter()
+        .filter(|edge| edge.active && edge.support.is_some())
+    {
+        resolver.add_support_pair(
+            NativeSigVertexId(edge.source),
+            NativeSigVertexId(edge.target),
+        );
+    }
+    Ok(resolver)
+}
+
+/// Execute Java's overlap-discovery epoch directly against one owned terminal
+/// STEMS SIG using only recognition-retained geometry.
+pub fn detect_native_stems_reduction_overlaps(
+    stems: &mut NativeStemsRecognition,
+    system_id: usize,
+) -> Result<NativeReductionOverlapTransaction, NativeReductionOverlapError> {
+    let mut resolver = native_stems_lossless_overlap_resolver(stems, system_id)?;
+    let system = stems
+        .systems
+        .iter_mut()
+        .find(|system| system.system_id == system_id)
+        .ok_or(NativeReductionOverlapGeometryError::MissingSystem(
+            system_id,
+        ))?;
+    detect_native_reduction_overlaps(
+        &mut system.transaction.state_after.beam_state.sig,
+        &mut resolver,
+    )
+}
+
+fn vertical_line_area(
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    width: f64,
+) -> NativeReductionAreaGeometry {
+    let dx = width / 2.0;
+    NativeReductionAreaGeometry {
+        components: vec![vec![
+            NativeReductionAreaPoint { x: x1 - dx, y: y1 },
+            NativeReductionAreaPoint { x: x2 - dx, y: y2 },
+            NativeReductionAreaPoint { x: x2 + dx, y: y2 },
+            NativeReductionAreaPoint { x: x1 + dx, y: y1 },
+        ]],
     }
 }
 

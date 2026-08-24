@@ -20,6 +20,9 @@ use audiveris_omr::{
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
+    native_reduction::{
+        detect_native_stems_reduction_overlaps, native_stems_lossless_overlap_resolver,
+    },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
         assemble_native_sig,
@@ -8710,11 +8713,25 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             && line.contains("nativeScope FullPageAllSystemsGenericFinalize")
             && line.contains("javaEvidence ReturnedAfterFinalPageFinalize")
     }));
-    let recognized =
+    let mut recognized =
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Batuque transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
     assert_generic_finalize_prefix_eq(&recognized.systems, &page_finalized.systems);
+    for system in &recognized.systems {
+        native_stems_lossless_overlap_resolver(&recognized, system.system_id)
+            .expect("Batuque terminal SIG has complete lossless overlap evidence");
+    }
+    let system_ids = recognized
+        .systems
+        .iter()
+        .map(|system| system.system_id)
+        .collect::<Vec<_>>();
+    for system_id in system_ids {
+        let overlap = detect_native_stems_reduction_overlaps(&mut recognized, system_id)
+            .expect("Batuque exact REDUCTION overlap discovery");
+        assert!(!overlap.scan_order.is_empty());
+    }
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

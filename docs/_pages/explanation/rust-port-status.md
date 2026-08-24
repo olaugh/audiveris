@@ -6793,3 +6793,23 @@ the full library passes 725 tests with two ignored; formatting and strict
 all-target/all-feature Clippy are clean. Next is terminal-SIG identity binding,
 including connector/bracket area components, followed by Java-order overlap
 epoch composition.
+
+## Boundary 284: production terminal-SIG overlap geometry
+
+The real terminal SIG now supplies every active overlap interpretation needed
+by the lossless resolver. GRID barline and bracket run tables are frozen at
+`buildBarSticks` time before cleanup can consume their source sections;
+connectors, barlines, beams, and terminal stems contribute exact median ribbon
+areas. Brackets also include Bravura's upper/lower serif rectangles and use
+the full Java-area integer bounds. Heads contribute their exact registered run
+tables, staff identity, and rounded pitch.
+
+The production adapter fails closed if any scanned live identity lacks that
+evidence, then runs the deterministic overlap scheduler directly against the
+owned terminal STEMS graph. The complete Batuque page constructs and executes
+this epoch for every system. Focused REDUCTION coverage passes 21/21, the new
+bracket-area gate and all 14 music-font tests pass, the Batuque carrier passes,
+and the full library passes 726 tests with two ignored. Formatting, strict
+Clippy, and diff checks are clean. Remaining REDUCTION work is Java-order
+composition with the already native exclusion/purge/foundation primitives and
+the still-open head, ledger, stem, and beam-group checks.
