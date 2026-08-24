@@ -18,6 +18,10 @@ fn batuque() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../data/examples/batuque.png")
 }
 
+fn example(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../../data/examples/{name}"))
+}
+
 fn invoke(stage: &str, stream: bool) -> String {
     let mut command = Command::new(binary());
     command.args(["-batch", "-step", stage, "-json"]);
@@ -160,5 +164,47 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
                 "STEMS stage-owned product is emitted exactly once"
             );
         }
+    }
+}
+
+#[test]
+fn stems_json_completes_the_parity_corpus_and_beyond_corpus_scan() {
+    for (page, systems, stems, checked_heads, relations, abnormal_heads) in [
+        ("chula.png", 3, 151, 326, 319, 7),
+        ("allegretto.png", 3, 150, 328, 314, 15),
+        ("batuque.png", 3, 148, 327, 323, 4),
+        ("carmen.png", 5, 178, 429, 403, 26),
+        ("cucaracha.png", 3, 114, 405, 400, 5),
+        ("hove.png", 5, 150, 343, 343, 0),
+        ("zizi.png", 2, 104, 221, 221, 5),
+        ("BachInvention5.jpg", 6, 412, 1142, 1040, 102),
+        ("D0392410-1.256.png", 4, 255, 947, 725, 223),
+    ] {
+        let output = Command::new(binary())
+            .args(["-batch", "-step", "STEMS", "-json"])
+            .arg(example(page))
+            .output()
+            .unwrap_or_else(|error| panic!("run STEMS for {page}: {error}"));
+        assert!(
+            output.status.success(),
+            "STEMS failed for {page}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let payload = String::from_utf8(output.stdout).expect("CLI stdout is UTF-8");
+        assert_eq!(payload.lines().count(), 1, "{page} emits one JSON document");
+        for exact in [
+            format!("\"system_count\":{systems}"),
+            format!("\"stem_count\":{stems}"),
+            format!("\"checked_head_count\":{checked_heads}"),
+            format!("\"head_stem_relation_count\":{relations}"),
+            format!("\"abnormal_head_count\":{abnormal_heads}"),
+        ] {
+            assert!(payload.contains(&exact), "{page} is missing {exact}");
+        }
+        assert_eq!(
+            payload.matches("\"grade_source\":").count(),
+            stems,
+            "{page} publishes every final native Stem exactly once"
+        );
     }
 }

@@ -1993,105 +1993,15 @@ fn stable_sort_items(
     y_direction: i32,
     system_id: usize,
 ) -> Result<(), NativeStemsBeamBuilderError> {
-    // Java `Collections.sort` reaches OpenJDK's object TimSort. The
-    // comparator below is pair-dependent and has observed cycles, so Rust's
-    // stable sort is not a compatible substitute: the run discovery, binary
-    // insertion, and merge sequence decide the visible permutation.
-    if items.len() >= Jdk25TimSortItems::MIN_MERGE {
-        return Err(NativeStemsBeamBuilderError::UnsupportedJdkTimSortLength {
+    // The comparator below is pair-dependent and has observed cycles, so the
+    // exact OpenJDK run discovery, binary insertion, merge, and gallop control
+    // flow is part of the visible result.
+    crate::jdk25_timsort::sort_by(items, |left, right| item_cmp(left, right, y_direction))
+        .then_some(())
+        .ok_or(NativeStemsBeamBuilderError::UnsupportedJdkTimSortLength {
             system_id,
             length: items.len(),
-        });
-    }
-    let mut sort = Jdk25TimSortItems::new(items, y_direction);
-    sort.sort_small();
-    items.clone_from_slice(&sort.items);
-    Ok(())
-}
-
-/// Exact JDK 25 `java.util.TimSort` mini-sort path (lists smaller than
-/// `MIN_MERGE`). The production boundary fails closed before the unpinned
-/// merge/gallop path; corpus evidence retains its maximum list lengths.
-struct Jdk25TimSortItems {
-    items: Vec<NativeStemsBeamBuilderItem>,
-    y_direction: i32,
-}
-
-impl Jdk25TimSortItems {
-    const MIN_MERGE: usize = 32;
-    fn new(items: &[NativeStemsBeamBuilderItem], y_direction: i32) -> Self {
-        Self {
-            items: items.to_vec(),
-            y_direction,
-        }
-    }
-
-    fn compare(
-        &self,
-        left: &NativeStemsBeamBuilderItem,
-        right: &NativeStemsBeamBuilderItem,
-    ) -> Ordering {
-        item_cmp(left, right, self.y_direction)
-    }
-
-    fn sort_small(&mut self) {
-        let length = self.items.len();
-        if length < 2 {
-            return;
-        }
-        debug_assert!(length < Self::MIN_MERGE);
-        let initial_run = self.count_run_and_make_ascending(0, length);
-        self.binary_sort(0, length, initial_run);
-    }
-
-    /// JDK's stable binary insertion sort: comparator-equal pivots insert
-    /// after the equal prefix, which remains observable for this comparator.
-    fn binary_sort(&mut self, lo: usize, hi: usize, mut start: usize) {
-        if start == lo {
-            start += 1;
-        }
-        while start < hi {
-            let pivot = self.items[start].clone();
-            let mut left = lo;
-            let mut right = start;
-            while left < right {
-                let middle = left + (right - left) / 2;
-                if self.compare(&pivot, &self.items[middle]) == Ordering::Less {
-                    right = middle;
-                } else {
-                    left = middle + 1;
-                }
-            }
-            let moved = self.items[left..start].to_vec();
-            self.items[left + 1..start + 1].clone_from_slice(&moved);
-            self.items[left] = pivot;
-            start += 1;
-        }
-    }
-
-    fn count_run_and_make_ascending(&mut self, lo: usize, hi: usize) -> usize {
-        let mut run_hi = lo + 1;
-        if run_hi == hi {
-            return 1;
-        }
-        if self.compare(&self.items[run_hi], &self.items[lo]) == Ordering::Less {
-            run_hi += 1;
-            while run_hi < hi
-                && self.compare(&self.items[run_hi], &self.items[run_hi - 1]) == Ordering::Less
-            {
-                run_hi += 1;
-            }
-            self.items[lo..run_hi].reverse();
-        } else {
-            run_hi += 1;
-            while run_hi < hi
-                && self.compare(&self.items[run_hi], &self.items[run_hi - 1]) != Ordering::Less
-            {
-                run_hi += 1;
-            }
-        }
-        run_hi - lo
-    }
+        })
 }
 
 fn sort_permutation(
@@ -3094,16 +3004,20 @@ mod tests {
     }
 
     #[test]
-    fn jdk25_merge_path_is_explicitly_unsupported() {
-        let mut items = vec![item(NativeStemsBeamBuilderItemKind::SeedGlyph, 12.0); 32];
+    fn jdk25_merge_path_sorts_thirty_two_items() {
+        let mut items = (0..32)
+            .rev()
+            .map(|y| item(NativeStemsBeamBuilderItemKind::SeedGlyph, f64::from(y)))
+            .collect::<Vec<_>>();
 
-        assert!(matches!(
-            stable_sort_items(&mut items, 1, 9),
-            Err(NativeStemsBeamBuilderError::UnsupportedJdkTimSortLength {
-                system_id: 9,
-                length: 32,
-            })
-        ));
+        stable_sort_items(&mut items, 1, 9).expect("JDK TimSort merge path");
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.line.start.y)
+                .collect::<Vec<_>>(),
+            (0..32).map(f64::from).collect::<Vec<_>>()
+        );
     }
 
     #[test]

@@ -2412,95 +2412,13 @@ fn stable_sort_items(
     system_id: usize,
     phase: &'static str,
 ) -> Result<(), NativeStemsHeadBuilderError> {
-    if items.len() >= 32 {
-        return Err(NativeStemsHeadBuilderError::UnsupportedJdkTimSortLength {
+    crate::jdk25_timsort::sort_by(items, |left, right| item_cmp(left, right, y_direction))
+        .then_some(())
+        .ok_or(NativeStemsHeadBuilderError::UnsupportedJdkTimSortLength {
             system_id,
             phase,
             length: items.len(),
-        });
-    }
-    let mut sort = Jdk25MiniTimSort::new(items, y_direction);
-    sort.sort();
-    items.clone_from_slice(&sort.items);
-    Ok(())
-}
-
-struct Jdk25MiniTimSort {
-    items: Vec<NativeStemsHeadBuilderItem>,
-    y_direction: i32,
-}
-
-impl Jdk25MiniTimSort {
-    fn new(items: &[NativeStemsHeadBuilderItem], y_direction: i32) -> Self {
-        Self {
-            items: items.to_vec(),
-            y_direction,
-        }
-    }
-
-    fn compare(
-        &self,
-        left: &NativeStemsHeadBuilderItem,
-        right: &NativeStemsHeadBuilderItem,
-    ) -> Ordering {
-        item_cmp(left, right, self.y_direction)
-    }
-
-    fn sort(&mut self) {
-        let length = self.items.len();
-        if length < 2 {
-            return;
-        }
-        let initial_run = self.count_run_and_make_ascending(0, length);
-        self.binary_sort(0, length, initial_run);
-    }
-
-    fn binary_sort(&mut self, lo: usize, hi: usize, mut start: usize) {
-        if start == lo {
-            start += 1;
-        }
-        while start < hi {
-            let pivot = self.items[start].clone();
-            let mut left = lo;
-            let mut right = start;
-            while left < right {
-                let middle = left + (right - left) / 2;
-                if self.compare(&pivot, &self.items[middle]) == Ordering::Less {
-                    right = middle;
-                } else {
-                    left = middle + 1;
-                }
-            }
-            let moved = self.items[left..start].to_vec();
-            self.items[left + 1..start + 1].clone_from_slice(&moved);
-            self.items[left] = pivot;
-            start += 1;
-        }
-    }
-
-    fn count_run_and_make_ascending(&mut self, lo: usize, hi: usize) -> usize {
-        let mut run_hi = lo + 1;
-        if run_hi == hi {
-            return 1;
-        }
-        if self.compare(&self.items[run_hi], &self.items[lo]) == Ordering::Less {
-            run_hi += 1;
-            while run_hi < hi
-                && self.compare(&self.items[run_hi], &self.items[run_hi - 1]) == Ordering::Less
-            {
-                run_hi += 1;
-            }
-            self.items[lo..run_hi].reverse();
-        } else {
-            run_hi += 1;
-            while run_hi < hi
-                && self.compare(&self.items[run_hi], &self.items[run_hi - 1]) != Ordering::Less
-            {
-                run_hi += 1;
-            }
-        }
-        run_hi - lo
-    }
+        })
 }
 
 fn item_cmp(
@@ -3122,16 +3040,25 @@ mod tests {
     }
 
     #[test]
-    fn sort_fails_closed_at_jdk_merge_boundary() {
-        let mut items = vec![item(NativeStemsHeadBuilderItemKind::SeedGlyph, 0.0, 1.0); 32];
-        assert!(matches!(
-            stable_sort_items(&mut items, 1, 7, "items"),
-            Err(NativeStemsHeadBuilderError::UnsupportedJdkTimSortLength {
-                system_id: 7,
-                phase: "items",
-                length: 32,
+    fn sort_carries_the_jdk_merge_boundary() {
+        let mut items = (0..32)
+            .rev()
+            .map(|y| {
+                item(
+                    NativeStemsHeadBuilderItemKind::SeedGlyph,
+                    f64::from(y),
+                    f64::from(y + 1),
+                )
             })
-        ));
+            .collect::<Vec<_>>();
+        stable_sort_items(&mut items, 1, 7, "items").expect("JDK TimSort merge path");
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.line.start.y)
+                .collect::<Vec<_>>(),
+            (0..32).map(f64::from).collect::<Vec<_>>()
+        );
     }
 
     #[test]

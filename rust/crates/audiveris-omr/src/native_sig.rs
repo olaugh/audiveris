@@ -1358,25 +1358,22 @@ fn append_beams(
         return Err(NativeSigError::MissingBeamGroup(system_id));
     }
 
-    let mut created = Vec::new();
-    for (owner, beam) in &beams.beams_after_multiple_rests {
-        if *owner != system_id {
-            continue;
-        }
-        let matches = beams
-            .raw_beams
-            .iter()
-            .enumerate()
-            .filter(|(_, (candidate_owner, candidate))| {
-                candidate_owner == owner && candidate == beam
-            })
-            .map(|(ordinal, _)| ordinal)
-            .collect::<Vec<_>>();
-        let [ordinal] = matches.as_slice() else {
-            return Err(NativeSigError::InvalidBeamSourceBinding { system_id });
-        };
-        created.push((NativeStemsBeamSource::RawBeam(*ordinal), beam));
-    }
+    let removed_raw_beams = beams
+        .multiple_rests
+        .iter()
+        .map(|rest| rest.source_beam_ordinal)
+        .collect::<BTreeSet<_>>();
+    // `beams_after_multiple_rests` intentionally stores geometry without
+    // identity. Equal beam values can legitimately occur, so recovering a
+    // source by value is ambiguous. Preserve the source ordinal directly from
+    // the aligned pre-replacement stream while applying the same removal set.
+    let mut created = beams
+        .raw_beams
+        .iter()
+        .enumerate()
+        .filter(|(ordinal, (owner, _))| *owner == system_id && !removed_raw_beams.contains(ordinal))
+        .map(|(ordinal, (_, beam))| (NativeStemsBeamSource::RawBeam(ordinal), beam))
+        .collect::<Vec<_>>();
     created.extend(
         beams
             .hooks

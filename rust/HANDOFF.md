@@ -11351,3 +11351,51 @@ reuse: Java StemInter 7366 maps to native glyph 248, stem identity 27, vertex
 allocating a stem. Two fresh Java passes are byte-identical; the next frontier is
 queue 8 x166/SIG58. Forecast: remaining generic STEMS work remains days to a
 couple of focused weeks because every new live branch needs this same evidence.
+
+## Boundary 268: Allegretto terminal phase two and eight-page STEMS publication
+
+The production driver now completes all Allegretto systems through native
+SIDES/STUMPS, both head phases, and generic `finalizeStems`. The final measured
+Java phase-two transactions cover system 1's terminal create/reuse appends and
+system 2's reused-stem append; system queue/finalizer summaries are
+`(10,90,1,0)`, `(11,120,0,0)`, and `(5,118,0,0)` for
+`(queue,checked,no-stem,abnormal)`. The JDK25 fixture is byte-identical across
+two fresh runs. Exact fixture/runner/transform SHA-256 values are
+`6b982b20e0f1ac60059102107ae42b0ddf2e0475de2d64a578e0d737e45249b2`,
+`3c411f6f9672553de28e73ba564fd0f66975656b695352127f2895a3a4368725`,
+and `bfe94c11a20ce9d96323fb4cd43b667952cf3510b9f03c969fa666fc2fd4816a`;
+the emitted semantic body is
+`046d73ae65ab0829a5d0826ca0953750cd488ce9039fa0ce62c29fc96922c554`.
+
+The real Rust-only `-step STEMS -json` path now completes and publishes all
+eight frozen parity pages. Exact `(systems, stems, checked heads, HeadStem
+relations, abnormal heads)` summaries are Chula `(3,151,326,319,7)`,
+Allegretto `(3,150,328,314,15)`, Batuque `(3,148,327,323,4)`, Carmen
+`(5,178,429,403,26)`, Cucaracha `(3,114,405,400,5)`, Hove
+`(5,150,343,343,0)`, Zizi `(2,104,221,221,5)`, and Bach
+`(6,412,1142,1040,102)`. This closes the corpus-wide transactional and
+publication audit named at Boundary 267.
+
+## Boundary 269: generic STEMS crosses beyond the frozen parity corpus
+
+The production transaction engine now carries rejected SIDES transactions,
+Java's remembered SIG-unattached stems, initial profile retries and terminal
+no-link heads, SeedGlyph C-link items, soft-tail following-item expansion,
+mixed head/beam expansions, rejected create/check mutation chronology, ordered
+multi-relation closure, reused unattached stem attachment, and the generic
+phase-two append/no-link loop. Beam/head builder ordering uses a shared stable
+JDK25 TimSort implementation, including merge paths at 32 or more items, and
+raw beam provenance is derived from the live pre-rest-removal set. Header
+geometry follows Java's line endpoint extrapolation when a real scan requests
+an ordinate just outside a sampled spline extent.
+
+With those branches carried atomically, `D0392410-1.256.png` completes the
+entire Rust-only STEMS stage and publishes one schema-1 document: 4 systems,
+255 stems, 947 checked heads, 725 HeadStem relations, and 223 abnormal heads.
+This is a completion/regression gate, not a claim that D039 has a frozen Java
+terminal parity oracle. Together with the eight exact corpus pages, the CLI
+gate now covers nine real pages. The TimSort units, 35/35 sibling suite, 2/2
+CLI stream/publication suite, formatting, strict all-target/all-feature
+workspace Clippy, and diff checks pass. Next work is broader out-of-corpus
+scanning and removal of remaining authenticated legacy dispatch wrappers only
+after their generic replacements remain exact.

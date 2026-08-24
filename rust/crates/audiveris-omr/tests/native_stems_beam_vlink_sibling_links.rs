@@ -250,6 +250,12 @@ const ALLEGRETTO_PHASE_TWO_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-allegretto.txt");
 const ALLEGRETTO_PHASE_TWO_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-allegretto.sh");
+const ALLEGRETTO_TERMINAL_PHASE_TWO_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-allegretto-terminal.txt");
+const ALLEGRETTO_TERMINAL_PHASE_TWO_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-allegretto-terminal.sh");
+const ALLEGRETTO_TERMINAL_PHASE_TWO_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-allegretto-terminal.transform.awk");
 const ALLEGRETTO_PHASE_TWO_X14_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-allegretto-system3-x14.txt");
 const ALLEGRETTO_PHASE_TWO_X14_RUNNER: &[u8] =
@@ -12571,6 +12577,87 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         "ReturnedAfterFinalPageRetry"
     );
 
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_TERMINAL_PHASE_TWO_FIXTURE.as_bytes()),
+        "6b982b20f1bca2f2af15f144c886f1613cdf882e020f0a4d7933ad1781d551cb"
+    );
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_TERMINAL_PHASE_TWO_RUNNER),
+        "3c411f6f9672553de28e73ba564fd0f66975656b695352127f2895a3a4368725"
+    );
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_TERMINAL_PHASE_TWO_TRANSFORM),
+        "bfe94c11a20ce9d96323fb4cd43b667952cf3510b9f03c969fa666fc2fd4816a"
+    );
+    let terminal_rows = ALLEGRETTO_TERMINAL_PHASE_TWO_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(terminal_rows.len(), 24);
+    for exact in [
+        "headInterId 1351 sourceHeadId 1313 sourceCorner TR sourceSide RIGHT",
+        "headInterId 1351 lastIndex 2 selectedStem id2209:glyphid275",
+        "head#1351-Clnk-TL:grade3feffffffffff7df:dx3d38618618618618",
+        "head#1317-Clnk-TR:grade3fe872c0dd16b817",
+        "queueIndex 4 headX 81 headSig 48 headInterId 1351",
+        "headInterId 1347 sourceHeadId 1317 sourceCorner TR sourceSide RIGHT",
+        "headInterId 1347 lastIndex 1 selectedStem id2240:glyphid297",
+        "head#1347-Clnk-TL:grade3feffffffffffc31:dxbd38618618618618",
+        "queueIndex 6 headX 83 headSig 46 headInterId 1347",
+        "headInterId 1523 sourceHeadId 1501 sourceCorner TR sourceSide RIGHT",
+        "headInterId 1523 lastIndex 1 selectedStem id2695:glyphid354",
+        "head#1523-Clnk-TL:grade3feffffffffffe18:dxbd28618618618618",
+        "queueIndex 3 headX 48 headSig 44 headInterId 1523",
+    ] {
+        assert!(
+            ALLEGRETTO_TERMINAL_PHASE_TWO_FIXTURE.contains(exact),
+            "missing Allegretto terminal phase-two oracle fragment: {exact}"
+        );
+    }
+    let terminal_summary = terminal_rows[23];
+    assert_eq!(
+        head_field(terminal_summary, "schema"),
+        "stems-head-phase-two-allegretto-terminal-v1"
+    );
+    assert_eq!(head_field(terminal_summary, "rows"), "23");
+    assert_eq!(
+        head_field(terminal_summary, "runnerSourceSha256"),
+        sha256_hex(ALLEGRETTO_TERMINAL_PHASE_TWO_RUNNER)
+    );
+    assert_eq!(
+        head_field(terminal_summary, "retargetTransformSourceSha256"),
+        sha256_hex(ALLEGRETTO_TERMINAL_PHASE_TWO_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(terminal_summary, "basePhaseTwoRunnerSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_RUNNER)
+    );
+    assert_eq!(
+        head_field(terminal_summary, "basePhaseTwoFixtureSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        head_field(terminal_summary, "emittedBodySha256"),
+        sha256_hex(format!("{}\n", terminal_rows[..23].join("\n")).as_bytes())
+    );
+    assert_eq!(
+        head_field(terminal_summary, "semanticPassSha256"),
+        "046d73ae65ab0829a5d0826ca0953750cd488ce9039fa0ce62c29fc96922c554"
+    );
+    assert_eq!(head_field(terminal_summary, "freshRuns"), "2");
+    assert_eq!(
+        head_field(terminal_summary, "freshRunsByteIdentical"),
+        "true"
+    );
+    assert_eq!(
+        head_field(terminal_summary, "nativeScope"),
+        "AllegrettoSystems1And2TerminalReuseStemAppends"
+    );
+    assert_eq!(
+        head_field(terminal_summary, "javaEvidence"),
+        "ReturnedAfterSystem2RetryIndex3"
+    );
+
     let order115_oracle = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-head-phase-prefix-allegretto-system3-order115.txt"),
     )
@@ -13041,6 +13128,43 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem3Order61TwoChunkBeamCreatedStem"
     );
     assert_eq!(field("javaEvidence"), "ReturnedBeforeSixtyThirdHead");
+
+    let page_phase_two = prepared
+        .drive_all_system_head_linking_phase2()
+        .expect("all three Allegretto systems complete HEADS phase 2");
+    assert_eq!(
+        page_phase_two
+            .systems
+            .iter()
+            .map(|system| (
+                system.system_id,
+                system.carrier.phase_two_index,
+                system.carrier.unlinked_heads.len(),
+            ))
+            .collect::<Vec<_>>(),
+        [(1, 10, 10), (2, 11, 11), (3, 5, 5)]
+    );
+    let finalized = prepared
+        .finalize_all_system_stems()
+        .expect("all three Allegretto systems complete generic finalizeStems");
+    assert_eq!(
+        finalized
+            .systems
+            .iter()
+            .map(|system| (
+                system.system_id,
+                system.transaction.checked_heads,
+                system.transaction.removed_head_stem_relations.len(),
+                system.transaction.abnormal_value_changes,
+            ))
+            .collect::<Vec<_>>(),
+        [(1, 90, 1, 0), (2, 120, 0, 0), (3, 118, 0, 0)]
+    );
+    let recognized =
+        recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+            .expect("Allegretto transactional native STEMS recognition");
+    assert_eq!(recognized.components, prepared.components);
+    assert_eq!(recognized.systems, finalized.systems);
 }
 
 /// Zizi's first wider-corpus gap links the same sibling head through two

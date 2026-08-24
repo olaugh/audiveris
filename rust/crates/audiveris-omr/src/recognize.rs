@@ -2737,12 +2737,26 @@ impl StaffLineGeometry {
             .map(|y| y.round_ties_even() as i32)
     }
 
+    /// Java `LineInfo.yAt(int)` for callers that intentionally follow Java's
+    /// endpoint extrapolation outside the sampled spline extent.
+    #[must_use]
+    pub fn first_line_y_at_ext(&self, x: i32) -> i32 {
+        self.first_line.y_at_x_ext(f64::from(x)).round_ties_even() as i32
+    }
+
     /// Java `LineInfo.yAt(int)` for the last line. Same extrapolation caveat.
     #[must_use]
     pub fn last_line_y_at(&self, x: i32) -> Option<i32> {
         self.last_line
             .y_at_x(f64::from(x))
             .map(|y| y.round_ties_even() as i32)
+    }
+
+    /// Java `LineInfo.yAt(int)` for callers that intentionally follow Java's
+    /// endpoint extrapolation outside the sampled spline extent.
+    #[must_use]
+    pub fn last_line_y_at_ext(&self, x: i32) -> i32 {
+        self.last_line.y_at_x_ext(f64::from(x)).round_ties_even() as i32
     }
 }
 

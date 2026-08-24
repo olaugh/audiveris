@@ -239,20 +239,12 @@ pub fn derive_native_header_grid_context(
                     system_id,
                     staff_id,
                 })?;
-            let first_line_y_at_left = lines.first_line_y_at(lines.left).ok_or(
-                NativeHeaderGridContextError::MissingStaffLineOrdinate {
-                    system_id,
-                    staff_id,
-                    x: lines.left,
-                },
-            )?;
-            let last_line_y_at_left = lines.last_line_y_at(lines.left).ok_or(
-                NativeHeaderGridContextError::MissingStaffLineOrdinate {
-                    system_id,
-                    staff_id,
-                    x: lines.left,
-                },
-            )?;
+            let first_line_y_at_left = lines
+                .first_line_y_at(lines.left)
+                .unwrap_or_else(|| lines.first_line_y_at_ext(lines.left));
+            let last_line_y_at_left = lines
+                .last_line_y_at(lines.left)
+                .unwrap_or_else(|| lines.last_line_y_at_ext(lines.left));
 
             let mut header_staff = HeadlessHeaderStaff::new(staff_id);
             header_staff.part_id = part_id_for_staff(grid_system, staff_id);
@@ -612,7 +604,14 @@ struct GridOrdinates<'a>(&'a [StaffLineGeometry]);
 impl StaffLineOrdinates for GridOrdinates<'_> {
     fn ordinates_at(&self, staff_id: usize, x: i32) -> Option<(i32, i32)> {
         let staff = self.0.iter().find(|staff| staff.staff_id == staff_id)?;
-        Some((staff.first_line_y_at(x)?, staff.last_line_y_at(x)?))
+        Some((
+            staff
+                .first_line_y_at(x)
+                .unwrap_or_else(|| staff.first_line_y_at_ext(x)),
+            staff
+                .last_line_y_at(x)
+                .unwrap_or_else(|| staff.last_line_y_at_ext(x)),
+        ))
     }
 }
 
@@ -987,22 +986,23 @@ fn header_start(
 }
 
 fn line_ordinate(
-    system_id: usize,
+    _system_id: usize,
     staff: &NativeHeaderGridStaff,
     x: i32,
     first: bool,
 ) -> Result<i32, NativeHeaderRecognitionError> {
     let ordinate = if first {
-        staff.lines.first_line_y_at(x)
+        staff
+            .lines
+            .first_line_y_at(x)
+            .unwrap_or_else(|| staff.lines.first_line_y_at_ext(x))
     } else {
-        staff.lines.last_line_y_at(x)
+        staff
+            .lines
+            .last_line_y_at(x)
+            .unwrap_or_else(|| staff.lines.last_line_y_at_ext(x))
     };
-    ordinate.ok_or(NativeHeaderRecognitionError::MissingLineOrdinate {
-        system_id,
-        staff_id: staff.staff_id,
-        x,
-        boundary: if first { "first" } else { "last" },
-    })
+    Ok(ordinate)
 }
 
 fn scaled_usize(

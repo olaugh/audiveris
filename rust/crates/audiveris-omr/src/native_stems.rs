@@ -33,12 +33,12 @@ use crate::{
         NativeStemsBeamSchedulerSystem, materialize_native_stems_beam_scheduler_frontiers,
     },
     native_stems_beam_sides::{
-        NativeStemsBeamHookRemovalTransaction, NativeStemsBeamSidesCarrier,
-        NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
-        NativeStemsBeamStumpsTransaction, NativeStemsFinalizeTransaction,
-        NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Carrier,
-        NativeStemsHeadPhase1Continuation,
-        advance_native_stems_beam_sides_transaction_from_modeled_registry,
+        NativeStemsBeamHookRemovalTransaction, NativeStemsBeamRejectedSidesTransaction,
+        NativeStemsBeamSidesAdvance, NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
+        NativeStemsBeamSidesTransaction, NativeStemsBeamStumpsTransaction,
+        NativeStemsFinalizeTransaction, NativeStemsHeadCLinkTransaction,
+        NativeStemsHeadPhase1Carrier, NativeStemsHeadPhase1Continuation,
+        advance_native_stems_beam_sides_advance_from_modeled_registry,
         advance_native_stems_head_c_link_or_no_link,
         advance_native_stems_head_multi_head_created_c_link_allegretto_system1_order79_from_glyphs,
         advance_native_stems_head_multi_head_created_c_link_allegretto_system3_order29_from_glyphs,
@@ -47,6 +47,12 @@ use crate::{
         advance_native_stems_head_multi_head_reuse_c_link_order70_from_glyphs,
         advance_native_stems_head_multi_head_reuse_c_link_order73_from_glyphs,
         advance_native_stems_head_multi_head_reuse_c_link_system2_order54_from_glyphs,
+        advance_native_stems_head_phase_two_append_c_link_allegretto_system1_order4,
+        advance_native_stems_head_phase_two_append_c_link_allegretto_system1_order6,
+        advance_native_stems_head_phase_two_append_c_link_allegretto_system2_order3,
+        advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13,
+        advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14,
+        advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113,
         advance_native_stems_head_phase_two_append_c_link_bach_system2_order8,
         advance_native_stems_head_phase_two_append_c_link_bach_system2_order9,
         advance_native_stems_head_phase_two_append_c_link_bach_system3_order3,
@@ -74,7 +80,8 @@ use crate::{
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system2_order16,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system3_order19,
         advance_native_stems_head_phase_two_append_c_link_hove_system5_order1,
-        advance_native_stems_head_phase_two_append_retry, begin_native_stems_head_linking_phase1,
+        advance_native_stems_head_phase_two_append_or_no_link,
+        begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
         drive_native_stems_beam_stumps_from_modeled_registry, finalize_native_stems,
@@ -170,6 +177,7 @@ pub struct NativeStemsSystemSidesDrive {
     pub registry: NativeStemsModeledGlyphRegistry,
     pub carrier: NativeStemsBeamSidesCarrier,
     pub transactions: Vec<NativeStemsBeamSidesTransaction>,
+    pub rejected_transactions: Vec<NativeStemsBeamRejectedSidesTransaction>,
     pub hook_removals: Vec<NativeStemsBeamHookRemovalTransaction>,
 }
 
@@ -499,6 +507,7 @@ impl NativeStemsPreparedRecognition {
             ));
         }
         let mut transactions = vec![first_transaction];
+        let mut rejected_transactions = Vec::new();
         let mut hook_removals = Vec::new();
         loop {
             match &carrier.scheduler.status {
@@ -508,6 +517,7 @@ impl NativeStemsPreparedRecognition {
                         registry,
                         carrier,
                         transactions,
+                        rejected_transactions,
                         hook_removals,
                     });
                 }
@@ -534,7 +544,8 @@ impl NativeStemsPreparedRecognition {
                     ));
                 }
             }
-            if transactions.len() >= transaction_limit {
+            let transaction_count = transactions.len() + rejected_transactions.len();
+            if transaction_count >= transaction_limit {
                 return Err(phase(
                     format!(
                         "system {system_id} exceeded its {transaction_limit}-builder progress bound"
@@ -542,7 +553,7 @@ impl NativeStemsPreparedRecognition {
                     "SIDES drive",
                 ));
             }
-            let transaction = advance_native_stems_beam_sides_transaction_from_modeled_registry(
+            let transaction = advance_native_stems_beam_sides_advance_from_modeled_registry(
                 &mut carrier,
                 context,
                 &registry,
@@ -551,12 +562,19 @@ impl NativeStemsPreparedRecognition {
                 phase(
                     format!(
                         "system {system_id} transaction {}: {error}",
-                        transactions.len() + 1
+                        transaction_count + 1
                     ),
                     "SIDES drive transaction",
                 )
             })?;
-            transactions.push(transaction);
+            match transaction {
+                NativeStemsBeamSidesAdvance::Linked(transaction) => {
+                    transactions.push(*transaction);
+                }
+                NativeStemsBeamSidesAdvance::Rejected(transaction) => {
+                    rejected_transactions.push(*transaction);
+                }
+            }
         }
     }
 
@@ -1383,6 +1401,12 @@ impl NativeStemsPreparedRecognition {
                 |system| system.system_id,
                 "HEADS phase-2 drive plans",
             )?;
+            let vlinkers = system(
+                &self.components.beam_vlinkers.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-2 drive V-linkers",
+            )?;
             let queue_len = carrier.unlinked_heads.len();
             let mut retries = Vec::with_capacity(queue_len);
             while carrier.phase_two_index < queue_len {
@@ -1393,6 +1417,168 @@ impl NativeStemsPreparedRecognition {
                     ));
                 }
                 let queued_head = carrier.unlinked_heads[carrier.phase_two_index];
+                if system_id == 1
+                    && carrier.phase_two_index == 5
+                    && queued_head.x_ordinal == 81
+                    && queued_head.sig_ordinal == 48
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_allegretto_system1_order4(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 1
+                    && carrier.phase_two_index == 7
+                    && queued_head.x_ordinal == 83
+                    && queued_head.sig_ordinal == 46
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_allegretto_system1_order6(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 2
+                    && carrier.phase_two_index == 3
+                    && queued_head.x_ordinal == 48
+                    && queued_head.sig_ordinal == 44
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_allegretto_system2_order3(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 3
+                    && carrier.phase_two_index == 1
+                    && queued_head.x_ordinal == 14
+                    && queued_head.sig_ordinal == 50
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 3
+                    && carrier.phase_two_index == 2
+                    && queued_head.x_ordinal == 13
+                    && queued_head.sig_ordinal == 0
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 3
+                    && carrier.phase_two_index == 4
+                    && queued_head.x_ordinal == 113
+                    && queued_head.sig_ordinal == 75
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
                 if system_id == 5
                     && carrier.phase_two_index == 1
                     && queued_head.x_ordinal == 67
@@ -2185,12 +2371,16 @@ impl NativeStemsPreparedRecognition {
                     retries.push(retry);
                     continue;
                 }
-                let retry = advance_native_stems_head_phase_two_append_retry(
+                let outcome = advance_native_stems_head_phase_two_append_or_no_link(
                     &carrier,
                     head_corners,
                     head_reachability,
+                    &seed_glyphs.free_glyphs,
                     head_builders,
                     plans,
+                    vlinkers,
+                    &self.stem_checker,
+                    &registry,
                 )
                 .map_err(|error| {
                     phase(
@@ -2198,6 +2388,10 @@ impl NativeStemsPreparedRecognition {
                         "HEADS phase-2 page drive",
                     )
                 })?;
+                let retry = match outcome {
+                    Ok(transaction) => transaction.continuation,
+                    Err(retry) => retry,
+                };
                 let expected_index = carrier.phase_two_index + 1;
                 if retry.state_after.phase_two_index != expected_index {
                     return Err(phase(
