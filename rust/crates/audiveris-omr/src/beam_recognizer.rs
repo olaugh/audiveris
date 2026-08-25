@@ -259,6 +259,31 @@ pub fn check_beam_glyph(
     item: &ItemParameters,
     sheet: &SheetParameters,
 ) -> BeamCheck {
+    check_beam_glyph_mode(component, raster, item, sheet, true)
+}
+
+/// Java `checkBeamGlyph(..., true, ...)` for active CUE_BEAMS.
+///
+/// Cue spots deliberately skip the ordinary maximum-slope/vertical-fit gate;
+/// all border, width, parallelism, adjustment, extension, and split rules are
+/// otherwise identical.
+#[must_use]
+pub fn check_cue_beam_glyph(
+    component: &GlyphComponent,
+    raster: &RunTable,
+    item: &ItemParameters,
+    sheet: &SheetParameters,
+) -> BeamCheck {
+    check_beam_glyph_mode(component, raster, item, sheet, false)
+}
+
+fn check_beam_glyph_mode(
+    component: &GlyphComponent,
+    raster: &RunTable,
+    item: &ItemParameters,
+    sheet: &SheetParameters,
+    check_slope: bool,
+) -> BeamCheck {
     let mut check = BeamCheck {
         mean_height: None,
         mean_distance: None,
@@ -283,16 +308,18 @@ pub fn check_beam_glyph(
 
     // Java catches an exception from the slope of a vertical fit and calls that
     // its own refusal, distinct from a slope that is merely too steep.
-    match center_line(component) {
-        Some(line) if line.x2 != line.x1 => {
-            if line.slope().abs() > sheet.max_beam_slope {
-                check.rejection = Some(BeamRejection::TooSteep);
+    if check_slope {
+        match center_line(component) {
+            Some(line) if line.x2 != line.x1 => {
+                if line.slope().abs() > sheet.max_beam_slope {
+                    check.rejection = Some(BeamRejection::TooSteep);
+                    return check;
+                }
+            }
+            _ => {
+                check.rejection = Some(BeamRejection::Vertical);
                 return check;
             }
-        }
-        _ => {
-            check.rejection = Some(BeamRejection::Vertical);
-            return check;
         }
     }
 
@@ -385,6 +412,25 @@ mod tests {
         assert_eq!(endpoints.x2 + 1.0, centered.x2);
         assert_eq!(endpoints.y1 + 0.5, centered.y1);
         assert_eq!(endpoints.y2 + 0.5, centered.y2);
+    }
+
+    #[test]
+    fn cue_mode_skips_the_ordinary_vertical_fit_gate() {
+        let pixels = vec![FOREGROUND; 8];
+        let table = RunTable::from_pixels(Orientation::Vertical, 1, 8, &pixels).unwrap();
+        let components = build_glyph_components(&table, 0, 0);
+        let component = &components[0];
+        let item = ItemParameters::new(1, 1.0, true);
+        let sheet = SheetParameters::new(1);
+
+        assert_eq!(
+            check_beam_glyph(component, &table, &item, &sheet).rejection,
+            Some(BeamRejection::Vertical)
+        );
+        assert_ne!(
+            check_cue_beam_glyph(component, &table, &item, &sheet).rejection,
+            Some(BeamRejection::Vertical)
+        );
     }
 
     #[test]

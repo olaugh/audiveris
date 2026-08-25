@@ -10,13 +10,17 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use audiveris_image::{
+    beam_structure::BeamRaster,
     glyph_factory::{GlyphComponent, build_glyph_components},
     morphology::{BEAM_CIRCLE_DIAMETER_RATIO, close_with_disk, digest},
     run_table::{Orientation, RunTable, RunTableError},
     spots::BEAM_BINARIZATION_THRESHOLD,
 };
 
-use crate::beam_parameters::SheetParameters;
+use crate::beam_inters::{RawBeam, create_beam_inters};
+use crate::beam_parameters::{ItemParameters, SheetParameters};
+use crate::beam_recognizer::{BeamCheck, BeamRejection, check_cue_beam_glyph};
+use crate::beams_step::component_vertical_raster;
 use crate::head_scanner_slices::JavaRectangle;
 use crate::native_heads_range_lookup::java_rectangle_grow;
 use crate::native_reduction::NativeReductionRecognition;
@@ -361,6 +365,7 @@ pub struct NativeCueAggregateSpots {
     pub aggregate_ordinal: usize,
     pub cue_box: NativeSigBounds,
     pub closing_radius: f32,
+    pub cue_beam_height: f64,
     pub closed_digest: String,
     pub glyphs: Vec<GlyphComponent>,
 }
@@ -369,6 +374,56 @@ pub struct NativeCueAggregateSpots {
 pub struct NativeCueSpotRecognition {
     pub aggregates: Vec<NativeCueAggregateSpots>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeCueBeamFailure {
+    Rejected(BeamRejection),
+    NoGoodItem,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamGlyphCheck {
+    pub glyph_ordinal: usize,
+    pub check: BeamCheck,
+    /// Java `createdCues`, always `SmallBeamInter` products in source order.
+    pub created_cues: Vec<RawBeam>,
+    pub failure: Option<NativeCueBeamFailure>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamAggregateCheck {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub glyphs: Vec<NativeCueBeamGlyphCheck>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamCheckRecognition {
+    pub aggregates: Vec<NativeCueBeamAggregateCheck>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeCueBeamCheckError {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub glyph_ordinal: usize,
+    pub message: String,
+}
+
+impl fmt::Display for NativeCueBeamCheckError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "native cue beam check S{}A{} glyph {}: {}",
+            self.system_id,
+            self.aggregate_ordinal + 1,
+            self.glyph_ordinal,
+            self.message
+        )
+    }
+}
+
+impl Error for NativeCueBeamCheckError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NativeCueAggregateError {
@@ -615,12 +670,68 @@ pub fn extract_native_cue_spots(
                 aggregate_ordinal: plan.aggregate_ordinal,
                 cue_box,
                 closing_radius,
+                cue_beam_height: plan.cue_beam_height,
                 closed_digest,
                 glyphs,
             });
         }
     }
     Ok(NativeCueSpotRecognition { aggregates })
+}
+
+/// Run Java's cue-specific `checkBeamGlyph(..., true, ...)` and
+/// `createSmallBeamInters` kernels without registering glyphs or mutating SIG.
+pub fn check_native_cue_beam_spots(
+    grid: &GridLinesRecognition,
+    spots: &NativeCueSpotRecognition,
+    interline: i32,
+) -> Result<NativeCueBeamCheckRecognition, NativeCueBeamCheckError> {
+    let sheet = SheetParameters::new(interline);
+    let source = BeamRaster {
+        table: &grid.no_staff,
+        offset_x: 0,
+        offset_y: 0,
+    };
+    let mut aggregates = Vec::with_capacity(spots.aggregates.len());
+    for aggregate in &spots.aggregates {
+        let item = ItemParameters::new(interline, aggregate.cue_beam_height, true);
+        let mut glyphs = Vec::with_capacity(aggregate.glyphs.len());
+        for (glyph_ordinal, glyph) in aggregate.glyphs.iter().enumerate() {
+            let raster =
+                component_vertical_raster(glyph).map_err(|error| NativeCueBeamCheckError {
+                    system_id: aggregate.system_id,
+                    aggregate_ordinal: aggregate.aggregate_ordinal,
+                    glyph_ordinal,
+                    message: error.to_string(),
+                })?;
+            let check = check_cue_beam_glyph(glyph, &raster, &item, &sheet);
+            let created_cues = check.structure.as_ref().map_or_else(Vec::new, |structure| {
+                create_beam_inters(
+                    structure, &raster, glyph.left, glyph.top, source, &item, &sheet,
+                )
+            });
+            let failure = check
+                .rejection
+                .map(NativeCueBeamFailure::Rejected)
+                .or_else(|| {
+                    created_cues
+                        .is_empty()
+                        .then_some(NativeCueBeamFailure::NoGoodItem)
+                });
+            glyphs.push(NativeCueBeamGlyphCheck {
+                glyph_ordinal,
+                check,
+                created_cues,
+                failure,
+            });
+        }
+        aggregates.push(NativeCueBeamAggregateCheck {
+            system_id: aggregate.system_id,
+            aggregate_ordinal: aggregate.aggregate_ordinal,
+            glyphs,
+        });
+    }
+    Ok(NativeCueBeamCheckRecognition { aggregates })
 }
 
 fn extract_cue_spot_components(

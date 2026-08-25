@@ -7127,3 +7127,11 @@ tests pin the geometry and morphology; the eight-page corpus remains an exact
 zero-plan/zero-spot result because all nine qualified heads are singletons.
 Active publication still waits for cue glyph registration, beam grading,
 grouping, and stem linking.
+
+## Boundary 301: cue-specific beam grading
+
+Cue spot components now pass through Java's cue-mode beam structure and impact
+checks and produce ordered `SmallBeamInter` creation plans. Cue mode skips only
+the ordinary slope/vertical-fit gate; all later geometry and grade checks remain
+shared with BEAMS. The current corpus still has zero plans after singleton
+purge. Registration, SIG mutation, grouping, and stem linking remain next.

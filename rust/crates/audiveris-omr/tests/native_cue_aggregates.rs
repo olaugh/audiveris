@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use audiveris_omr::{
     cue_beams_step::{
-        NativeCueAggregateRecognition, extract_native_cue_spots, materialize_native_cue_aggregates,
-        plan_native_cue_aggregate_processing,
+        NativeCueAggregateRecognition, check_native_cue_beam_spots, extract_native_cue_spots,
+        materialize_native_cue_aggregates, plan_native_cue_aggregate_processing,
     },
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads_with_small_heads,
@@ -56,9 +56,12 @@ fn active_cue_aggregate_corpus_matches_java() {
                 .all(|system| system.plans.is_empty()),
             "{page}"
         );
+        let spots =
+            extract_native_cue_spots(&grid, &processing).expect("native cue spot extraction");
+        assert!(spots.aggregates.is_empty(), "{page}");
         assert!(
-            extract_native_cue_spots(&grid, &processing)
-                .expect("native cue spot extraction")
+            check_native_cue_beam_spots(&grid, &spots, reduction.stems.reduction_interline)
+                .expect("native cue beam checks")
                 .aggregates
                 .is_empty(),
             "{page}"

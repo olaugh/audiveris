@@ -6623,3 +6623,17 @@ returns, crop clipping, closing radius, and glyph geometry. The eight-page
 active differential remains an exact empty process/spot result because Java's
 nine qualified heads are all purged singletons. Registration, beam grading,
 cue grouping, and BeamStem linking remain deliberately unclaimed.
+
+## Boundary 301: cue beam grading plans
+
+Extracted cue glyphs now enter a native cue-specific `checkBeamGlyph` path and
+the shared small-beam creation kernel. The cue path skips only Java's
+`!isCue` maximum-slope/vertical-fit block; every later structural and impact
+gate is shared with ordinary BEAMS. Successful items are planned as
+`SmallBeamInter` products in Java line/item order, and rejected/no-good-item
+outcomes remain explicit.
+
+Focused tests pin the cue-versus-standard slope distinction, and the active
+eight-page differential remains empty through the grading plan because all
+qualified heads are singletons. Glyph registration, shared spot retention,
+SIG insertion, grouping, and linking are the next mutation slice.

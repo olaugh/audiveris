@@ -12153,3 +12153,23 @@ therefore no process plan or cue spot, matching Java without mutation.
 Resume at the next source statement: register each cue glyph as BEAM_SPOT,
 append it to the shared spot list, grade it through `checkBeamGlyph(..., true,
 stdParams, createdCues)`, then group and link the accepted cue beams.
+
+## Boundary 301: cue-specific beam checks and creation plans
+
+`check_native_cue_beam_spots` now carries each extracted component through
+Java's `checkBeamGlyph(glyph, true, stdParams, createdCues)` computation and
+the existing `createSmallBeamInters`-equivalent impact kernel. The item
+parameters use the unrounded cue height and `isSmall=true`, so successful items
+are `SmallBeamInter` plans only and preserve Java line/item order.
+
+The shared recognizer now has an explicit cue entry point. It skips exactly the
+ordinary maximum-slope/vertical-fit gate, as Java does when `isCue` is true,
+while retaining all width, mean-height, border-distance, parallelism, side
+adjustment, middle-line extension, split, core/belt, and grade rules. A focused
+regression proves the standard entry rejects a vertical-fit glyph and the cue
+entry does not reject it for that reason. The eight-page active differential
+still produces zero checks because no aggregate survives singleton purge.
+
+Next is the mutation envelope: register every checked glyph as BEAM_SPOT,
+append it to the shared cue spot list even on rejection, then register accepted
+SmallBeam vertices and their glyph ownership before cue grouping and stem links.
