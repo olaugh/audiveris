@@ -7116,3 +7116,14 @@ to a standard beam and excluded. The frozen fixture/probe/runner hashes are
 and `45b47a66a30665c7c3737926ad3aa8bff77a4c14fab4ecefbbf49ab1f5394e15`.
 Active CUE_BEAMS remains unpublished until `CueAggregate.process()` cue-spot
 morphology, beam creation, and linking are ported.
+
+## Boundary 300: cue-process crop and morphology
+
+Rust now follows retained cue aggregates through Java's direction gate and
+`getCueGlyphs()`: inclusive quarter-stem direction, mixed/unknown early return,
+the exact shifted and clipped NO_STAFF crop, unrounded 0.6 beam-height closing,
+threshold 140, vertical runs, and sheet-coordinate glyph components. Synthetic
+tests pin the geometry and morphology; the eight-page corpus remains an exact
+zero-plan/zero-spot result because all nine qualified heads are singletons.
+Active publication still waits for cue glyph registration, beam grading,
+grouping, and stem linking.

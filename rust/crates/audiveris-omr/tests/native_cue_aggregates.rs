@@ -3,14 +3,19 @@
 use std::path::PathBuf;
 
 use audiveris_omr::{
-    cue_beams_step::{NativeCueAggregateRecognition, materialize_native_cue_aggregates},
+    cue_beams_step::{
+        NativeCueAggregateRecognition, extract_native_cue_spots, materialize_native_cue_aggregates,
+        plan_native_cue_aggregate_processing,
+    },
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads_with_small_heads,
     native_ledgers::recognize_native_ledgers,
-    native_reduction::recognize_native_reduction,
+    native_reduction::{NativeReductionRecognition, recognize_native_reduction},
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems::recognize_native_stems,
-    recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
+    recognize::{
+        GridLinesRecognition, recognize_grid_lines, recognize_native_beams_with_stem_seeds,
+    },
 };
 
 const ORACLE: &str = include_str!("../../../oracle/cue-aggregates.txt");
@@ -27,7 +32,7 @@ fn active_cue_aggregate_corpus_matches_java() {
         "data/examples/zizi.png",
         "data/examples/BachInvention5.jpg",
     ] {
-        let recognition = recognize_page(path);
+        let (grid, reduction, recognition) = recognize_page(path);
         let page = format!(
             "{}#1",
             PathBuf::from(path).file_name().unwrap().to_string_lossy()
@@ -42,10 +47,32 @@ fn active_cue_aggregate_corpus_matches_java() {
                 .all(|system| system.aggregates.is_empty()),
             "{page}"
         );
+        let processing = plan_native_cue_aggregate_processing(&grid, &reduction, &recognition)
+            .expect("native cue process plans");
+        assert!(
+            processing
+                .systems
+                .iter()
+                .all(|system| system.plans.is_empty()),
+            "{page}"
+        );
+        assert!(
+            extract_native_cue_spots(&grid, &processing)
+                .expect("native cue spot extraction")
+                .aggregates
+                .is_empty(),
+            "{page}"
+        );
     }
 }
 
-fn recognize_page(path: &str) -> NativeCueAggregateRecognition {
+fn recognize_page(
+    path: &str,
+) -> (
+    GridLinesRecognition,
+    NativeReductionRecognition,
+    NativeCueAggregateRecognition,
+) {
     let grid = recognize_grid_lines(repo_path(path)).expect("GRID");
     let headers = recognize_native_headers(&grid).expect("HEADERS");
     let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
@@ -64,7 +91,8 @@ fn recognize_page(path: &str) -> NativeCueAggregateRecognition {
     let stems = recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
         .expect("small-head STEMS");
     let reduction = recognize_native_reduction(&grid, stems).expect("small-head REDUCTION");
-    materialize_native_cue_aggregates(&reduction).expect("native cue aggregates")
+    let aggregates = materialize_native_cue_aggregates(&reduction).expect("native cue aggregates");
+    (grid, reduction, aggregates)
 }
 
 fn canonical_native_rows(page: &str, recognition: &NativeCueAggregateRecognition) -> Vec<String> {

@@ -9,6 +9,14 @@
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
+use audiveris_image::{
+    glyph_factory::{GlyphComponent, build_glyph_components},
+    morphology::{BEAM_CIRCLE_DIAMETER_RATIO, close_with_disk, digest},
+    run_table::{Orientation, RunTable, RunTableError},
+    spots::BEAM_BINARIZATION_THRESHOLD,
+};
+
+use crate::beam_parameters::SheetParameters;
 use crate::head_scanner_slices::JavaRectangle;
 use crate::native_heads_range_lookup::java_rectangle_grow;
 use crate::native_reduction::NativeReductionRecognition;
@@ -314,6 +322,54 @@ pub struct NativeCueAggregateRecognition {
     pub systems: Vec<NativeCueAggregateSystem>,
 }
 
+/// Exact mutation-free prefix of Java `CueAggregate.process()`.
+///
+/// A zero direction is terminal for this aggregate: Java logs the mixed or
+/// unknown layout and returns before copying or morphologically closing any
+/// raster pixels.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueAggregateProcessPlan {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub aggregate_bounds: NativeSigBounds,
+    /// Up stems are `-1`, down stems are `1`, mixed or unknown is `0`.
+    pub global_direction: i32,
+    /// Clipped NO_STAFF crop. Absent exactly when `global_direction == 0`.
+    pub cue_box: Option<NativeSigBounds>,
+    pub cue_box_dx: i32,
+    pub cue_box_dy: i32,
+    /// The unrounded height passed to `SpotsBuilder.buildSpots`.
+    pub cue_beam_height: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueAggregateProcessSystem {
+    pub system_id: usize,
+    pub plans: Vec<NativeCueAggregateProcessPlan>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueAggregateProcessRecognition {
+    pub systems: Vec<NativeCueAggregateProcessSystem>,
+}
+
+/// Cue glyphs returned by Java `CueAggregate.getCueGlyphs()` before they are
+/// registered as BEAM_SPOT glyphs or graded as beam interpretations.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueAggregateSpots {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub cue_box: NativeSigBounds,
+    pub closing_radius: f32,
+    pub closed_digest: String,
+    pub glyphs: Vec<GlyphComponent>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueSpotRecognition {
+    pub aggregates: Vec<NativeCueAggregateSpots>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NativeCueAggregateError {
     MissingStem {
@@ -324,6 +380,14 @@ pub enum NativeCueAggregateError {
         system_id: usize,
         head_sig_ordinal: usize,
         stem_sig_ordinal: usize,
+    },
+    MissingSystem {
+        system_id: usize,
+    },
+    MissingMember {
+        system_id: usize,
+        aggregate_ordinal: usize,
+        sig_ordinal: usize,
     },
 }
 
@@ -449,6 +513,205 @@ pub fn materialize_native_cue_aggregates(
     }
 
     Ok(NativeCueAggregateRecognition { systems })
+}
+
+/// Plan Java `CueAggregate.process()` through its direction gate and exact
+/// sheet-clipped NO_STAFF crop, without yet running morphology or mutating the
+/// graph.
+pub fn plan_native_cue_aggregate_processing(
+    grid: &GridLinesRecognition,
+    reduction: &NativeReductionRecognition,
+    aggregates: &NativeCueAggregateRecognition,
+) -> Result<NativeCueAggregateProcessRecognition, NativeCueAggregateError> {
+    let sheet_width = i32::try_from(grid.scale.width).unwrap_or(i32::MAX);
+    let sheet_height = i32::try_from(grid.scale.height).unwrap_or(i32::MAX);
+    let params = SheetParameters::new(reduction.stems.reduction_interline);
+    let cue_beam_height = f64::from(grid.scale.scale.beam.main) * params.cue_beam_ratio;
+    let mut systems = Vec::with_capacity(aggregates.systems.len());
+
+    for aggregate_system in &aggregates.systems {
+        let finalized = reduction
+            .stems
+            .systems
+            .iter()
+            .find(|system| system.system_id == aggregate_system.system_id)
+            .ok_or(NativeCueAggregateError::MissingSystem {
+                system_id: aggregate_system.system_id,
+            })?;
+        let sig = &finalized.transaction.state_after.beam_state.sig;
+        let mut plans = Vec::with_capacity(aggregate_system.aggregates.len());
+        for aggregate in &aggregate_system.aggregates {
+            let mut member_bounds = Vec::with_capacity(aggregate.members.len());
+            for &(head, stem) in &aggregate.members {
+                let head_bounds = sig.vertex(head.0).map(|vertex| vertex.bounds).ok_or(
+                    NativeCueAggregateError::MissingMember {
+                        system_id: aggregate_system.system_id,
+                        aggregate_ordinal: aggregate.ordinal,
+                        sig_ordinal: head.0,
+                    },
+                )?;
+                let stem_bounds = sig.vertex(stem.0).map(|vertex| vertex.bounds).ok_or(
+                    NativeCueAggregateError::MissingMember {
+                        system_id: aggregate_system.system_id,
+                        aggregate_ordinal: aggregate.ordinal,
+                        sig_ordinal: stem.0,
+                    },
+                )?;
+                member_bounds.push((head_bounds, stem_bounds));
+            }
+            let (global_direction, cue_box) = cue_process_geometry(
+                aggregate.bounds,
+                &member_bounds,
+                params.cue_box_dx,
+                params.cue_box_dy,
+                sheet_width,
+                sheet_height,
+            );
+            plans.push(NativeCueAggregateProcessPlan {
+                system_id: aggregate_system.system_id,
+                aggregate_ordinal: aggregate.ordinal,
+                aggregate_bounds: aggregate.bounds,
+                global_direction,
+                cue_box,
+                cue_box_dx: params.cue_box_dx,
+                cue_box_dy: params.cue_box_dy,
+                cue_beam_height,
+            });
+        }
+        systems.push(NativeCueAggregateProcessSystem {
+            system_id: aggregate_system.system_id,
+            plans,
+        });
+    }
+
+    Ok(NativeCueAggregateProcessRecognition { systems })
+}
+
+/// Execute Java `CueAggregate.getCueGlyphs()` over every processable plan.
+///
+/// This is deliberately still read-only: glyph registration, BEAM_SPOT
+/// retention, beam grading, grouping, and stem links belong to the subsequent
+/// `CueAggregate.process()` mutation slice.
+pub fn extract_native_cue_spots(
+    grid: &GridLinesRecognition,
+    processing: &NativeCueAggregateProcessRecognition,
+) -> Result<NativeCueSpotRecognition, RunTableError> {
+    let pixels = grid.no_staff.to_pixels();
+    let mut aggregates = Vec::new();
+    for system in &processing.systems {
+        for plan in &system.plans {
+            let Some(cue_box) = plan.cue_box else {
+                continue;
+            };
+            let (closing_radius, closed_digest, glyphs) = extract_cue_spot_components(
+                &pixels,
+                grid.scale.width,
+                grid.scale.height,
+                cue_box,
+                plan.cue_beam_height,
+            )?;
+            aggregates.push(NativeCueAggregateSpots {
+                system_id: system.system_id,
+                aggregate_ordinal: plan.aggregate_ordinal,
+                cue_box,
+                closing_radius,
+                closed_digest,
+                glyphs,
+            });
+        }
+    }
+    Ok(NativeCueSpotRecognition { aggregates })
+}
+
+fn extract_cue_spot_components(
+    page: &[u8],
+    page_width: usize,
+    page_height: usize,
+    cue_box: NativeSigBounds,
+    cue_beam_height: f64,
+) -> Result<(f32, String, Vec<GlyphComponent>), RunTableError> {
+    if page.len() != page_width.saturating_mul(page_height)
+        || cue_box.width <= 0
+        || cue_box.height <= 0
+    {
+        return Err(RunTableError::InvalidDimensions);
+    }
+    let width = usize::try_from(cue_box.width).map_err(|_| RunTableError::InvalidDimensions)?;
+    let height = usize::try_from(cue_box.height).map_err(|_| RunTableError::InvalidDimensions)?;
+    let left = usize::try_from(cue_box.x).map_err(|_| RunTableError::OutOfBounds)?;
+    let top = usize::try_from(cue_box.y).map_err(|_| RunTableError::OutOfBounds)?;
+    if left.saturating_add(width) > page_width || top.saturating_add(height) > page_height {
+        return Err(RunTableError::OutOfBounds);
+    }
+
+    let mut buffer = Vec::with_capacity(width.saturating_mul(height));
+    for y in top..top + height {
+        buffer.extend_from_slice(&page[(y * page_width) + left..(y * page_width) + left + width]);
+    }
+    let diameter = cue_beam_height * BEAM_CIRCLE_DIAMETER_RATIO;
+    let closing_radius = (diameter - 1.0) as f32 / 2.0;
+    close_with_disk(&mut buffer, width, height, closing_radius);
+    let closed_digest = digest(&buffer);
+    let binary = buffer
+        .into_iter()
+        .map(|pixel| {
+            if pixel <= BEAM_BINARIZATION_THRESHOLD {
+                0
+            } else {
+                255
+            }
+        })
+        .collect::<Vec<_>>();
+    let table = RunTable::from_pixels(Orientation::Vertical, width, height, &binary)?;
+    let glyphs = build_glyph_components(&table, cue_box.x, cue_box.y);
+    Ok((closing_radius, closed_digest, glyphs))
+}
+
+fn cue_process_geometry(
+    aggregate_bounds: NativeSigBounds,
+    members: &[(NativeSigBounds, NativeSigBounds)],
+    cue_box_dx: i32,
+    cue_box_dy: i32,
+    sheet_width: i32,
+    sheet_height: i32,
+) -> (i32, Option<NativeSigBounds>) {
+    let mut direction: Option<i32> = None;
+    for &(head, stem) in members {
+        let head_y = f64::from(head.y) + (f64::from(head.height) / 2.0);
+        let quarter = f64::from(stem.height) / 4.0;
+        let member_direction = if head_y >= f64::from(stem.y) + f64::from(stem.height) - quarter {
+            Some(-1)
+        } else if head_y <= f64::from(stem.y) + quarter {
+            Some(1)
+        } else {
+            None
+        };
+        if let Some(member_direction) = member_direction {
+            if direction.is_some_and(|direction| direction != member_direction) {
+                return (0, None);
+            }
+            direction = Some(member_direction);
+        }
+    }
+
+    let Some(direction) = direction else {
+        return (0, None);
+    };
+    let mut box_ = java_rectangle_grow(rectangle(aggregate_bounds), cue_box_dx, 0);
+    box_.y = box_.y.saturating_add(direction.saturating_mul(cue_box_dy));
+    let left = box_.x.max(0).min(sheet_width);
+    let top = box_.y.max(0).min(sheet_height);
+    let right = box_.x.saturating_add(box_.width).max(0).min(sheet_width);
+    let bottom = box_.y.saturating_add(box_.height).max(0).min(sheet_height);
+    (
+        direction,
+        Some(NativeSigBounds {
+            x: left,
+            y: top,
+            width: right.saturating_sub(left),
+            height: bottom.saturating_sub(top),
+        }),
+    )
 }
 
 fn group_cue_candidates(
@@ -1250,6 +1513,117 @@ mod tests {
         assert_eq!(heads[0].aggregate_ordinal, Some(0));
         assert_eq!(heads[1].aggregate_ordinal, Some(0));
         assert_eq!(heads[2].aggregate_ordinal, None);
+    }
+
+    #[test]
+    fn cue_process_direction_gates_before_the_exact_clipped_crop() {
+        let bounds = NativeSigBounds {
+            x: 5,
+            y: 10,
+            width: 40,
+            height: 80,
+        };
+        let stem = NativeSigBounds {
+            x: 20,
+            y: 0,
+            width: 4,
+            height: 80,
+        };
+        let up_head_at_inclusive_quarter = NativeSigBounds {
+            x: 10,
+            y: 55,
+            width: 12,
+            height: 10,
+        };
+        let (direction, crop) = cue_process_geometry(
+            bounds,
+            &[(up_head_at_inclusive_quarter, stem)],
+            5,
+            20,
+            40,
+            75,
+        );
+        assert_eq!(direction, -1);
+        assert_eq!(
+            crop,
+            Some(NativeSigBounds {
+                x: 0,
+                y: 0,
+                width: 40,
+                height: 70,
+            })
+        );
+
+        let down_head_at_inclusive_quarter = NativeSigBounds {
+            y: 15,
+            ..up_head_at_inclusive_quarter
+        };
+        let (direction, crop) = cue_process_geometry(
+            bounds,
+            &[(down_head_at_inclusive_quarter, stem)],
+            5,
+            20,
+            100,
+            100,
+        );
+        assert_eq!(direction, 1);
+        assert_eq!(crop.unwrap().y, 30);
+
+        let middle_head = NativeSigBounds {
+            y: 35,
+            ..up_head_at_inclusive_quarter
+        };
+        assert_eq!(
+            cue_process_geometry(bounds, &[(middle_head, stem)], 5, 20, 100, 100),
+            (0, None)
+        );
+        assert_eq!(
+            cue_process_geometry(
+                bounds,
+                &[
+                    (up_head_at_inclusive_quarter, stem),
+                    (down_head_at_inclusive_quarter, stem),
+                ],
+                5,
+                20,
+                100,
+                100,
+            ),
+            (0, None)
+        );
+    }
+
+    #[test]
+    fn cue_spot_extraction_closes_thresholds_and_restores_sheet_coordinates() {
+        let width = 20;
+        let height = 20;
+        let mut page = vec![255_u8; width * height];
+        for y in 8..10 {
+            for x in 6..12 {
+                page[(y * width) + x] = 0;
+            }
+        }
+        let (radius, _, glyphs) = extract_cue_spot_components(
+            &page,
+            width,
+            height,
+            NativeSigBounds {
+                x: 4,
+                y: 6,
+                width: 12,
+                height: 8,
+            },
+            1.25,
+        )
+        .unwrap();
+
+        assert_eq!(radius.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(glyphs.len(), 1);
+        let glyph = &glyphs[0];
+        assert_eq!((glyph.left, glyph.top), (6, 8));
+        assert_eq!((glyph.width, glyph.height, glyph.weight), (6, 2, 12));
+        assert_eq!((glyph.centroid_x, glyph.centroid_y), (8.5, 8.5));
+        assert_eq!(glyph.orientation, Orientation::Vertical);
     }
 
     #[test]

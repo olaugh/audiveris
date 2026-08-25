@@ -6608,3 +6608,18 @@ Fixture/probe/runner hashes are
 and `45b47a66a30665c7c3737926ad3aa8bff77a4c14fab4ecefbbf49ab1f5394e15`.
 Next port `CueAggregate.process()` morphology and graph mutation; no active
 CUE_BEAMS publication is claimed yet.
+
+## Boundary 300: cue-process geometry and morphology
+
+Rust now owns the exact read-only prefix of `CueAggregate.process()`: global
+stem direction from the head center's inclusive upper/lower stem quarter,
+mixed/unknown early return, direction-shifted and page-clipped aggregate crop,
+and cue morphology using the unrounded 0.6 beam-height ratio. The crop is copied
+from NO_STAFF, closed with Java's float radius, thresholded at 140, converted to
+vertical runs, and materialized into sheet-coordinate glyph components.
+
+Focused synthetic tests pin both direction branches, the unknown and mixed
+returns, crop clipping, closing radius, and glyph geometry. The eight-page
+active differential remains an exact empty process/spot result because Java's
+nine qualified heads are all purged singletons. Registration, beam grading,
+cue grouping, and BeamStem linking remain deliberately unclaimed.

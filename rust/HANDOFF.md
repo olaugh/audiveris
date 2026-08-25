@@ -12132,3 +12132,24 @@ differential and focused reachability/linking suites pass. Active CUE_BEAMS
 still fails before mutation/publication. Resume with `CueAggregate.process()`:
 cue spot morphology, beam construction, and graph linking over this exact
 aggregate frontier.
+
+## Boundary 300: `CueAggregate.process()` direction and cue spots
+
+The active path now continues through the mutation-free prefix of
+`CueAggregate.process()`. For every retained aggregate, Rust computes Java's
+quarter-stem global direction in member order, including inclusive upper/lower
+quarter thresholds and the mixed/unknown early return. A processable aggregate
+then uses the exact ties-to-even 0.25/1.0-interline crop parameters, directional
+vertical shift, horizontal grow, and sheet intersection.
+
+`extract_native_cue_spots` copies that region from NO_STAFF, derives the
+unrounded `0.6 * beamThickness` closing height, narrows Java's closing radius to
+`float`, closes, thresholds at 140, builds a vertical run table, and restores
+glyph components to sheet coordinates. The synthetic gate pins the direction,
+crop, zero-radius morphology, component bounds, weight, centroid, orientation,
+and offset. The eight-page differential still yields no retained aggregate and
+therefore no process plan or cue spot, matching Java without mutation.
+
+Resume at the next source statement: register each cue glyph as BEAM_SPOT,
+append it to the shared spot list, grade it through `checkBeamGlyph(..., true,
+stdParams, createdCues)`, then group and link the accepted cue beams.
