@@ -1440,6 +1440,24 @@ fn boost_native_stems_beam_sides(
                     && edge.target == beam_stem.target
                     && edge.kind == NativeSigRelationKind::HeadStem
             }) {
+                // Java Finalizer.boostBeamSides() deliberately withholds this
+                // temporary cross-support from small heads. REDUCTION must be
+                // able to exclude a small head attached to a standard beam.
+                if sig.vertices[head_stem.source]
+                    .shape
+                    .as_deref()
+                    .is_some_and(|shape| {
+                        matches!(
+                            shape,
+                            "NOTEHEAD_BLACK_SMALL"
+                                | "NOTEHEAD_VOID_SMALL"
+                                | "WHOLE_NOTE_SMALL"
+                                | "BREVE_SMALL"
+                        )
+                    })
+                {
+                    continue;
+                }
                 let Some(head_support) = head_stem.support else {
                     continue;
                 };
@@ -1997,6 +2015,56 @@ mod tests {
                 (0.8 * 3.2) + (0.35 * 0.7)
             ))
         );
+    }
+
+    #[test]
+    fn finalize_beams_does_not_boost_small_heads() {
+        let mut head = vertex(2, NativeSigInterKind::Head, 0.7);
+        head.shape = Some("NOTEHEAD_BLACK_SMALL".to_owned());
+        let mut sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Beam, GOOD_BEAM_GRADE),
+                vertex(1, NativeSigInterKind::Stem, 0.8),
+                head,
+            ],
+            edges: vec![
+                NativeSigEdge {
+                    ordinal: 0,
+                    active: true,
+                    source: 0,
+                    target: 1,
+                    kind: NativeSigRelationKind::BeamStem,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: support(0.6),
+                    beam_portion: Some(NativeBeamPortion::Left),
+                    stem_extension: Some(NativeStemPoint { x: 10.0, y: 10.0 }),
+                    head_stem: None,
+                },
+                NativeSigEdge {
+                    ordinal: 1,
+                    active: true,
+                    source: 2,
+                    target: 1,
+                    kind: NativeSigRelationKind::HeadStem,
+                    origin: NativeSigRelationOrigin::BaselineGraph,
+                    support: support(0.8),
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: Some(NativeSigHeadStemPayload {
+                        dx: 0.0,
+                        dy: 0.0,
+                        head_side: NativeStemHeadSide::Left,
+                        extension_point: NativeStemPoint { x: 20.0, y: 10.0 },
+                        consistency: 1.0,
+                        manual: false,
+                    }),
+                },
+            ],
+        };
+
+        assert!(boost_native_stems_beam_sides(&mut sig).unwrap().is_empty());
+        assert_eq!(sig.edges.len(), 2);
     }
 
     #[test]

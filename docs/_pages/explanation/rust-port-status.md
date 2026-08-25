@@ -7098,3 +7098,21 @@ All 696 stemmed heads continue into 2,784 STEMS corners; the default four-shape
 path remains unchanged. Active CUE_BEAMS is still explicitly unavailable at
 `BeamsBuilder.buildCueBeams`. The next boundary is `getCueAggregates()` and
 then `CueAggregate.process()`, not an approximation of cue morphology.
+
+## Boundary 299: active cue aggregates before morphology
+
+Rust now reproduces Java's read-only `getCueAggregates()` frontier from the
+reduced live graph: qualified small black heads, first HeadStem ownership,
+ties-to-even 2/3-interline margins, stable first-intersection grouping, and
+singleton purge. A fresh eight-page Java differential covers 30 systems and
+nine qualified singleton heads; it retains zero aggregates on both sides.
+
+The Bach regression also restores Java's small-head STEMS isolation from
+standard beams. The head at `1514,1974` survives REDUCTION on its distinct
+stem with exact contextual bits `3fec1a2859cdaff9`, rather than being attached
+to a standard beam and excluded. The frozen fixture/probe/runner hashes are
+`c10a12a0f8b3adabfa2de4e39b51b4f904881d2052e0b34385dca721388dde8a`,
+`16a57d022e089de068f591c970467b475b439afeb3d5d96e2921c818e15abac3`,
+and `45b47a66a30665c7c3737926ad3aa8bff77a4c14fab4ecefbbf49ab1f5394e15`.
+Active CUE_BEAMS remains unpublished until `CueAggregate.process()` cue-spot
+morphology, beam creation, and linking are ported.

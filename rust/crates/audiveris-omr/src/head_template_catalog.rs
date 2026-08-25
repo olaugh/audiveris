@@ -335,7 +335,7 @@ mod tests {
                 .iter()
                 .flat_map(HeadTemplateCatalog::templates)
                 .count(),
-            20
+            40
         );
         assert_eq!(
             catalogs
@@ -343,7 +343,7 @@ mod tests {
                 .flat_map(HeadTemplateCatalog::templates)
                 .flat_map(HeadTemplate::key_points)
                 .count(),
-            17_094
+            26_000
         );
     }
 

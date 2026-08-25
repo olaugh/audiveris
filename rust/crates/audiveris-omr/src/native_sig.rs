@@ -27,6 +27,7 @@ use crate::{
     header_time_column::{NeutralSpecificTimeShape, NeutralTimeCandidate},
     native_headers::{NativeHeaderRecognition, NativeHeaderStaffRecognition},
     native_heads::NativeHeadsRecognition,
+    native_heads_competitors::NativeHeadsCompetitorSource,
     native_heads_staff_epilog::NativeHeadStaffEpilogRef,
     native_ledgers::NativeLedgerRecognition,
     native_reduction::{
@@ -1176,6 +1177,7 @@ pub fn assemble_native_sig(
         append_headers(header_system.staffs.as_slice(), &mut graph)?;
         append_beams(
             beams,
+            head_system,
             system_id,
             grid_system.interline.round() as i32,
             &mut graph,
@@ -1953,6 +1955,7 @@ fn time_shape(time: &NeutralTimeCandidate) -> Result<&'static str, NativeSigErro
 
 fn append_beams(
     beams: &NativeBeamRecognition,
+    heads: &crate::native_heads_epilog::NativeHeadsEpilogSystem,
     system_id: usize,
     interline: i32,
     graph: &mut NativeSigSystem,
@@ -1997,6 +2000,22 @@ fn append_beams(
         .iter()
         .map(|rest| rest.source_beam_ordinal)
         .collect::<BTreeSet<_>>();
+    let removed_by_heads = heads
+        .small_beams
+        .beam_provenance
+        .iter()
+        .zip(&heads.small_beams.beam_inputs)
+        .zip(&heads.small_beams.arbitration.beam_removed)
+        .filter_map(|((provenance, beam), &removed)| {
+            (removed || beam.removed).then_some(match provenance.source {
+                NativeHeadsCompetitorSource::RawBeam(ordinal) => {
+                    NativeStemsBeamSource::RawBeam(ordinal)
+                }
+                NativeHeadsCompetitorSource::Hook(ordinal) => NativeStemsBeamSource::Hook(ordinal),
+                _ => return None,
+            })
+        })
+        .collect::<BTreeSet<_>>();
     // `beams_after_multiple_rests` intentionally stores geometry without
     // identity. Equal beam values can legitimately occur, so recovering a
     // source by value is ambiguous. Preserve the source ordinal directly from
@@ -2005,7 +2024,11 @@ fn append_beams(
         .raw_beams
         .iter()
         .enumerate()
-        .filter(|(ordinal, (owner, _))| *owner == system_id && !removed_raw_beams.contains(ordinal))
+        .filter(|(ordinal, (owner, _))| {
+            *owner == system_id
+                && !removed_raw_beams.contains(ordinal)
+                && !removed_by_heads.contains(&NativeStemsBeamSource::RawBeam(*ordinal))
+        })
         .map(|(ordinal, (_, beam))| (NativeStemsBeamSource::RawBeam(ordinal), beam))
         .collect::<Vec<_>>();
     created.extend(
@@ -2013,7 +2036,10 @@ fn append_beams(
             .hooks
             .iter()
             .enumerate()
-            .filter(|(_, (owner, _))| *owner == system_id)
+            .filter(|(ordinal, (owner, _))| {
+                *owner == system_id
+                    && !removed_by_heads.contains(&NativeStemsBeamSource::Hook(*ordinal))
+            })
             .map(|(ordinal, (_, beam))| (NativeStemsBeamSource::Hook(ordinal), beam)),
     );
     for &(source, beam) in &created {

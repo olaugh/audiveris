@@ -6587,3 +6587,24 @@ conversion and carries all 696 stemmed heads into 2,784 STEMS corners. The
 default four-shape entry point remains unchanged. Active CUE_BEAMS still fails
 typed at `BeamsBuilder.buildCueBeams`; next is `getCueAggregates()` followed by
 `CueAggregate.process()` rather than any invented cue mutation.
+
+## Boundary 299: `getCueAggregates()` parity
+
+The active path now has an exact, read-only native implementation of Java's
+cue aggregate discovery. It filters live `NOTEHEAD_BLACK_SMALL` vertices at
+contextual grade 0.5, follows the first HeadStem, applies ties-to-even 2/3
+interline margins, groups in stable x order by first intersection, and drops
+singletons. The eight-page Java corpus covers 30 systems and nine qualified
+heads; all are singletons, so the retained aggregate count is zero.
+
+Bach system 5 exposed and now pins the relevant STEMS prerequisites: standard
+beam V-linkers reject small heads, small-head C-link geometry stops at the near
+standard-beam border without selecting it as `targetBeam`, and HeadStem
+consistency uses the actual head size. The result retains the Java head at
+`1514,1974` with contextual bits `3fec1a2859cdaff9` on its distinct stem.
+Fixture/probe/runner hashes are
+`c10a12a0f8b3adabfa2de4e39b51b4f904881d2052e0b34385dca721388dde8a`,
+`16a57d022e089de068f591c970467b475b439afeb3d5d96e2921c818e15abac3`,
+and `45b47a66a30665c7c3737926ad3aa8bff77a4c14fab4ecefbbf49ab1f5394e15`.
+Next port `CueAggregate.process()` morphology and graph mutation; no active
+CUE_BEAMS publication is claimed yet.

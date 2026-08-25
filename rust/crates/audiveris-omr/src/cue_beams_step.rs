@@ -9,7 +9,12 @@
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
+use crate::head_scanner_slices::JavaRectangle;
+use crate::native_heads_range_lookup::java_rectangle_grow;
 use crate::native_reduction::NativeReductionRecognition;
+use crate::native_sig::{
+    NativeSigBounds, NativeSigInterKind, NativeSigRelationKind, NativeSigVertexId,
+};
 use crate::recognize::GridLinesRecognition;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -267,6 +272,253 @@ pub fn recognize_native_cue_beams(
         small_heads_enabled,
         detected_small_beam_height,
     })
+}
+
+/// One contextual-grade-qualified small black head considered by Java's
+/// `BeamsBuilder.getCueAggregates()`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueAggregateHead {
+    pub sig_ordinal: NativeSigVertexId,
+    pub stem_sig_ordinal: NativeSigVertexId,
+    pub bounds: NativeSigBounds,
+    pub grade: f64,
+    pub contextual_grade: f64,
+    /// Final aggregate ordinal, or `None` when Java purges its singleton.
+    pub aggregate_ordinal: Option<usize>,
+}
+
+/// One retained Java cue aggregate after singleton purge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeCueAggregate {
+    pub ordinal: usize,
+    pub bounds: NativeSigBounds,
+    /// Parallel head/stem identity pairs in stable head-abscissa order.
+    pub members: Vec<(NativeSigVertexId, NativeSigVertexId)>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueAggregateSystem {
+    pub system_id: usize,
+    pub interline: i32,
+    pub cue_x_margin: i32,
+    pub cue_y_margin: i32,
+    pub small_black_count: usize,
+    pub qualified_heads: Vec<NativeCueAggregateHead>,
+    pub aggregates: Vec<NativeCueAggregate>,
+}
+
+/// Read-only active CUE_BEAMS frontier immediately before
+/// `CueAggregate.process()` performs morphology and graph mutation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueAggregateRecognition {
+    pub systems: Vec<NativeCueAggregateSystem>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NativeCueAggregateError {
+    MissingStem {
+        system_id: usize,
+        head_sig_ordinal: usize,
+    },
+    InvalidStem {
+        system_id: usize,
+        head_sig_ordinal: usize,
+        stem_sig_ordinal: usize,
+    },
+}
+
+impl fmt::Display for NativeCueAggregateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "native cue aggregates failed: {self:?}")
+    }
+}
+
+impl Error for NativeCueAggregateError {}
+
+#[derive(Clone, Debug)]
+struct WorkingCueAggregate {
+    bounds: NativeSigBounds,
+    member_indices: Vec<usize>,
+}
+
+/// Materialize Java's complete `getCueAggregates()` result from the live,
+/// reduced native SIG without performing cue-spot morphology or mutation.
+pub fn materialize_native_cue_aggregates(
+    reduction: &NativeReductionRecognition,
+) -> Result<NativeCueAggregateRecognition, NativeCueAggregateError> {
+    const MIN_CONTEXTUAL_GRADE: f64 = 0.5;
+    const CUE_X_MARGIN: f64 = 2.0;
+    const CUE_Y_MARGIN: f64 = 3.0;
+
+    let interline = reduction.stems.reduction_interline;
+    let cue_x_margin = (f64::from(interline) * CUE_X_MARGIN).round_ties_even() as i32;
+    let cue_y_margin = (f64::from(interline) * CUE_Y_MARGIN).round_ties_even() as i32;
+    let mut systems = Vec::with_capacity(reduction.stems.systems.len());
+
+    for finalized in &reduction.stems.systems {
+        let system_id = finalized.system_id;
+        let mut sig = finalized.transaction.state_after.beam_state.sig.clone();
+        if sig.vertices.iter().any(|vertex| {
+            vertex.active
+                && vertex.kind == NativeSigInterKind::Head
+                && vertex.shape.as_deref() == Some("NOTEHEAD_BLACK_SMALL")
+                && vertex.contextual_grade.is_none()
+        }) {
+            sig.contextualize();
+        }
+
+        let small_black_count = sig
+            .vertices
+            .iter()
+            .filter(|vertex| {
+                vertex.active
+                    && vertex.kind == NativeSigInterKind::Head
+                    && vertex.shape.as_deref() == Some("NOTEHEAD_BLACK_SMALL")
+            })
+            .count();
+        let mut qualified_heads = Vec::new();
+        for head in sig.vertices.iter().filter(|vertex| {
+            vertex.active
+                && vertex.kind == NativeSigInterKind::Head
+                && vertex.shape.as_deref() == Some("NOTEHEAD_BLACK_SMALL")
+                && vertex
+                    .contextual_grade
+                    .is_some_and(|grade| grade >= MIN_CONTEXTUAL_GRADE)
+        }) {
+            let stem = sig
+                .incident_edges(head.ordinal)
+                .expect("active head has valid incident-edge lookup")
+                .into_iter()
+                .find(|edge| edge.kind == NativeSigRelationKind::HeadStem)
+                .map(|edge| edge.target)
+                .ok_or(NativeCueAggregateError::MissingStem {
+                    system_id,
+                    head_sig_ordinal: head.ordinal,
+                })?;
+            let stem_vertex = sig
+                .vertex(stem)
+                .ok_or(NativeCueAggregateError::InvalidStem {
+                    system_id,
+                    head_sig_ordinal: head.ordinal,
+                    stem_sig_ordinal: stem,
+                })?;
+            if stem_vertex.kind != NativeSigInterKind::Stem || stem == head.ordinal {
+                return Err(NativeCueAggregateError::InvalidStem {
+                    system_id,
+                    head_sig_ordinal: head.ordinal,
+                    stem_sig_ordinal: stem,
+                });
+            }
+            qualified_heads.push(NativeCueAggregateHead {
+                sig_ordinal: NativeSigVertexId(head.ordinal),
+                stem_sig_ordinal: NativeSigVertexId(stem),
+                bounds: head.bounds,
+                grade: head.grade,
+                contextual_grade: head
+                    .contextual_grade
+                    .expect("qualified head has a contextual grade"),
+                aggregate_ordinal: None,
+            });
+        }
+        qualified_heads.sort_by_key(|head| head.bounds.x);
+
+        let stem_bounds = qualified_heads
+            .iter()
+            .map(|head| {
+                sig.vertex(head.stem_sig_ordinal.0)
+                    .expect("validated cue stem remains active")
+                    .bounds
+            })
+            .collect::<Vec<_>>();
+        let aggregates = group_cue_candidates(
+            &mut qualified_heads,
+            &stem_bounds,
+            cue_x_margin,
+            cue_y_margin,
+        );
+
+        systems.push(NativeCueAggregateSystem {
+            system_id,
+            interline,
+            cue_x_margin,
+            cue_y_margin,
+            small_black_count,
+            qualified_heads,
+            aggregates,
+        });
+    }
+
+    Ok(NativeCueAggregateRecognition { systems })
+}
+
+fn group_cue_candidates(
+    qualified_heads: &mut [NativeCueAggregateHead],
+    stem_bounds: &[NativeSigBounds],
+    cue_x_margin: i32,
+    cue_y_margin: i32,
+) -> Vec<NativeCueAggregate> {
+    debug_assert_eq!(qualified_heads.len(), stem_bounds.len());
+    let mut working = Vec::<WorkingCueAggregate>::new();
+    for (head_index, (head, &stem_bounds)) in qualified_heads.iter().zip(stem_bounds).enumerate() {
+        let head_box = java_rectangle_grow(rectangle(head.bounds), cue_x_margin, cue_y_margin);
+        let aggregate = working
+            .iter()
+            .position(|aggregate| rectangle(aggregate.bounds).intersects(head_box));
+        if let Some(aggregate) = aggregate {
+            working[aggregate].bounds = bounds_union(working[aggregate].bounds, head.bounds);
+            working[aggregate].bounds = bounds_union(working[aggregate].bounds, stem_bounds);
+            working[aggregate].member_indices.push(head_index);
+        } else {
+            working.push(WorkingCueAggregate {
+                bounds: bounds_union(head.bounds, stem_bounds),
+                member_indices: vec![head_index],
+            });
+        }
+    }
+
+    let mut aggregates = Vec::new();
+    for aggregate in working
+        .into_iter()
+        .filter(|aggregate| aggregate.member_indices.len() > 1)
+    {
+        let ordinal = aggregates.len();
+        let members = aggregate
+            .member_indices
+            .iter()
+            .map(|&index| {
+                qualified_heads[index].aggregate_ordinal = Some(ordinal);
+                (
+                    qualified_heads[index].sig_ordinal,
+                    qualified_heads[index].stem_sig_ordinal,
+                )
+            })
+            .collect();
+        aggregates.push(NativeCueAggregate {
+            ordinal,
+            bounds: aggregate.bounds,
+            members,
+        });
+    }
+    aggregates
+}
+
+fn rectangle(bounds: NativeSigBounds) -> JavaRectangle {
+    JavaRectangle::new(bounds.x, bounds.y, bounds.width, bounds.height)
+}
+
+fn bounds_union(one: NativeSigBounds, two: NativeSigBounds) -> NativeSigBounds {
+    let left = i64::from(one.x).min(i64::from(two.x));
+    let top = i64::from(one.y).min(i64::from(two.y));
+    let right =
+        (i64::from(one.x) + i64::from(one.width)).max(i64::from(two.x) + i64::from(two.width));
+    let bottom =
+        (i64::from(one.y) + i64::from(one.height)).max(i64::from(two.y) + i64::from(two.height));
+    NativeSigBounds {
+        x: left.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        y: top.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        width: (right - left).clamp(0, i64::from(i32::MAX)) as i32,
+        height: (bottom - top).clamp(0, i64::from(i32::MAX)) as i32,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -932,6 +1184,72 @@ mod tests {
                 }),
             ],
         }
+    }
+
+    #[test]
+    fn cue_aggregate_grouping_uses_first_intersection_and_purges_singletons() {
+        let make_head = |sig, stem, x| NativeCueAggregateHead {
+            sig_ordinal: NativeSigVertexId(sig),
+            stem_sig_ordinal: NativeSigVertexId(stem),
+            bounds: NativeSigBounds {
+                x,
+                y: 50,
+                width: 12,
+                height: 10,
+            },
+            grade: 0.7,
+            contextual_grade: 0.8,
+            aggregate_ordinal: None,
+        };
+        let mut heads = vec![
+            make_head(10, 20, 100),
+            make_head(11, 21, 130),
+            make_head(12, 22, 300),
+        ];
+        let stems = vec![
+            NativeSigBounds {
+                x: 110,
+                y: 20,
+                width: 4,
+                height: 80,
+            },
+            NativeSigBounds {
+                x: 140,
+                y: 25,
+                width: 4,
+                height: 75,
+            },
+            NativeSigBounds {
+                x: 310,
+                y: 20,
+                width: 4,
+                height: 80,
+            },
+        ];
+
+        let aggregates = group_cue_candidates(&mut heads, &stems, 20, 30);
+
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(aggregates[0].ordinal, 0);
+        assert_eq!(
+            aggregates[0].members,
+            [
+                (NativeSigVertexId(10), NativeSigVertexId(20)),
+                (NativeSigVertexId(11), NativeSigVertexId(21))
+            ]
+        );
+        assert_eq!(
+            aggregates[0].bounds,
+            NativeSigBounds {
+                x: 100,
+                y: 20,
+                width: 44,
+                height: 80,
+            }
+        );
+        assert_eq!(heads[0].aggregate_ordinal, Some(0));
+        assert_eq!(heads[1].aggregate_ordinal, Some(0));
+        assert_eq!(heads[2].aggregate_ordinal, None);
     }
 
     #[test]

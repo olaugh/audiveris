@@ -1,0 +1,49 @@
+# Temurin-25 BeamsBuilder.getCueAggregates oracle.
+# Java reaches REDUCTION with the qualified smallHeads switch true.
+cueaggregatesystem chula.png#1 system 1 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem chula.png#1 system 2 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem chula.png#1 system 3 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesummary chula.png#1 systems 3 rows 3 c37485ab41c234ba
+cueaggregatesystem allegretto.png#1 system 1 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem allegretto.png#1 system 2 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem allegretto.png#1 system 3 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesummary allegretto.png#1 systems 3 rows 3 c2c0af1d536d1ac6
+cueaggregatesystem batuque.png#1 system 1 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatehead batuque.png#1 system 2 sig 156 stem 215 bounds 1985 1095 14 14 gradeBits 3fe0ec7a79f8d648 contextualBits 3fe9b769c59f153d aggregate -1
+cueaggregatehead batuque.png#1 system 2 sig 157 stem 214 bounds 2194 1096 14 14 gradeBits 3fe1ae2e4e973aab contextualBits 3fea2dd6440070a9 aggregate -1
+cueaggregatesystem batuque.png#1 system 2 interline 21 margins 42 63 smallBlack 2 qualified 2 aggregates 0
+cueaggregatehead batuque.png#1 system 3 sig 143 stem 195 bounds 261 1659 17 14 gradeBits 3fe45b15640dccf0 contextualBits 3febbf262aadf8b7 aggregate -1
+cueaggregatehead batuque.png#1 system 3 sig 145 stem 197 bounds 480 1661 16 14 gradeBits 3fe3424f76ed507a contextualBits 3feae37c87141ff7 aggregate -1
+cueaggregatehead batuque.png#1 system 3 sig 92 stem 196 bounds 1993 1504 16 14 gradeBits 3fe455f553cb8082 contextualBits 3feb444dba16cc1b aggregate -1
+cueaggregatesystem batuque.png#1 system 3 interline 21 margins 42 63 smallBlack 3 qualified 3 aggregates 0
+cueaggregatesummary batuque.png#1 systems 3 rows 8 6191e9844716704d
+cueaggregatesystem carmen.png#1 system 1 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem carmen.png#1 system 2 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem carmen.png#1 system 3 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem carmen.png#1 system 4 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatehead carmen.png#1 system 5 sig 153 stem 196 bounds 865 3200 13 13 gradeBits 3fdc677c4a89dc2d contextualBits 3fe498c53dfeb7b7 aggregate -1
+cueaggregatesystem carmen.png#1 system 5 interline 21 margins 42 63 smallBlack 1 qualified 1 aggregates 0
+cueaggregatesummary carmen.png#1 systems 5 rows 6 56a2c2476689dc9d
+cueaggregatesystem cucaracha.png#1 system 1 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem cucaracha.png#1 system 2 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem cucaracha.png#1 system 3 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesummary cucaracha.png#1 systems 3 rows 3 3474d35b21428a92
+cueaggregatesystem hove.png#1 system 1 interline 20 margins 40 60 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem hove.png#1 system 2 interline 20 margins 40 60 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem hove.png#1 system 3 interline 20 margins 40 60 smallBlack 0 qualified 0 aggregates 0
+cueaggregatehead hove.png#1 system 4 sig 48 stem 78 bounds 1023 1507 17 14 gradeBits 3fd40cffd0e883f5 contextualBits 3fe2f56793f28971 aggregate -1
+cueaggregatesystem hove.png#1 system 4 interline 20 margins 40 60 smallBlack 1 qualified 1 aggregates 0
+cueaggregatehead hove.png#1 system 5 sig 57 stem 88 bounds 1214 1849 17 13 gradeBits 3fe5f8be495f8be5 contextualBits 3febf25e5889d579 aggregate -1
+cueaggregatesystem hove.png#1 system 5 interline 20 margins 40 60 smallBlack 1 qualified 1 aggregates 0
+cueaggregatesummary hove.png#1 systems 5 rows 7 25be6c2e3b54f7f7
+cueaggregatesystem zizi.png#1 system 1 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem zizi.png#1 system 2 interline 21 margins 42 63 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesummary zizi.png#1 systems 2 rows 2 8f497455e2ed1a80
+cueaggregatesystem BachInvention5.jpg#1 system 1 interline 17 margins 34 51 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem BachInvention5.jpg#1 system 2 interline 17 margins 34 51 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem BachInvention5.jpg#1 system 3 interline 17 margins 34 51 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesystem BachInvention5.jpg#1 system 4 interline 17 margins 34 51 smallBlack 0 qualified 0 aggregates 0
+cueaggregatehead BachInvention5.jpg#1 system 5 sig 145 stem 236 bounds 1514 1974 15 12 gradeBits 3fe6d19a9c81f5a3 contextualBits 3fec1a2859cdaff9 aggregate -1
+cueaggregatesystem BachInvention5.jpg#1 system 5 interline 17 margins 34 51 smallBlack 1 qualified 1 aggregates 0
+cueaggregatesystem BachInvention5.jpg#1 system 6 interline 17 margins 34 51 smallBlack 0 qualified 0 aggregates 0
+cueaggregatesummary BachInvention5.jpg#1 systems 6 rows 7 9a216b6de08de833

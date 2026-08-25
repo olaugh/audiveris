@@ -474,7 +474,7 @@ pub fn apply_native_stems_beam_vlink_head_transaction_to_native_sig(
             NativeStemsBeamHeadLinkBranch::ExistingHeadStem
         } else {
             let value = head_stem_consistency(
-                false,
+                head.shape.is_small(),
                 b15.stem_after.geometry.median.start.y,
                 b15.stem_after.geometry.median.stop.y,
                 plans.interline,

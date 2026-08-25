@@ -1492,6 +1492,26 @@ fn materialize_geometry(
             if !intersects {
                 continue;
             }
+            if input.head.shape.is_small() {
+                // Java does not let a small head target a standard beam. It
+                // truncates the corner lookup at the nearest beam border and
+                // deliberately leaves CLinker.targetBeam unset.
+                let nearest = *members.first().expect("group containing scanned member");
+                let border = beam_border(nearest, opposite_vertical(input.corner.vertical));
+                let y_limit = y_at_x(border, input.corner.reference.x);
+                final_lookup = lookup_geometry(
+                    input.system_id,
+                    input.corner.reference,
+                    input.corner.out_point,
+                    input.corner.in_point,
+                    x_direction,
+                    y_direction,
+                    input.grid_slope,
+                    y_limit,
+                )?;
+                target_point_value = target_point(input.corner.reference, border, input.grid_slope);
+                break 'groups;
+            }
             let farthest = *members.last().expect("group containing scanned member");
             target_beam = Some(farthest.source);
             let border = beam_border(farthest, input.corner.vertical);

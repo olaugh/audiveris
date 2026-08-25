@@ -2301,16 +2301,13 @@ fn close_heads_sharing_prelinked_stems(
             })
             .map(|edge| edge.ordinal)
             .collect::<Vec<_>>();
-        if matching.is_empty() {
-            return Err(stage(
-                "HEADS-phase1-close-head-scan",
-                "linked head side has no matching HeadStem relation",
-            ));
-        }
         // Java iterates every HeadStem relation on the linked horizontal
         // side. A head may legitimately reach two same-side stems, and each
         // stem independently closes its other heads (including repeated,
-        // idempotent S-linker writes).
+        // idempotent S-linker writes). A C-link can operationally mark its
+        // encountered S-linker even when relation geometry derives the
+        // opposite head side; Java then sees no matching relation here and
+        // performs no closure for that linked side.
         for edge_ordinal in matching {
             let edge = &sig.edges[edge_ordinal];
             let stem_vertex = if edge.source == current_vertex.0 {
@@ -12845,6 +12842,9 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         (stem, stem_vertex)
     };
     let consistency = head_stem_consistency(
+        head_corners.heads_in_sig_order[frontier.next_corner.sig_ordinal]
+            .shape
+            .is_small(),
         stem.geometry.median.start.y,
         stem.geometry.median.stop.y,
         interline,
@@ -14164,6 +14164,9 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
         ));
     }
     let consistency = head_stem_consistency(
+        head_corners.heads_in_sig_order[frontier.next_corner.sig_ordinal]
+            .shape
+            .is_small(),
         stem.geometry.median.start.y,
         stem.geometry.median.stop.y,
         head_builders.interline,
@@ -14936,6 +14939,11 @@ fn advance_native_stems_head_c_link_at_frontier(
     let mut beam_relation_plans = Vec::new();
     let mut rejected_chunk_item_index = None;
     let mut gap_stop_item_index = None;
+    let mut last_gap: Option<(
+        usize,
+        &crate::native_stems_head_builders::NativeStemsHeadBuilderItem,
+    )> = None;
+    let mut head_separation_stop_item_index = None;
     let max_gap = head_builders
         .gap_map
         .get(&frontier.stem_profile)
@@ -14968,9 +14976,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                     frontier.link_profile,
                 )
                 .map_err(|error| stage("HEADS-CLink-relation", error))?;
-                if !relation.accepted
-                    || relation.derived_horizontal != frontier.next_corner.horizontal
-                {
+                if !relation.accepted {
                     continue;
                 }
                 start_relation_before_expand = Some(relation);
@@ -15055,6 +15061,55 @@ fn advance_native_stems_head_c_link_at_frontier(
                             "crossed reachability corner is missing",
                         )
                     })?;
+                if let Some((gap_index, gap)) = last_gap {
+                    let target_y = target_reach.reference_point.y;
+                    let dy = if builder.y_direction > 0 {
+                        target_y - gap.line.stop.y
+                    } else {
+                        gap.line.start.y - target_y
+                    };
+                    if dy < f64::from(plans.min_linker_length) {
+                        let opposite = NativeStemsHeadCornerRef {
+                            horizontal: match target.horizontal {
+                                crate::stems_step::NativeStemHeadSide::Left => {
+                                    crate::stems_step::NativeStemHeadSide::Right
+                                }
+                                crate::stems_step::NativeStemHeadSide::Right => {
+                                    crate::stems_step::NativeStemHeadSide::Left
+                                }
+                            },
+                            ..target
+                        };
+                        let opposite_builder = head_builders
+                            .builders
+                            .iter()
+                            .find(|candidate| candidate.start == opposite)
+                            .ok_or_else(|| {
+                                stage(
+                                    "HEADS-CLink-expand",
+                                    "crossed head opposite corner has no builder",
+                                )
+                            })?;
+                        let opposite_length = opposite_builder
+                            .lengths
+                            .get(&frontier.link_profile)
+                            .copied()
+                            .ok_or_else(|| {
+                                stage(
+                                    "HEADS-CLink-expand",
+                                    "crossed head opposite builder lacks the link profile",
+                                )
+                            })?;
+                        if opposite_length >= plans.min_linker_length {
+                            // Java returns `indexOf(gap) - 1` immediately.
+                            // This deliberately bypasses the final hard-tail
+                            // check while retaining relations and glyphs
+                            // accumulated before this separated head.
+                            head_separation_stop_item_index = Some(gap_index);
+                            break;
+                        }
+                    }
+                }
                 let target_relation = project_native_stems_head_c_link_relation(
                     head_corners,
                     head_builders,
@@ -15064,9 +15119,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                     frontier.link_profile,
                 )
                 .map_err(|error| stage("HEADS-CLink-relation", error))?;
-                if !target_relation.accepted
-                    || target_relation.derived_horizontal != target.horizontal
-                {
+                if !target_relation.accepted {
                     continue;
                 }
                 additional_relation_plans.push((target, target_relation));
@@ -15186,6 +15239,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                 beam_relation_plans.push((target, stem_line));
             }
             NativeStemsHeadBuilderItemKind::Gap => {
+                last_gap = Some((item_index, item));
                 // Java does not update lastY for a GapItem. A show-stopping
                 // gap returns -1 immediately when the walk has not reached
                 // the hard tail, so CLinker.link returns false without a
@@ -15414,6 +15468,7 @@ fn advance_native_stems_head_c_link_at_frontier(
     // point; the theoretical-line endpoint is only the initial `lastY`.
     if rejected_chunk_item_index.is_none()
         && gap_stop_item_index.is_none()
+        && head_separation_stop_item_index.is_none()
         && beam_targets.is_empty()
         && builder.y_direction * java_double_compare(last_y, hard_y) < 0
     {
@@ -15427,8 +15482,10 @@ fn advance_native_stems_head_c_link_at_frontier(
     // loop, so it never reaches the final relation recheck at the bottom of `expand`.
     // Preserve that initial relation while still evolving `stem_line` for BeamStem
     // projection and checked-stem creation.
-    let stopped_before_final_relation =
-        rejected_chunk_item_index.is_some() || gap_stop_item_index.is_some() || beam_stopped;
+    let stopped_before_final_relation = rejected_chunk_item_index.is_some()
+        || gap_stop_item_index.is_some()
+        || head_separation_stop_item_index.is_some()
+        || beam_stopped;
     if stopped_before_final_relation && start_relation_before_expand.is_none() {
         return Err(stage(
             "HEADS-CLink-no-link",
@@ -15468,14 +15525,9 @@ fn advance_native_stems_head_c_link_at_frontier(
             ),
         ));
     }
-    if relation.derived_horizontal != frontier.next_corner.horizontal {
-        return Err(stage(
-            "HEADS-CLink-relation",
-            "start-head relation changes horizontal side",
-        ));
-    }
     let actual_last_index = rejected_chunk_item_index
         .or(gap_stop_item_index)
+        .or(head_separation_stop_item_index)
         .map(|index| index.saturating_sub(1))
         .unwrap_or(expected_last_index);
 
@@ -15676,6 +15728,9 @@ fn advance_native_stems_head_c_link_at_frontier(
                 ));
             }
             let consistency = head_stem_consistency(
+                head_corners.heads_in_sig_order[frontier.next_corner.sig_ordinal]
+                    .shape
+                    .is_small(),
                 stem.geometry.median.start.y,
                 stem.geometry.median.stop.y,
                 head_builders.interline,
@@ -15745,7 +15800,10 @@ fn advance_native_stems_head_c_link_at_frontier(
             )?;
             let s_ref = NativeStemsBeamHeadSLinkerRef {
                 head: frontier.head,
-                horizontal: relation.derived_horizontal,
+                // Java links the SLinker that owns the encountered corner;
+                // HeadStemRelation's derived head side is payload geometry
+                // and is allowed to diverge from that operational side.
+                horizontal: frontier.next_corner.horizontal,
             };
             let cell = shadow
                 .beam_state
@@ -15970,6 +16028,9 @@ fn advance_native_stems_head_c_link_at_frontier(
         ));
     }
     let consistency = head_stem_consistency(
+        head_corners.heads_in_sig_order[frontier.next_corner.sig_ordinal]
+            .shape
+            .is_small(),
         stem.geometry.median.start.y,
         stem.geometry.median.stop.y,
         head_builders.interline,
@@ -16039,7 +16100,9 @@ fn advance_native_stems_head_c_link_at_frontier(
     )?;
     let s_ref = NativeStemsBeamHeadSLinkerRef {
         head: frontier.head,
-        horizontal: relation.derived_horizontal,
+        // CLinker.link marks its containing SLinker, not the side derived
+        // independently by HeadStemRelation.checkRelation.
+        horizontal: frontier.next_corner.horizontal,
     };
     let matching_count = shadow
         .beam_state
@@ -16268,7 +16331,7 @@ fn append_head_c_link_additional_head_relations(
                 sig_ordinal: corner.sig_ordinal,
                 x_ordinal: corner.x_ordinal,
             },
-            horizontal: target_relation.derived_horizontal,
+            horizontal: corner.horizontal,
         };
         let persistent = state
             .beam_state
@@ -16834,6 +16897,7 @@ fn java_next_up(value: f64) -> f64 {
 }
 
 fn head_stem_consistency(
+    initiating_head_is_small: bool,
     y1: f64,
     y2: f64,
     interline: i32,
@@ -16844,7 +16908,16 @@ fn head_stem_consistency(
             "invalid stem consistency geometry",
         ));
     }
-    let value = ((y2 - y1) / f64::from(interline)) / 2.8;
+    let ratio = ((y2 - y1) / f64::from(interline)) / 2.8;
+    // Java's HeadLinker.CLinker applies the initiating C-linker's `head`
+    // when assigning consistency to every relation accumulated by the
+    // transaction.  Crossed heads therefore deliberately inherit the
+    // initiating head's small/standard classification.
+    let value = if initiating_head_is_small {
+        1.0 / ratio
+    } else {
+        ratio
+    };
     if !value.is_finite() {
         return Err(stage(
             "HEADS-CLink-consistency",
@@ -17378,16 +17451,16 @@ mod tests {
         let mut rejected_heads = heads.clone();
         let cells_before = rejected_cells.clone();
         let heads_before = rejected_heads.clone();
-        assert!(
-            close_heads_sharing_prelinked_stems(
-                &missing,
-                &bindings,
-                &mut rejected_cells,
-                &mut rejected_heads,
-                &current_head,
-            )
-            .is_err()
-        );
+        let (writes, changes) = close_heads_sharing_prelinked_stems(
+            &missing,
+            &bindings,
+            &mut rejected_cells,
+            &mut rejected_heads,
+            &current_head,
+        )
+        .expect("linked side without a matching relation is a Java no-op");
+        assert!(writes.is_empty());
+        assert_eq!(changes, 0);
         assert_eq!(rejected_cells, cells_before);
         assert_eq!(rejected_heads, heads_before);
     }

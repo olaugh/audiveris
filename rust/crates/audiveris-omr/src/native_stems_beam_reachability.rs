@@ -1311,7 +1311,7 @@ fn filter_heads(
     let mut targets = Vec::new();
     for candidate in candidates.iter().copied() {
         let head = &head_system.heads_in_sig_order[candidate.sig_ordinal];
-        let is_small_head = false;
+        let is_small_head = head.shape.is_small();
         totals.small_heads += usize::from(is_small_head);
         let size_accepted = ALLOW_SMALL_HEAD_ON_STANDARD_BEAM || !is_small_head || is_small_beam;
         if !size_accepted {

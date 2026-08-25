@@ -12105,3 +12105,30 @@ remains at `BeamsBuilder.buildCueBeams`, after exact HEADS and before any cue
 mutation or JSON. Resume with Java's `getCueAggregates()` over live small black
 heads and their HeadStem relations, then `CueAggregate.process()` morphology
 and linking.
+
+## Boundary 299: exact active cue-aggregate foundation
+
+`materialize_native_cue_aggregates` now ports Java's complete read-only
+`BeamsBuilder.getCueAggregates()` result over the reduced live SIG. It selects
+contextual-grade-qualified small black heads, resolves the first HeadStem,
+uses Java's ties-to-even 2/3-interline margins and stable x order, joins the
+first intersecting aggregate, and purges singletons without mutating REDUCTION.
+
+The fresh Temurin-25 eight-page oracle has 30 systems, nine qualified heads,
+and zero retained aggregates; every candidate is a singleton. Bach system 5
+is the critical real-scan regression: the retained head at `1514,1974` has
+exact contextual bits `3fec1a2859cdaff9` and remains separate from the nearby
+standard beam. Matching Java required restoring two small-head STEMS rules:
+beam V-link reachability rejects small heads on standard beams, and head-corner
+reachability truncates at the near beam border while leaving `targetBeam`
+unset. Beam/head consistency now also uses the actual small-head class.
+
+The 49-line fixture, probe, and runner SHA-256 values are respectively
+`c10a12a0f8b3adabfa2de4e39b51b4f904881d2052e0b34385dca721388dde8a`,
+`16a57d022e089de068f591c970467b475b439afeb3d5d96e2921c818e15abac3`,
+and `45b47a66a30665c7c3737926ad3aa8bff77a4c14fab4ecefbbf49ab1f5394e15`.
+Warm Java regeneration is byte-identical; the clean eight-page Rust
+differential and focused reachability/linking suites pass. Active CUE_BEAMS
+still fails before mutation/publication. Resume with `CueAggregate.process()`:
+cue spot morphology, beam construction, and graph linking over this exact
+aggregate frontier.

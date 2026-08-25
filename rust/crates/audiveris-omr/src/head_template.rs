@@ -940,12 +940,14 @@ mod tests {
                     dy: 16.0,
                 },
             ],
-            HeadTemplateShape::NoteheadBlackSmall
-            | HeadTemplateShape::NoteheadVoidSmall
-            | HeadTemplateShape::WholeNoteSmall
-            | HeadTemplateShape::BreveSmall => {
-                panic!("small shape is outside the legacy test helper")
+            HeadTemplateShape::NoteheadBlackSmall => {
+                chula_84_anchors(HeadTemplateShape::NoteheadBlack)
             }
+            HeadTemplateShape::NoteheadVoidSmall => {
+                chula_84_anchors(HeadTemplateShape::NoteheadVoid)
+            }
+            HeadTemplateShape::WholeNoteSmall => chula_84_anchors(HeadTemplateShape::WholeNote),
+            HeadTemplateShape::BreveSmall => chula_84_anchors(HeadTemplateShape::Breve),
         }
     }
 
@@ -1282,7 +1284,7 @@ mod tests {
     }
 
     #[test]
-    fn catalog_requires_all_four_records_in_exact_factory_order() {
+    fn catalog_requires_all_eight_records_in_exact_factory_order() {
         let geometry = [
             (
                 HeadTemplateShape::NoteheadBlack,
@@ -1306,6 +1308,34 @@ mod tests {
                 (11, 2),
             ),
             (HeadTemplateShape::Breve, 57, 33, (3, 3, 50, 26), (1, 1)),
+            (
+                HeadTemplateShape::NoteheadBlackSmall,
+                31,
+                27,
+                (3, 4, 25, 20),
+                (12, 2),
+            ),
+            (
+                HeadTemplateShape::NoteheadVoidSmall,
+                31,
+                27,
+                (3, 4, 25, 20),
+                (12, 2),
+            ),
+            (
+                HeadTemplateShape::WholeNoteSmall,
+                42,
+                27,
+                (3, 4, 35, 20),
+                (11, 2),
+            ),
+            (
+                HeadTemplateShape::BreveSmall,
+                57,
+                33,
+                (3, 3, 50, 26),
+                (1, 1),
+            ),
         ];
         let templates = geometry
             .into_iter()
@@ -1340,7 +1370,7 @@ mod tests {
 
         assert_eq!(catalog.family(), HeadTemplateFamily::Bravura);
         assert_eq!(catalog.point_size(), 84);
-        assert_eq!(catalog.templates().len(), 4);
+        assert_eq!(catalog.templates().len(), 8);
         assert_eq!(catalog.template(HeadTemplateShape::Breve).width(), 57);
     }
 
