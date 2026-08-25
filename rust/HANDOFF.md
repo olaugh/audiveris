@@ -12254,3 +12254,30 @@ checks pass.
 Resume by applying each accepted first relation to SIG, then extending the same
 grade through later beams in that group with their independently computed
 border intersections and beam portions.
+
+## Boundary 306: cue BeamStem SIG mutation kernel
+
+`apply_native_cue_beam_stem_relations` now owns the mutating tail of Java
+`CueAggregate.linkStemToCueBeams`. The first group member either reuses its
+already-live `BeamStemRelation` or inserts the accepted checked relation with
+its exact grade, portion, and extension. The SIG primitive is idempotent and
+runs Java's `BeamStemRelation.added()` beam-abnormal callback after insertion.
+
+When the first beam's intrinsic grade meets Java's inclusive `0.35`
+`goodBeamGrade`, every later member is visited in the already authenticated
+from-head order. Existing relations are skipped; new relations copy the first
+relation's grade while independently intersecting the final REDUCTION-refined
+stem median with that member's border and recomputing LEFT/CENTER/RIGHT using
+Java's ties-to-even `Scale.toPixels(0.5)` threshold and strict comparisons.
+Focused tests pin duplicate insertion, abnormal recomputation, the exact good
+grade boundary, propagation order, copied grade, intersections, and portion
+boundaries. The eight-page differential executes the new continuation as an
+exact zero-edge delta after singleton purge. The full library passes 770 tests
+with two ignored; formatting, strict workspace/all-target/all-feature Clippy,
+and diff checks pass.
+
+The kernel is deliberately not yet folded into the concurrently changing
+top-level active-CUE_BEAMS result. Once that recovery integration lands, wire
+this recognition immediately after `stem_checks`, publish its terminal SIG,
+and freeze at least one non-empty cue aggregate before advancing beyond
+`CueAggregate.process()`.

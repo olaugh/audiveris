@@ -6684,3 +6684,19 @@ and records the first beam's portion, gaps, impacts, grade, extension point,
 and acceptance without graph mutation. The empty active corpus and all full
 verification gates pass. Applying accepted first relations and extending them
 across remaining group beams is next.
+
+## Boundary 306: cue BeamStem relation application
+
+The checked cue relation can now be committed to native SIG. Insertion is
+idempotent, retains grade/portion/extension payloads, and recomputes beam
+abnormality like Java's relation callback. If the nearest beam is good at the
+inclusive `0.35` threshold, later group beams inherit that relation grade in
+stable order but receive independently computed border intersections and
+strict Java-rounded beam portions; existing relations are never duplicated.
+
+Synthetic coverage pins the good-grade threshold and multi-member mutation,
+while the eight-page Java differential remains an exact no-op because all cue
+aggregates are singletons. The full library (770 passed, two ignored), format,
+strict workspace Clippy, and diff gates pass. Top-level active-CUE_BEAMS wiring
+is intentionally deferred until the overlapping optional recovery patch is
+committed, after which this result becomes the stage's terminal SIG snapshot.

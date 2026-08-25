@@ -28,8 +28,9 @@ use crate::head_scanner_slices::JavaRectangle;
 use crate::native_heads_range_lookup::java_rectangle_grow;
 use crate::native_reduction::NativeReductionRecognition;
 use crate::native_sig::{
-    NativeSigBounds, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem, NativeSigVertexId,
-    append_native_cue_beam_groups, append_native_cue_beam_vertex,
+    NativeSigBounds, NativeSigEdgeId, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem,
+    NativeSigVertexId, append_native_cue_beam_groups, append_native_cue_beam_stem_relation,
+    append_native_cue_beam_vertex,
 };
 use crate::native_stems_beam_stumps::NativeStemsBeamSource;
 use crate::native_stems_beam_vlink_reuse_check::{
@@ -514,6 +515,7 @@ pub struct NativeCueBeamStemRelationCheck {
     pub head_sig_ordinal: NativeSigVertexId,
     pub stem_sig_ordinal: NativeSigVertexId,
     pub stem_identity: usize,
+    pub stem_median: crate::stems_step::NativeStemLine,
     pub group_sig_ordinal: NativeSigVertexId,
     pub first_beam_sig_ordinal: NativeSigVertexId,
     pub beam_portion: crate::stems_step::NativeBeamPortion,
@@ -529,6 +531,32 @@ pub struct NativeCueBeamStemRelationCheck {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeCueBeamStemCheckRecognition {
     pub checks: Vec<NativeCueBeamStemRelationCheck>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeCueBeamStemGroupMutation {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub head_sig_ordinal: NativeSigVertexId,
+    pub stem_sig_ordinal: NativeSigVertexId,
+    pub group_sig_ordinal: NativeSigVertexId,
+    pub first_beam_sig_ordinal: NativeSigVertexId,
+    pub first_relation_edge: Option<NativeSigEdgeId>,
+    pub first_relation_created: bool,
+    pub extended_relation_edges: Vec<NativeSigEdgeId>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamStemMutationSystem {
+    pub system_id: usize,
+    pub sig_before_relation_count: usize,
+    pub sig_after: NativeSigSystem,
+    pub mutations: Vec<NativeCueBeamStemGroupMutation>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamStemMutationRecognition {
+    pub systems: Vec<NativeCueBeamStemMutationSystem>,
 }
 
 #[derive(Clone, Copy)]
@@ -1418,6 +1446,7 @@ pub fn check_native_cue_beam_stem_links(
                     head_sig_ordinal: head_plan.head_sig_ordinal,
                     stem_sig_ordinal: head_plan.stem_sig_ordinal,
                     stem_identity,
+                    stem_median: stem.geometry.median,
                     group_sig_ordinal,
                     first_beam_sig_ordinal: first.sig_ordinal,
                     beam_portion: relation.portion,
@@ -1433,6 +1462,303 @@ pub fn check_native_cue_beam_stem_links(
         }
     }
     Ok(NativeCueBeamStemCheckRecognition { checks })
+}
+
+/// Apply Java `CueAggregate.linkStemToCueBeams` in selected-group order.
+///
+/// The first beam receives the fully checked relation. If that relation exists
+/// (pre-existing or newly accepted) and the first beam is good, Java extends
+/// the same relation grade to every other member of the group, recomputing
+/// only the member-specific intersection and beam portion.
+pub fn apply_native_cue_beam_stem_relations(
+    mutations: &NativeCueBeamMutationRecognition,
+    grouping: &NativeCueBeamGroupingRecognition,
+    lookup: &NativeCueBeamStemLookupRecognition,
+    checks: &NativeCueBeamStemCheckRecognition,
+    sheet_skew_slope: f64,
+    interline: i32,
+) -> Result<NativeCueBeamStemMutationRecognition, NativeCueBeamMutationError> {
+    if interline <= 0 {
+        return Err(cue_lookup_error(0, 0, "invalid cue relation interline"));
+    }
+    let mut systems = Vec::with_capacity(grouping.systems.len());
+    for grouping_system in &grouping.systems {
+        let system_id = grouping_system.system_id;
+        let mutation_system = mutations
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing cue mutation system"))?;
+        let lookup_system = lookup
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing cue lookup system"))?;
+        let mut sig_after = grouping_system.sig_after.clone();
+        let sig_before_relation_count = sig_after.edges.len();
+        let mut relation_mutations = Vec::new();
+        for plan in &lookup_system.plans {
+            let grouped = grouping_system
+                .aggregates
+                .iter()
+                .find(|aggregate| aggregate.aggregate_ordinal == plan.aggregate_ordinal)
+                .ok_or_else(|| {
+                    cue_lookup_error(system_id, plan.aggregate_ordinal, "missing cue grouping")
+                })?;
+            let local_beams = mutation_system
+                .beams
+                .iter()
+                .filter(|beam| beam.aggregate_ordinal == plan.aggregate_ordinal)
+                .collect::<Vec<_>>();
+            for &group_sig_ordinal in &plan.beam_groups {
+                let check = checks
+                    .checks
+                    .iter()
+                    .find(|check| {
+                        check.system_id == system_id
+                            && check.aggregate_ordinal == plan.aggregate_ordinal
+                            && check.head_sig_ordinal == plan.head_sig_ordinal
+                            && check.stem_sig_ordinal == plan.stem_sig_ordinal
+                            && check.group_sig_ordinal == group_sig_ordinal
+                    })
+                    .ok_or_else(|| {
+                        cue_lookup_error(
+                            system_id,
+                            plan.aggregate_ordinal,
+                            "missing cue BeamStem check",
+                        )
+                    })?;
+                let group_index = grouped
+                    .group_sig_ordinals
+                    .iter()
+                    .position(|group| *group == group_sig_ordinal)
+                    .ok_or_else(|| {
+                        cue_lookup_error(
+                            system_id,
+                            plan.aggregate_ordinal,
+                            "selected cue group is unavailable",
+                        )
+                    })?;
+                let mut members = grouped.evidence.groups[group_index]
+                    .iter()
+                    .map(|&id| {
+                        local_beams.get(id).copied().ok_or_else(|| {
+                            cue_lookup_error(
+                                system_id,
+                                plan.aggregate_ordinal,
+                                "cue group member is unavailable",
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if members.is_empty() {
+                    return Err(cue_lookup_error(
+                        system_id,
+                        plan.aggregate_ordinal,
+                        "selected cue group is empty",
+                    ));
+                }
+                members.sort_by(|left, right| {
+                    cue_beam_direction_distance(
+                        left.beam,
+                        plan.reference_point,
+                        plan.vertical_side,
+                        sheet_skew_slope,
+                    )
+                    .total_cmp(&cue_beam_direction_distance(
+                        right.beam,
+                        plan.reference_point,
+                        plan.vertical_side,
+                        sheet_skew_slope,
+                    ))
+                });
+                let first = members[0];
+                if first.sig_ordinal != check.first_beam_sig_ordinal {
+                    return Err(cue_lookup_error(
+                        system_id,
+                        plan.aggregate_ordinal,
+                        "cue first-beam order changed after relation check",
+                    ));
+                }
+
+                let existing_first =
+                    active_cue_beam_stem_edge(&sig_after, first.sig_ordinal, plan.stem_sig_ordinal);
+                let mut first_relation_created = false;
+                let first_relation_edge = if let Some(edge) = existing_first {
+                    Some(NativeSigEdgeId(edge.ordinal))
+                } else if check.accepted {
+                    let extension = check.extension_point.ok_or_else(|| {
+                        cue_lookup_error(
+                            system_id,
+                            plan.aggregate_ordinal,
+                            "accepted cue relation has no extension",
+                        )
+                    })?;
+                    let appended = append_native_cue_beam_stem_relation(
+                        &mut sig_after,
+                        first.sig_ordinal,
+                        plan.stem_sig_ordinal,
+                        check.grade,
+                        check.beam_portion,
+                        extension,
+                    )
+                    .map_err(|error| {
+                        cue_lookup_error(system_id, plan.aggregate_ordinal, &error.to_string())
+                    })?;
+                    first_relation_created = appended.created;
+                    Some(appended.edge)
+                } else {
+                    None
+                };
+
+                let ordered_members = members
+                    .iter()
+                    .map(|beam| (beam.sig_ordinal, beam.beam))
+                    .collect::<Vec<_>>();
+                let extended_relation_edges = if let Some(first_edge) = first_relation_edge {
+                    extend_native_cue_beam_group_relations(
+                        &mut sig_after,
+                        &ordered_members,
+                        plan.stem_sig_ordinal,
+                        check.stem_median,
+                        plan.vertical_side,
+                        interline,
+                        first_edge,
+                    )
+                    .map_err(|error| {
+                        cue_lookup_error(system_id, plan.aggregate_ordinal, &error.to_string())
+                    })?
+                } else {
+                    Vec::new()
+                };
+                relation_mutations.push(NativeCueBeamStemGroupMutation {
+                    system_id,
+                    aggregate_ordinal: plan.aggregate_ordinal,
+                    head_sig_ordinal: plan.head_sig_ordinal,
+                    stem_sig_ordinal: plan.stem_sig_ordinal,
+                    group_sig_ordinal,
+                    first_beam_sig_ordinal: first.sig_ordinal,
+                    first_relation_edge,
+                    first_relation_created,
+                    extended_relation_edges,
+                });
+            }
+        }
+        sig_after.validate_integrity().map_err(|error| {
+            cue_lookup_error(system_id, 0, &format!("invalid cue relation SIG: {error}"))
+        })?;
+        systems.push(NativeCueBeamStemMutationSystem {
+            system_id,
+            sig_before_relation_count,
+            sig_after,
+            mutations: relation_mutations,
+        });
+    }
+    Ok(NativeCueBeamStemMutationRecognition { systems })
+}
+
+fn active_cue_beam_stem_edge(
+    sig: &NativeSigSystem,
+    beam: NativeSigVertexId,
+    stem: NativeSigVertexId,
+) -> Option<&crate::native_sig::NativeSigEdge> {
+    sig.edges.iter().find(|edge| {
+        edge.active
+            && edge.source == beam.0
+            && edge.target == stem.0
+            && edge.kind == NativeSigRelationKind::BeamStem
+    })
+}
+
+fn extend_native_cue_beam_group_relations(
+    sig: &mut NativeSigSystem,
+    ordered_members: &[(NativeSigVertexId, RawBeam)],
+    stem: NativeSigVertexId,
+    stem_median: crate::stems_step::NativeStemLine,
+    vertical_side: NativeStemVerticalSide,
+    interline: i32,
+    first_edge: NativeSigEdgeId,
+) -> Result<Vec<NativeSigEdgeId>, crate::native_sig::NativeSigError> {
+    let Some((_, first_beam)) = ordered_members.first() else {
+        return Ok(Vec::new());
+    };
+    if first_beam
+        .grade
+        .partial_cmp(&0.35)
+        .is_none_or(|ordering| ordering.is_lt())
+        || ordered_members.len() < 2
+    {
+        return Ok(Vec::new());
+    }
+    let relation_grade = sig
+        .edges
+        .get(first_edge.0)
+        .and_then(|edge| edge.active.then_some(edge))
+        .and_then(|edge| edge.support)
+        .ok_or(crate::native_sig::NativeSigError::InvalidRelationPayload {
+            system_id: sig.system_id,
+            ordinal: first_edge.0,
+        })?
+        .grade;
+    let stem_segment = Segment {
+        x1: stem_median.start.x,
+        y1: stem_median.start.y,
+        x2: stem_median.stop.x,
+        y2: stem_median.stop.y,
+    };
+    let mut extended = Vec::new();
+    for &(beam_id, beam) in ordered_members.iter().skip(1) {
+        if active_cue_beam_stem_edge(sig, beam_id, stem).is_some() {
+            continue;
+        }
+        let cross = generic_intersection(stem_segment, cue_beam_border(beam, vertical_side));
+        let extension = NativeStemPoint {
+            x: cross.x,
+            y: cross.y,
+        };
+        let appended = append_native_cue_beam_stem_relation(
+            sig,
+            beam_id,
+            stem,
+            relation_grade,
+            cue_beam_portion(beam.item.median, extension.x, interline),
+            extension,
+        )?;
+        if appended.created {
+            extended.push(appended.edge);
+        }
+    }
+    Ok(extended)
+}
+
+fn cue_beam_portion(
+    median: Segment,
+    x_stem: f64,
+    interline: i32,
+) -> crate::stems_step::NativeBeamPortion {
+    let maximum_dx = (f64::from(interline) * 0.5).round_ties_even();
+    if x_stem < median.x1 + maximum_dx {
+        crate::stems_step::NativeBeamPortion::Left
+    } else if x_stem > median.x2 - maximum_dx {
+        crate::stems_step::NativeBeamPortion::Right
+    } else {
+        crate::stems_step::NativeBeamPortion::Center
+    }
+}
+
+fn cue_beam_direction_distance(
+    beam: RawBeam,
+    reference_point: NativeStemPoint,
+    vertical_side: NativeStemVerticalSide,
+    slope: f64,
+) -> f64 {
+    let border = cue_beam_border(beam, vertical_side);
+    let y_direction = if vertical_side == NativeStemVerticalSide::Bottom {
+        1.0
+    } else {
+        -1.0
+    };
+    y_direction * (cue_target_point(reference_point, border, slope).y - reference_point.y)
 }
 
 fn lookup_cue_beam_groups(
@@ -2286,6 +2612,149 @@ mod tests {
         assert_eq!(parameters.min_x_overlap, 10.0);
         assert_eq!(parameters.max_y_distance, 15.0);
         assert_eq!(parameters.max_slope_diff, 0.2);
+    }
+
+    #[test]
+    fn cue_group_extension_uses_java_strict_portion_boundaries() {
+        use crate::stems_step::NativeBeamPortion;
+
+        let median = Segment {
+            x1: 10.0,
+            y1: 20.0,
+            x2: 40.0,
+            y2: 20.0,
+        };
+        // Scale.toPixels(0.5) uses Math.rint: 15 * 0.5 rounds to 8.
+        assert_eq!(cue_beam_portion(median, 17.99, 15), NativeBeamPortion::Left);
+        assert_eq!(
+            cue_beam_portion(median, 18.0, 15),
+            NativeBeamPortion::Center
+        );
+        assert_eq!(
+            cue_beam_portion(median, 32.0, 15),
+            NativeBeamPortion::Center
+        );
+        assert_eq!(
+            cue_beam_portion(median, 32.01, 15),
+            NativeBeamPortion::Right
+        );
+    }
+
+    #[test]
+    fn cue_group_extension_copies_first_grade_in_member_order_at_good_threshold() {
+        use crate::native_sig::{NativeSigVertex, append_native_cue_beam_vertex};
+        use crate::stems_step::{NativeBeamPortion, NativeStemLine};
+        use audiveris_image::beam_structure::{BeamImpacts, BeamItem, BeamRasterEvidence};
+
+        let cue = |y: f64, grade: f64| RawBeam {
+            kind: BeamKind::SmallBeam,
+            item: BeamItem {
+                median: Segment {
+                    x1: 10.0,
+                    y1: y,
+                    x2: 40.0,
+                    y2: y,
+                },
+                height: 4.0,
+            },
+            impacts: BeamImpacts {
+                width: 1.0,
+                min_height: 1.0,
+                max_height: 1.0,
+                core: 1.0,
+                belt: 1.0,
+                distance: 1.0,
+                raster: BeamRasterEvidence {
+                    core_foreground: 1,
+                    core_count: 1,
+                    belt_foreground: 0,
+                    belt_count: 1,
+                    core_ratio: 1.0,
+                    belt_ratio: 0.0,
+                    rounded_width: 31,
+                },
+            },
+            grade,
+        };
+        let beams = [cue(20.0, 0.35), cue(30.0, 0.8), cue(40.0, 0.9)];
+        let mut sig = NativeSigSystem {
+            system_id: 4,
+            vertices: Vec::new(),
+            edges: Vec::new(),
+        };
+        let beam_ids = beams
+            .iter()
+            .map(|beam| append_native_cue_beam_vertex(&mut sig, beam))
+            .collect::<Vec<_>>();
+        let stem = NativeSigVertexId(sig.vertices.len());
+        sig.append_vertex(NativeSigVertex {
+            ordinal: stem.0,
+            active: true,
+            removed: false,
+            frozen: false,
+            kind: NativeSigInterKind::Stem,
+            shape: Some("STEM".to_owned()),
+            grade: 0.7,
+            contextual_grade: None,
+            bounds: NativeSigBounds {
+                x: 11,
+                y: 0,
+                width: 2,
+                height: 60,
+            },
+            abnormal: false,
+            beam_geometry: None,
+        })
+        .unwrap();
+        let first = append_native_cue_beam_stem_relation(
+            &mut sig,
+            beam_ids[0],
+            stem,
+            0.61,
+            NativeBeamPortion::Left,
+            NativeStemPoint { x: 12.0, y: 22.0 },
+        )
+        .unwrap();
+        let mut ordered = beam_ids.iter().copied().zip(beams).collect::<Vec<_>>();
+        ordered[0].1.grade = 0.35 - f64::EPSILON;
+        assert!(
+            extend_native_cue_beam_group_relations(
+                &mut sig,
+                &ordered,
+                stem,
+                NativeStemLine {
+                    start: NativeStemPoint { x: 12.0, y: 0.0 },
+                    stop: NativeStemPoint { x: 12.0, y: 60.0 },
+                },
+                NativeStemVerticalSide::Bottom,
+                15,
+                first.edge,
+            )
+            .unwrap()
+            .is_empty()
+        );
+        ordered[0].1.grade = 0.35;
+        let extended = extend_native_cue_beam_group_relations(
+            &mut sig,
+            &ordered,
+            stem,
+            NativeStemLine {
+                start: NativeStemPoint { x: 12.0, y: 0.0 },
+                stop: NativeStemPoint { x: 12.0, y: 60.0 },
+            },
+            NativeStemVerticalSide::Bottom,
+            15,
+            first.edge,
+        )
+        .unwrap();
+
+        assert_eq!(extended, [NativeSigEdgeId(1), NativeSigEdgeId(2)]);
+        assert_eq!(sig.edges[1].support.unwrap().grade, 0.61);
+        assert_eq!(sig.edges[2].support.unwrap().grade, 0.61);
+        assert_eq!(sig.edges[1].stem_extension.unwrap().y, 32.0);
+        assert_eq!(sig.edges[2].stem_extension.unwrap().y, 42.0);
+        assert_eq!(sig.edges[1].beam_portion, Some(NativeBeamPortion::Left));
+        assert_eq!(sig.edges[2].beam_portion, Some(NativeBeamPortion::Left));
     }
 
     #[test]

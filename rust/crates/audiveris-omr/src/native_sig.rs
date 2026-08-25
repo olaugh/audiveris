@@ -2298,6 +2298,97 @@ pub fn append_native_cue_beam_vertex(
     NativeSigVertexId(push_beam_vertex(graph, beam))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeCueBeamStemRelationAppend {
+    pub edge: NativeSigEdgeId,
+    pub created: bool,
+}
+
+/// Append one committed active-CUE_BEAMS `BeamStemRelation`.
+///
+/// Java's `Link.applyTo()` is idempotent at the graph level and invokes the
+/// relation's `added()` callback. The callback recomputes beam abnormality
+/// after the relation payload has been installed. Keeping those semantics in
+/// this small SIG primitive lets the cue-beam orchestration preserve Java's
+/// group iteration order without duplicating graph invariants.
+pub fn append_native_cue_beam_stem_relation(
+    graph: &mut NativeSigSystem,
+    beam: NativeSigVertexId,
+    stem: NativeSigVertexId,
+    grade: f64,
+    beam_portion: NativeBeamPortion,
+    stem_extension: NativeStemPoint,
+) -> Result<NativeCueBeamStemRelationAppend, NativeSigError> {
+    let system_id = graph.system_id;
+    if graph
+        .vertex(beam.0)
+        .is_none_or(|vertex| vertex.kind != NativeSigInterKind::SmallBeam)
+    {
+        return Err(NativeSigError::InvalidVertexState {
+            system_id,
+            ordinal: beam.0,
+        });
+    }
+    if graph
+        .vertex(stem.0)
+        .is_none_or(|vertex| vertex.kind != NativeSigInterKind::Stem)
+    {
+        return Err(NativeSigError::InvalidVertexState {
+            system_id,
+            ordinal: stem.0,
+        });
+    }
+    if let Some(edge) = graph.edges.iter().find(|edge| {
+        edge.active
+            && edge.source == beam.0
+            && edge.target == stem.0
+            && edge.kind == NativeSigRelationKind::BeamStem
+    }) {
+        return Ok(NativeCueBeamStemRelationAppend {
+            edge: NativeSigEdgeId(edge.ordinal),
+            created: false,
+        });
+    }
+
+    let edge = NativeSigEdgeId(graph.edges.len());
+    graph.append_edge(NativeSigEdge {
+        ordinal: edge.0,
+        active: true,
+        source: beam.0,
+        target: stem.0,
+        kind: NativeSigRelationKind::BeamStem,
+        origin: NativeSigRelationOrigin::BaselineGraph,
+        support: Some(NativeSigSupport {
+            grade,
+            bar_connection_impacts: None,
+        }),
+        beam_portion: Some(beam_portion),
+        stem_extension: Some(stem_extension),
+        head_stem: None,
+    })?;
+
+    let mut left = false;
+    let mut right = false;
+    for relation in graph.incident_edges(beam.0)?.into_iter().filter(|edge| {
+        matches!(
+            edge.kind,
+            NativeSigRelationKind::BeamStem | NativeSigRelationKind::BeamRest
+        )
+    }) {
+        match relation.beam_portion {
+            Some(NativeBeamPortion::Left) => left = true,
+            Some(NativeBeamPortion::Right) => right = true,
+            Some(NativeBeamPortion::Center) | None => {}
+        }
+    }
+    graph.set_abnormal(beam, !left || !right)?;
+
+    Ok(NativeCueBeamStemRelationAppend {
+        edge,
+        created: true,
+    })
+}
+
 /// Materialize Java `BeamGroupInter.populateCueAggregate` evidence into SIG.
 ///
 /// `beam_vertices[beam_id]` is the already inserted `SmallBeamInter`. Group
@@ -2756,6 +2847,110 @@ mod overlap_geometry_tests {
         assert_eq!(vertex.grade, 0.8);
         assert!(vertex.abnormal);
         assert_eq!(vertex.beam_geometry.unwrap().height, 4.0);
+    }
+
+    #[test]
+    fn cue_beam_stem_append_is_idempotent_and_runs_beam_callback() {
+        fn stem_vertex(x: i32) -> NativeSigVertex {
+            NativeSigVertex {
+                ordinal: 0,
+                active: true,
+                removed: false,
+                frozen: false,
+                kind: NativeSigInterKind::Stem,
+                shape: Some("STEM".to_owned()),
+                grade: 0.7,
+                contextual_grade: None,
+                bounds: NativeSigBounds {
+                    x,
+                    y: 10,
+                    width: 2,
+                    height: 40,
+                },
+                abnormal: false,
+                beam_geometry: None,
+            }
+        }
+
+        let beam = RawBeam {
+            kind: BeamKind::SmallBeam,
+            item: BeamItem {
+                median: Segment {
+                    x1: 10.0,
+                    y1: 20.0,
+                    x2: 40.0,
+                    y2: 20.0,
+                },
+                height: 4.0,
+            },
+            impacts: BeamImpacts {
+                width: 1.0,
+                min_height: 1.0,
+                max_height: 1.0,
+                core: 1.0,
+                belt: 1.0,
+                distance: 1.0,
+                raster: BeamRasterEvidence {
+                    core_foreground: 120,
+                    core_count: 120,
+                    belt_foreground: 0,
+                    belt_count: 60,
+                    core_ratio: 1.0,
+                    belt_ratio: 0.0,
+                    rounded_width: 31,
+                },
+            },
+            grade: 0.8,
+        };
+        let mut graph = NativeSigSystem {
+            system_id: 3,
+            vertices: Vec::new(),
+            edges: Vec::new(),
+        };
+        let beam_id = append_native_cue_beam_vertex(&mut graph, &beam);
+        let left_stem = NativeSigVertexId(push_vertex(&mut graph, stem_vertex(10)));
+        let right_stem = NativeSigVertexId(push_vertex(&mut graph, stem_vertex(39)));
+
+        let left = append_native_cue_beam_stem_relation(
+            &mut graph,
+            beam_id,
+            left_stem,
+            0.6,
+            NativeBeamPortion::Left,
+            NativeStemPoint { x: 11.0, y: 22.0 },
+        )
+        .unwrap();
+        assert!(left.created);
+        assert!(graph.vertex(beam_id.0).unwrap().abnormal);
+        assert_eq!(graph.edges[left.edge.0].support.unwrap().grade, 0.6);
+
+        let duplicate = append_native_cue_beam_stem_relation(
+            &mut graph,
+            beam_id,
+            left_stem,
+            0.1,
+            NativeBeamPortion::Center,
+            NativeStemPoint { x: 0.0, y: 0.0 },
+        )
+        .unwrap();
+        assert_eq!(duplicate.edge, left.edge);
+        assert!(!duplicate.created);
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[left.edge.0].support.unwrap().grade, 0.6);
+
+        let right = append_native_cue_beam_stem_relation(
+            &mut graph,
+            beam_id,
+            right_stem,
+            0.6,
+            NativeBeamPortion::Right,
+            NativeStemPoint { x: 40.0, y: 22.0 },
+        )
+        .unwrap();
+        assert!(right.created);
+        assert!(!graph.vertex(beam_id.0).unwrap().abnormal);
+        assert_eq!(graph.edges.len(), 2);
+        graph.validate_integrity().unwrap();
     }
 
     #[test]

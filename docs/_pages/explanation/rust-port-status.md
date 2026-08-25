@@ -7166,3 +7166,14 @@ The nearest member of each selected cue group now enters the shared native
 `BeamStemRelation` grade kernel using the final REDUCTION-refined stem median.
 Rust retains complete relation evidence without mutating SIG. The active corpus
 remains exactly empty; accepted relation insertion and group extension are next.
+
+## Boundary 306: cue BeamStem graph mutation
+
+Rust now has the exact SIG mutation kernel for checked cue-beam links. It
+reuses existing first-member relations, inserts accepted relations with their
+full payload, updates beam abnormality, and propagates a good first relation's
+grade across later group members with per-member intersections and Java-rounded
+beam portions. Focused tests cover the inclusive `0.35` gate and ordered group
+extension; the eight-page differential remains an exact zero-edge delta after
+singleton purge. Top-level active-stage wiring waits only for the overlapping
+optional recovery integration to land cleanly.

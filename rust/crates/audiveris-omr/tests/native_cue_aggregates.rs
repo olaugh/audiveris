@@ -4,10 +4,11 @@ use std::path::PathBuf;
 
 use audiveris_omr::{
     cue_beams_step::{
-        NativeCueAggregateRecognition, check_native_cue_beam_spots,
-        check_native_cue_beam_stem_links, extract_native_cue_spots, group_native_cue_beams,
-        materialize_native_cue_aggregates, materialize_native_cue_beam_mutations,
-        plan_native_cue_aggregate_processing, plan_native_cue_beam_stem_links,
+        NativeCueAggregateRecognition, apply_native_cue_beam_stem_relations,
+        check_native_cue_beam_spots, check_native_cue_beam_stem_links, extract_native_cue_spots,
+        group_native_cue_beams, materialize_native_cue_aggregates,
+        materialize_native_cue_beam_mutations, plan_native_cue_aggregate_processing,
+        plan_native_cue_beam_stem_links,
     },
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads_with_small_heads,
@@ -112,6 +113,29 @@ fn active_cue_aggregate_corpus_matches_java() {
             check_native_cue_beam_stem_links(&reduction, &mutations, &grouping, &link_plans)
                 .expect("native cue BeamStem checks");
         assert!(relation_checks.checks.is_empty(), "{page}");
+        let relation_mutations = apply_native_cue_beam_stem_relations(
+            &mutations,
+            &grouping,
+            &link_plans,
+            &relation_checks,
+            reduction.stems.sheet_skew_slope,
+            reduction.stems.reduction_interline,
+        )
+        .expect("native cue BeamStem mutations");
+        assert!(
+            relation_mutations.systems.iter().all(|system| {
+                system.mutations.is_empty()
+                    && system.sig_after.edges.len() == system.sig_before_relation_count
+                    && system.sig_after
+                        == grouping
+                            .systems
+                            .iter()
+                            .find(|grouped| grouped.system_id == system.system_id)
+                            .expect("aligned grouping system")
+                            .sig_after
+            }),
+            "{page}"
+        );
     }
 }
 
