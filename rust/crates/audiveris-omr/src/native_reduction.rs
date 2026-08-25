@@ -7,7 +7,8 @@
 //! native STEMS SIGs with Java's deterministic `SIGraph.reduceExclusions()`
 //! algorithm, lossless overlap discovery, chord prolog, and the complete
 //! foundations outer fixed point.  It also owns the enabled
-//! `StemInter.refineHeadEnd()` pass that immediately follows foundations.
+//! `StemInter.refineHeadEnd()` pass that immediately follows foundations and
+//! the sheet-epilog beam-group consistency split pass.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -20,6 +21,7 @@ use audiveris_image::{
     run_table::{Orientation, RunTable},
 };
 
+use crate::grid_executor::HeadlessSkew;
 use crate::head_scanner_slices::VerticalRibbonArea;
 use crate::native_sig::{
     NativeSigBounds, NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigError,
@@ -340,6 +342,42 @@ pub struct NativeReductionStemHeadEndTransaction {
     pub refinements: Vec<NativeReductionStemHeadEndRefinement>,
 }
 
+/// One call to Java `BeamGroupInter.sortedBeamsAround()` during epilog checks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionBeamGroupCheck {
+    pub group: NativeSigVertexId,
+    pub beam: NativeSigVertexId,
+    pub siblings: Vec<NativeSigVertexId>,
+    pub beam_index: Option<usize>,
+    pub previous_beam: Option<NativeSigVertexId>,
+    pub common_concrete_stems: Vec<NativeSigVertexId>,
+    pub split_group: Option<NativeSigVertexId>,
+}
+
+/// Exact graph mutation performed by Java `SplitterOnSpace.process()`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionBeamGroupSplit {
+    pub original_group: NativeSigVertexId,
+    pub alien_group: NativeSigVertexId,
+    pub upper_beam: NativeSigVertexId,
+    pub lower_beam: NativeSigVertexId,
+    pub moved_beams: Vec<NativeSigVertexId>,
+    pub removed_containments: Vec<NativeSigEdgeId>,
+    pub added_containments: Vec<NativeSigEdgeId>,
+    pub added_beam_supports: Vec<NativeSigEdgeId>,
+    pub removed_cross_stem_relations: Vec<NativeSigEdgeId>,
+    pub removed_cross_beam_relations: Vec<NativeSigEdgeId>,
+}
+
+/// Complete Java beam-group consistency epilog for one system.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionBeamGroupTransaction {
+    pub system_id: usize,
+    pub initial_groups: Vec<NativeSigVertexId>,
+    pub checks: Vec<NativeReductionBeamGroupCheck>,
+    pub splits: Vec<NativeReductionBeamGroupSplit>,
+}
+
 /// Exact head anchor lookup keyed by SIG head, horizontal side, vertical side.
 pub type NativeReductionHeadAnchorMap = BTreeMap<
     (
@@ -392,6 +430,14 @@ pub enum NativeReductionFoundationPrefixError {
     InvalidRefinedStemGeometry {
         system_id: usize,
         stem: NativeSigVertexId,
+    },
+    MissingBeamGeometry {
+        system_id: usize,
+        beam: NativeSigVertexId,
+    },
+    InvalidBeamGroupGeometry {
+        system_id: usize,
+        beam: NativeSigVertexId,
     },
 }
 
@@ -457,6 +503,16 @@ impl fmt::Display for NativeReductionFoundationPrefixError {
                 "REDUCTION system {system_id} produced invalid refined geometry for stem {}",
                 stem.0
             ),
+            Self::MissingBeamGeometry { system_id, beam } => write!(
+                formatter,
+                "REDUCTION system {system_id} has no geometry for beam {}",
+                beam.0
+            ),
+            Self::InvalidBeamGroupGeometry { system_id, beam } => write!(
+                formatter,
+                "REDUCTION system {system_id} produced invalid beam-group geometry around beam {}",
+                beam.0
+            ),
         }
     }
 }
@@ -475,7 +531,9 @@ impl Error for NativeReductionFoundationPrefixError {
             | Self::InvalidStemRefinementContext { .. }
             | Self::MissingStemThickness { .. }
             | Self::MissingStemHeadAnchor { .. }
-            | Self::InvalidRefinedStemGeometry { .. } => None,
+            | Self::InvalidRefinedStemGeometry { .. }
+            | Self::MissingBeamGeometry { .. }
+            | Self::InvalidBeamGroupGeometry { .. } => None,
         }
     }
 }
@@ -1497,6 +1555,522 @@ fn apply_native_reduction_stem_head_ends(
         no_head_stems,
         refinements,
     })
+}
+
+/// Execute Java `BeamGroupInter.checkBeamGroups(system)` against one terminal
+/// production STEMS SIG after stem head-end refinement.
+pub fn check_native_reduction_beam_groups(
+    stems: &mut NativeStemsRecognition,
+    system_id: usize,
+) -> Result<NativeReductionBeamGroupTransaction, NativeReductionFoundationPrefixError> {
+    let system_index = stems
+        .systems
+        .iter()
+        .position(|system| system.system_id == system_id)
+        .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
+            system_id,
+        ))?;
+    let beam_state = &stems.systems[system_index]
+        .transaction
+        .state_after
+        .beam_state;
+    let mut stem_medians = BTreeMap::new();
+    for (&identity, &vertex) in &beam_state.bindings.stem_vertices {
+        let stem = beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .find(|stem| stem.stem_identity == identity && stem.sig_attached)
+            .ok_or(NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id,
+                stem: vertex,
+            })?;
+        stem_medians.insert(vertex, stem.geometry.median);
+    }
+    check_native_reduction_beam_groups_in_sig(
+        &mut stems.systems[system_index]
+            .transaction
+            .state_after
+            .beam_state
+            .sig,
+        &stem_medians,
+        stems.reduction_interline,
+        stems.reduction_skew,
+    )
+}
+
+/// Dependency-light, atomic port of Java's beam-group consistency epilog.
+pub fn check_native_reduction_beam_groups_in_sig(
+    sig: &mut NativeSigSystem,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    interline: i32,
+    skew: HeadlessSkew,
+) -> Result<NativeReductionBeamGroupTransaction, NativeReductionFoundationPrefixError> {
+    let mut shadow = sig.clone();
+    let transaction =
+        apply_native_reduction_beam_groups(&mut shadow, stem_medians, interline, &skew)?;
+    *sig = shadow;
+    Ok(transaction)
+}
+
+fn apply_native_reduction_beam_groups(
+    sig: &mut NativeSigSystem,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    interline: i32,
+    skew: &HeadlessSkew,
+) -> Result<NativeReductionBeamGroupTransaction, NativeReductionFoundationPrefixError> {
+    if interline <= 0 || !skew.slope.is_finite() {
+        return Err(
+            NativeReductionFoundationPrefixError::InvalidStemRefinementContext {
+                system_id: sig.system_id,
+            },
+        );
+    }
+    sig.validate_integrity()?;
+    // Java allocates the outer group list, so new split groups are not revisited.
+    let initial_groups = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::BeamGroup)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut checks = Vec::new();
+    let mut splits = Vec::new();
+    for &group in &initial_groups {
+        // The enhanced-for loop also owns a fresh `getBeams()` snapshot.
+        let beams = native_beam_group_members(sig, group);
+        for beam in beams {
+            let siblings = native_sorted_beams_around(sig, group, beam, skew)?;
+            let beam_index = siblings.iter().position(|candidate| *candidate == beam);
+            let mut previous_beam = None;
+            let mut common_concrete_stems = Vec::new();
+            let mut split_group = None;
+            if let Some(index) = beam_index.filter(|index| *index > 0) {
+                let previous = siblings[index - 1];
+                previous_beam = Some(previous);
+                common_concrete_stems =
+                    native_common_concrete_stems(sig, previous, beam, stem_medians, interline)?;
+                if common_concrete_stems.is_empty() {
+                    let split = split_native_reduction_beam_group(
+                        sig,
+                        group,
+                        &siblings,
+                        index,
+                        stem_medians,
+                        interline,
+                    )?;
+                    split_group = Some(split.alien_group);
+                    splits.push(split);
+                }
+            }
+            checks.push(NativeReductionBeamGroupCheck {
+                group,
+                beam,
+                siblings,
+                beam_index,
+                previous_beam,
+                common_concrete_stems,
+                split_group,
+            });
+        }
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionBeamGroupTransaction {
+        system_id: sig.system_id,
+        initial_groups,
+        checks,
+        splits,
+    })
+}
+
+fn split_native_reduction_beam_group(
+    sig: &mut NativeSigSystem,
+    original_group: NativeSigVertexId,
+    siblings: &[NativeSigVertexId],
+    alien_index: usize,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    interline: i32,
+) -> Result<NativeReductionBeamGroupSplit, NativeReductionFoundationPrefixError> {
+    let upper_beam = siblings[alien_index - 1];
+    let lower_beam = siblings[alien_index];
+    let moved_beams = siblings[alien_index..].to_vec();
+    let alien_group = NativeSigVertexId(sig.vertices.len());
+    sig.append_vertex(crate::native_sig::NativeSigVertex {
+        ordinal: alien_group.0,
+        active: true,
+        removed: false,
+        frozen: false,
+        kind: NativeSigInterKind::BeamGroup,
+        shape: None,
+        grade: 1.0,
+        contextual_grade: None,
+        bounds: NativeSigBounds {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        },
+        abnormal: false,
+        beam_geometry: None,
+    })?;
+
+    let mut removed_containments = Vec::new();
+    let mut added_containments = Vec::new();
+    let mut added_beam_supports = Vec::new();
+    for &beam in &moved_beams {
+        if let Some(edge) = first_active_directed_relation(
+            sig,
+            original_group,
+            beam,
+            Some(NativeSigRelationKind::Containment),
+        ) {
+            sig.remove_edge(edge)?;
+            removed_containments.push(edge);
+        }
+        let containment = append_native_reduction_relation(
+            sig,
+            alien_group,
+            beam,
+            NativeSigRelationKind::Containment,
+            None,
+        )?;
+        added_containments.push(containment);
+        for member in native_beam_group_members(sig, alien_group) {
+            if member != beam {
+                if let Some(edge) = insert_native_reduction_beam_support(sig, beam, member)? {
+                    added_beam_supports.push(edge);
+                }
+            }
+        }
+    }
+
+    let mut removed_cross_stem_relations = Vec::new();
+    for stem in native_concrete_stems(sig, lower_beam, stem_medians, interline)? {
+        if let Some(edge) = first_active_directed_relation(sig, upper_beam, stem, None) {
+            sig.remove_edge(edge)?;
+            removed_cross_stem_relations.push(edge);
+        }
+    }
+    for stem in native_concrete_stems(sig, upper_beam, stem_medians, interline)? {
+        if let Some(edge) = first_active_directed_relation(sig, lower_beam, stem, None) {
+            sig.remove_edge(edge)?;
+            removed_cross_stem_relations.push(edge);
+        }
+    }
+
+    // Java's non-sibling dispatch stream ends in `peek` without a terminal
+    // operation, so it intentionally performs no mutation.
+    let mut removed_cross_beam_relations = Vec::new();
+    let old_beams = native_beam_group_members(sig, original_group);
+    let alien_beams = native_beam_group_members(sig, alien_group);
+    for one in old_beams {
+        for &two in &alien_beams {
+            for (source, target) in [(one, two), (two, one)] {
+                if let Some(edge) = first_active_directed_relation(sig, source, target, None) {
+                    sig.remove_edge(edge)?;
+                    removed_cross_beam_relations.push(edge);
+                }
+            }
+        }
+    }
+    recompute_native_beam_group_bounds(sig, original_group);
+    recompute_native_beam_group_bounds(sig, alien_group);
+    Ok(NativeReductionBeamGroupSplit {
+        original_group,
+        alien_group,
+        upper_beam,
+        lower_beam,
+        moved_beams,
+        removed_containments,
+        added_containments,
+        added_beam_supports,
+        removed_cross_stem_relations,
+        removed_cross_beam_relations,
+    })
+}
+
+fn native_sorted_beams_around(
+    sig: &NativeSigSystem,
+    group: NativeSigVertexId,
+    beam: NativeSigVertexId,
+    skew: &HeadlessSkew,
+) -> Result<Vec<NativeSigVertexId>, NativeReductionFoundationPrefixError> {
+    let geometry = native_beam_geometry(sig, beam)?;
+    let x1 = skew.deskewed_x(geometry.x1, geometry.y1);
+    let x2 = skew.deskewed_x(geometry.x2, geometry.y2);
+    let x = (x1 + x2) / 2.0;
+    let mut siblings = Vec::new();
+    for candidate in native_beam_group_members(sig, group) {
+        if candidate == beam {
+            siblings.push(candidate);
+            continue;
+        }
+        let other = native_beam_geometry(sig, candidate)?;
+        let left = x1.max(skew.deskewed_x(other.x1, other.y1));
+        let right = x2.min(skew.deskewed_x(other.x2, other.y2));
+        if right > left {
+            siblings.push(candidate);
+        }
+    }
+    let mut ordinates = BTreeMap::new();
+    for &candidate in &siblings {
+        let ordinate = native_beam_y_at_x(native_beam_geometry(sig, candidate)?, x);
+        if !ordinate.is_finite() {
+            return Err(
+                NativeReductionFoundationPrefixError::InvalidBeamGroupGeometry {
+                    system_id: sig.system_id,
+                    beam: candidate,
+                },
+            );
+        }
+        ordinates.insert(candidate, ordinate);
+    }
+    siblings.sort_by(|one, two| ordinates[one].total_cmp(&ordinates[two]));
+    Ok(siblings)
+}
+
+fn native_common_concrete_stems(
+    sig: &NativeSigSystem,
+    one: NativeSigVertexId,
+    two: NativeSigVertexId,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    interline: i32,
+) -> Result<Vec<NativeSigVertexId>, NativeReductionFoundationPrefixError> {
+    let one_stems = native_concrete_stems(sig, one, stem_medians, interline)?;
+    let two_stems = native_concrete_stems(sig, two, stem_medians, interline)?;
+    Ok(one_stems
+        .into_iter()
+        .filter(|stem| two_stems.contains(stem))
+        .collect())
+}
+
+fn native_concrete_stems(
+    sig: &NativeSigSystem,
+    beam: NativeSigVertexId,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    interline: i32,
+) -> Result<Vec<NativeSigVertexId>, NativeReductionFoundationPrefixError> {
+    let max_gap = (0.25 * f64::from(interline)).round_ties_even() as i32;
+    let beam_geometry = native_beam_geometry(sig, beam)?;
+    let mut stems = Vec::new();
+    for edge in sig.incident_edges(beam.0)? {
+        if edge.kind != NativeSigRelationKind::BeamStem {
+            continue;
+        }
+        let other = if edge.source == beam.0 {
+            edge.target
+        } else {
+            edge.source
+        };
+        if sig.vertices[other].kind != NativeSigInterKind::Stem {
+            continue;
+        }
+        let stem = NativeSigVertexId(other);
+        let median = *stem_medians.get(&stem).ok_or(
+            NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id: sig.system_id,
+                stem,
+            },
+        )?;
+        let beam_middle = generic_intersection(stem_segment(median), beam_segment(beam_geometry)).y;
+        let gap = if median.start.y <= beam_middle {
+            let top = shifted_beam_segment(beam_geometry, -beam_geometry.height / 2.0);
+            let beam_top = generic_intersection(stem_segment(median), top).y;
+            0.0_f64.max(beam_top - median.stop.y)
+        } else {
+            let bottom = shifted_beam_segment(beam_geometry, beam_geometry.height / 2.0);
+            let beam_bottom = generic_intersection(stem_segment(median), bottom).y;
+            0.0_f64.max(median.start.y - beam_bottom)
+        };
+        if !gap.is_finite() {
+            return Err(
+                NativeReductionFoundationPrefixError::InvalidBeamGroupGeometry {
+                    system_id: sig.system_id,
+                    beam,
+                },
+            );
+        }
+        if gap <= f64::from(max_gap) {
+            stems.push(stem);
+        }
+    }
+    Ok(stems)
+}
+
+fn native_beam_group_members(
+    sig: &NativeSigSystem,
+    group: NativeSigVertexId,
+) -> Vec<NativeSigVertexId> {
+    sig.edges
+        .iter()
+        .filter(|edge| {
+            edge.active
+                && edge.source == group.0
+                && edge.kind == NativeSigRelationKind::Containment
+                && sig.vertices[edge.target].active
+                && is_native_beam(sig.vertices[edge.target].kind)
+        })
+        .map(|edge| NativeSigVertexId(edge.target))
+        .collect()
+}
+
+fn is_native_beam(kind: NativeSigInterKind) -> bool {
+    matches!(
+        kind,
+        NativeSigInterKind::Beam | NativeSigInterKind::BeamHook | NativeSigInterKind::SmallBeam
+    )
+}
+
+fn native_beam_geometry(
+    sig: &NativeSigSystem,
+    beam: NativeSigVertexId,
+) -> Result<crate::native_sig::NativeSigBeamGeometry, NativeReductionFoundationPrefixError> {
+    sig.vertices[beam.0].beam_geometry.ok_or(
+        NativeReductionFoundationPrefixError::MissingBeamGeometry {
+            system_id: sig.system_id,
+            beam,
+        },
+    )
+}
+
+fn beam_segment(geometry: crate::native_sig::NativeSigBeamGeometry) -> Segment {
+    Segment {
+        x1: geometry.x1,
+        y1: geometry.y1,
+        x2: geometry.x2,
+        y2: geometry.y2,
+    }
+}
+
+fn shifted_beam_segment(geometry: crate::native_sig::NativeSigBeamGeometry, dy: f64) -> Segment {
+    Segment {
+        x1: geometry.x1,
+        y1: geometry.y1 + dy,
+        x2: geometry.x2,
+        y2: geometry.y2 + dy,
+    }
+}
+
+fn native_beam_y_at_x(geometry: crate::native_sig::NativeSigBeamGeometry, x: f64) -> f64 {
+    generic_intersection(
+        beam_segment(geometry),
+        Segment {
+            x1: x,
+            y1: 0.0,
+            x2: x,
+            y2: 1_000.0,
+        },
+    )
+    .y
+}
+
+fn first_active_directed_relation(
+    sig: &NativeSigSystem,
+    source: NativeSigVertexId,
+    target: NativeSigVertexId,
+    kind: Option<NativeSigRelationKind>,
+) -> Option<NativeSigEdgeId> {
+    sig.edges
+        .iter()
+        .find(|edge| {
+            edge.active
+                && edge.source == source.0
+                && edge.target == target.0
+                && kind.is_none_or(|kind| edge.kind == kind)
+        })
+        .map(|edge| NativeSigEdgeId(edge.ordinal))
+}
+
+fn append_native_reduction_relation(
+    sig: &mut NativeSigSystem,
+    source: NativeSigVertexId,
+    target: NativeSigVertexId,
+    kind: NativeSigRelationKind,
+    support: Option<crate::native_sig::NativeSigSupport>,
+) -> Result<NativeSigEdgeId, NativeSigError> {
+    let edge = NativeSigEdgeId(sig.edges.len());
+    sig.append_edge(NativeSigEdge {
+        ordinal: edge.0,
+        active: true,
+        source: source.0,
+        target: target.0,
+        kind,
+        origin: NativeSigRelationOrigin::BaselineGraph,
+        support,
+        beam_portion: None,
+        stem_extension: None,
+        head_stem: None,
+    })?;
+    Ok(edge)
+}
+
+fn insert_native_reduction_beam_support(
+    sig: &mut NativeSigSystem,
+    one: NativeSigVertexId,
+    two: NativeSigVertexId,
+) -> Result<Option<NativeSigEdgeId>, NativeSigError> {
+    let (source, target) = normalized_vertex_pair(one, two);
+    let excluded = sig.edges.iter().any(|edge| {
+        edge.active
+            && edge.kind == NativeSigRelationKind::Exclusion
+            && ((edge.source == source.0 && edge.target == target.0)
+                || (edge.source == target.0 && edge.target == source.0))
+    });
+    let exists = sig.edges.iter().any(|edge| {
+        edge.active
+            && edge.kind == NativeSigRelationKind::BeamBeam
+            && ((edge.source == source.0 && edge.target == target.0)
+                || (edge.source == target.0 && edge.target == source.0))
+    });
+    if excluded || exists {
+        return Ok(None);
+    }
+    append_native_reduction_relation(
+        sig,
+        source,
+        target,
+        NativeSigRelationKind::BeamBeam,
+        Some(crate::native_sig::NativeSigSupport {
+            grade: 1.0,
+            bar_connection_impacts: None,
+        }),
+    )
+    .map(Some)
+}
+
+fn recompute_native_beam_group_bounds(sig: &mut NativeSigSystem, group: NativeSigVertexId) {
+    let bounds = native_beam_group_members(sig, group)
+        .into_iter()
+        .map(|beam| sig.vertices[beam.0].bounds)
+        .reduce(native_bounds_union)
+        .unwrap_or(NativeSigBounds {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        });
+    sig.vertices[group.0].bounds = bounds;
+}
+
+fn native_bounds_union(one: NativeSigBounds, two: NativeSigBounds) -> NativeSigBounds {
+    let right = one
+        .x
+        .saturating_add(one.width)
+        .max(two.x.saturating_add(two.width));
+    let bottom = one
+        .y
+        .saturating_add(one.height)
+        .max(two.y.saturating_add(two.height));
+    let x = one.x.min(two.x);
+    let y = one.y.min(two.y);
+    NativeSigBounds {
+        x,
+        y,
+        width: right.saturating_sub(x),
+        height: bottom.saturating_sub(y),
+    }
 }
 
 const fn stem_segment(line: NativeStemLine) -> Segment {
@@ -4165,6 +4739,34 @@ mod tests {
         head
     }
 
+    fn horizontal_beam(ordinal: usize, y: f64) -> NativeSigVertex {
+        let mut beam = vertex(ordinal, NativeSigInterKind::Beam, 0.8);
+        beam.bounds = NativeSigBounds {
+            x: 0,
+            y: (y - 2.0) as i32,
+            width: 100,
+            height: 4,
+        };
+        beam.beam_geometry = Some(crate::native_sig::NativeSigBeamGeometry {
+            x1: 0.0,
+            y1: y,
+            x2: 100.0,
+            y2: y,
+            height: 4.0,
+        });
+        beam
+    }
+
+    fn beam_support_edge(ordinal: usize, one: usize, two: usize) -> NativeSigEdge {
+        NativeSigEdge {
+            support: Some(NativeSigSupport {
+                grade: 1.0,
+                bar_connection_impacts: None,
+            }),
+            ..edge(ordinal, one, two, NativeSigRelationKind::BeamBeam)
+        }
+    }
+
     fn horizontal_staff_line(y: f64) -> StaffBoundary {
         StaffBoundary {
             segments: vec![BoundarySegment::Line {
@@ -5017,6 +5619,115 @@ mod tests {
         ));
         assert_eq!(sig, sig_before_error);
         assert_eq!(medians, medians_before_error);
+    }
+
+    #[test]
+    fn beam_group_check_splits_suffix_and_removes_cross_group_relations() {
+        let mut stem_four = vertex(4, NativeSigInterKind::Stem, 0.8);
+        stem_four.bounds = NativeSigBounds {
+            x: 20,
+            y: 8,
+            width: 2,
+            height: 16,
+        };
+        let mut stem_five = vertex(5, NativeSigInterKind::Stem, 0.8);
+        stem_five.bounds = NativeSigBounds {
+            x: 80,
+            y: 28,
+            width: 2,
+            height: 12,
+        };
+        let mut sig = NativeSigSystem {
+            system_id: 49,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::BeamGroup, 1.0),
+                horizontal_beam(1, 10.0),
+                horizontal_beam(2, 20.0),
+                horizontal_beam(3, 30.0),
+                stem_four,
+                stem_five,
+            ],
+            edges: vec![
+                edge(0, 0, 1, NativeSigRelationKind::Containment),
+                edge(1, 0, 2, NativeSigRelationKind::Containment),
+                edge(2, 0, 3, NativeSigRelationKind::Containment),
+                beam_support_edge(3, 1, 2),
+                beam_support_edge(4, 1, 3),
+                beam_support_edge(5, 2, 3),
+                beam_stem_edge(6, 1, 4, NativeBeamPortion::Center),
+                beam_stem_edge(7, 2, 4, NativeBeamPortion::Center),
+                beam_stem_edge(8, 2, 5, NativeBeamPortion::Center),
+                beam_stem_edge(9, 3, 5, NativeBeamPortion::Center),
+            ],
+        };
+        let medians = BTreeMap::from([
+            (
+                NativeSigVertexId(4),
+                NativeStemLine {
+                    start: NativeStemPoint { x: 21.0, y: 8.0 },
+                    stop: NativeStemPoint { x: 21.0, y: 24.0 },
+                },
+            ),
+            (
+                NativeSigVertexId(5),
+                NativeStemLine {
+                    start: NativeStemPoint { x: 81.0, y: 28.0 },
+                    stop: NativeStemPoint { x: 81.0, y: 40.0 },
+                },
+            ),
+        ]);
+
+        let transaction = check_native_reduction_beam_groups_in_sig(
+            &mut sig,
+            &medians,
+            10,
+            HeadlessSkew::new(0.0, 100, 100),
+        )
+        .unwrap();
+
+        assert_eq!(transaction.initial_groups, vec![NativeSigVertexId(0)]);
+        assert_eq!(transaction.splits.len(), 1);
+        let split = &transaction.splits[0];
+        assert_eq!(split.original_group, NativeSigVertexId(0));
+        assert_eq!(split.alien_group, NativeSigVertexId(6));
+        assert_eq!(split.upper_beam, NativeSigVertexId(2));
+        assert_eq!(split.lower_beam, NativeSigVertexId(3));
+        assert_eq!(split.moved_beams, vec![NativeSigVertexId(3)]);
+        assert_eq!(split.removed_containments, vec![NativeSigEdgeId(2)]);
+        assert_eq!(split.added_containments, vec![NativeSigEdgeId(10)]);
+        assert!(split.added_beam_supports.is_empty());
+        assert_eq!(split.removed_cross_stem_relations, vec![NativeSigEdgeId(8)]);
+        assert_eq!(
+            split.removed_cross_beam_relations,
+            vec![NativeSigEdgeId(4), NativeSigEdgeId(5)]
+        );
+        assert_eq!(
+            native_beam_group_members(&sig, NativeSigVertexId(0)),
+            vec![NativeSigVertexId(1), NativeSigVertexId(2)]
+        );
+        assert_eq!(
+            native_beam_group_members(&sig, NativeSigVertexId(6)),
+            vec![NativeSigVertexId(3)]
+        );
+        assert_eq!(transaction.checks.last().unwrap().beam_index, Some(2));
+        assert!(sig.edges[7].active);
+        assert!(!sig.edges[8].active);
+
+        let mut invalid = sig.clone();
+        invalid.vertices[1].beam_geometry = None;
+        let invalid_before = invalid.clone();
+        let error = check_native_reduction_beam_groups_in_sig(
+            &mut invalid,
+            &medians,
+            10,
+            HeadlessSkew::new(0.0, 100, 100),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            NativeReductionFoundationPrefixError::MissingBeamGeometry { .. }
+        ));
+        assert_eq!(invalid, invalid_before);
     }
 
     #[test]

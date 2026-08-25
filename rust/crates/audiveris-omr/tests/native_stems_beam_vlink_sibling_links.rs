@@ -21,8 +21,8 @@ use audiveris_omr::{
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
     native_reduction::{
-        native_stems_lossless_overlap_resolver, reduce_native_stems_foundations,
-        refine_native_stems_head_ends,
+        check_native_reduction_beam_groups, native_stems_lossless_overlap_resolver,
+        reduce_native_stems_foundations, refine_native_stems_head_ends,
     },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
@@ -8729,6 +8729,7 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         .map(|system| system.system_id)
         .collect::<Vec<_>>();
     let mut foundation_outer_repeats = 0;
+    let mut beam_group_splits = 0;
     for system_id in system_ids {
         let transaction = reduce_native_stems_foundations(&mut recognized, system_id)
             .expect("Batuque exact REDUCTION foundations fixed point");
@@ -8792,10 +8793,39 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
                 .iter()
                 .all(|item| item.median_after.start.y < item.median_after.stop.y)
         );
+        let initial_beam_group_members = {
+            let sig = &recognized
+                .systems
+                .iter()
+                .find(|system| system.system_id == system_id)
+                .expect("Batuque system")
+                .transaction
+                .state_after
+                .beam_state
+                .sig;
+            sig.edges
+                .iter()
+                .filter(|edge| {
+                    edge.active
+                        && edge.kind == NativeSigRelationKind::Containment
+                        && sig.vertices[edge.source].kind
+                            == audiveris_omr::native_sig::NativeSigInterKind::BeamGroup
+                })
+                .count()
+        };
+        let beam_groups = check_native_reduction_beam_groups(&mut recognized, system_id)
+            .expect("Batuque exact REDUCTION beam-group consistency");
+        assert_eq!(beam_groups.system_id, system_id);
+        assert_eq!(beam_groups.checks.len(), initial_beam_group_members);
+        beam_group_splits += beam_groups.splits.len();
     }
     assert!(
         foundation_outer_repeats > 0,
         "Batuque must exercise a continuation foundations epoch"
+    );
+    assert_eq!(
+        beam_group_splits, 0,
+        "Batuque's retained beam groups need no REDUCTION split"
     );
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;

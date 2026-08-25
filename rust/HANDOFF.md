@@ -11931,3 +11931,31 @@ ignored. Strict workspace Clippy with all targets/features, formatting, and
 diff checks pass. Tail refinement stays disabled, matching Java's default.
 Resume at `BeamGroupInter.checkBeamGroups(system)` in the REDUCTION epilog;
 then port free-stem length measurement and glyph cleanup before publication.
+
+## Boundary 293: beam-group consistency split pass
+
+The first REDUCTION sheet-epilog action is now production native.
+`check_native_reduction_beam_groups` takes Java's initial BeamGroup snapshot
+and a fresh member snapshot for each original group. `sortedBeamsAround`
+reuses the complete retained deskew transform, strict x overlap, and stable
+vertical sorting at the inspected beam's deskewed midpoint. A stem counts as
+concrete only when the exact median/border intersection gap is no greater than
+Java's rounded quarter-interline threshold.
+
+With no common concrete stem between adjacent siblings, the clone-and-swap
+splitter creates a grade-one group, moves the lower suffix by containment
+insertion order, honors BeamBeam exclusion and duplicate checks, removes
+cross-group BeamStem and BeamBeam relations in Java call order, and leaves all
+removed relations as stable tombstones. Old/new group bounds are recomputed
+from their live members. Do not “fix” the non-sibling dispatch while porting:
+Java uses `stream().filter(...).peek(...)` with no terminal operation, so that
+block is intentionally inert.
+
+The isolated three-beam regression exercises the split, exact moved suffix,
+cross-stem and cross-beam removals, post-split snapshot observation, and
+missing-geometry rollback. All Batuque systems execute the production pass and
+need zero splits. Focused REDUCTION is 41/41; the complete sibling suite is
+35/35; frozen SIG is ten active passes plus five ignored diagnostics; the
+library is 746 passed plus two ignored. Strict workspace Clippy with every
+target/feature, formatting, and diff checks pass. Next implement the sheet-wide
+`StemInter.getFreeLength()` collection and median report, then glyph cleanup.

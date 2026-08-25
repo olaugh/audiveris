@@ -12,6 +12,7 @@ use std::{collections::BTreeSet, error::Error, fmt};
 
 use crate::{
     beam_inters::MIN_INTER_GRADE,
+    grid_executor::HeadlessSkew,
     native_headers::NativeHeaderRecognition,
     native_heads::NativeHeadsRecognition,
     native_ledgers::NativeLedgerRecognition,
@@ -323,6 +324,8 @@ pub struct NativeStemsRecognition {
     pub reduction_interline: i32,
     /// Java `Skew.slope`, used by the short-stem reliable-line fallback.
     pub sheet_skew_slope: f64,
+    /// Complete Java-compatible deskew transform used by REDUCTION beam groups.
+    pub reduction_skew: HeadlessSkew,
     pub systems: Vec<NativeStemsSystemFinalizeDrive>,
     pub beam_finalizations: Vec<NativeStemsBeamFinalizationTransaction>,
     pub contextualizations: Vec<NativeSigContextualization>,
@@ -1870,6 +1873,11 @@ pub fn recognize_native_stems(
         components: prepared.components,
         reduction_interline: grid.scale.scale.interline.main,
         sheet_skew_slope: grid.global_slope,
+        reduction_skew: HeadlessSkew::new(
+            grid.global_slope,
+            grid.no_staff.width() as i32,
+            grid.no_staff.height() as i32,
+        ),
         systems: finalized.systems,
         beam_finalizations,
         contextualizations,
