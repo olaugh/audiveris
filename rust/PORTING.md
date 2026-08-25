@@ -6559,4 +6559,7 @@ Ordinary and streamed `CUE_BEAMS` schema-1 payloads are byte-identical. The
 ninth stage snapshot retains REDUCTION and adds one exact skip record. The
 black-box output contract, seven CLI units, and all six dependency-light
 CUE_BEAMS lifecycle tests pass. Active cue recognition begins next at
-`getCueAggregates()` / `CueAggregate.process()`; it is not claimed here.
+`getCueAggregates()` / `CueAggregate.process()`; it is not claimed here. The
+qualified `ProcessingSwitches.smallHeads` CLI constant uses Java
+`Boolean.valueOf` semantics and an active request fails explicitly with no
+partial JSON.

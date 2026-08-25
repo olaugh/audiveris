@@ -70,6 +70,15 @@ fn is_json_only_step(step: OmrStep) -> bool {
     )
 }
 
+const SMALL_HEADS_CONSTANT: &str = "org.audiveris.omr.sheet.ProcessingSwitches.smallHeads";
+
+fn small_heads_enabled(parameters: &Parameters) -> bool {
+    parameters
+        .constants
+        .get(SMALL_HEADS_CONSTANT)
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
 /// Native batch recognition for the stages the port supports so far.
 ///
 /// Returns `Ok(true)` when the requested step was handled natively; `Ok(false)`
@@ -276,13 +285,17 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                         );
                         continue;
                     }
-                    let cue_beams = recognize_native_cue_beams(&recognition, reduction, false)
-                        .map_err(|error| {
-                            format!(
-                                "{} sheet {sheet}: CUE_BEAMS failed: {error}",
-                                input.display()
-                            )
-                        })?;
+                    let cue_beams = recognize_native_cue_beams(
+                        &recognition,
+                        reduction,
+                        small_heads_enabled(parameters),
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "{} sheet {sheet}: CUE_BEAMS failed: {error}",
+                            input.display()
+                        )
+                    })?;
                     print!(
                         "{}",
                         cue_beams_json(
@@ -811,7 +824,11 @@ fn run_native_stream(parameters: &Parameters, json: bool) -> Result<bool, String
                 // CUE_BEAMS -------------------------------------------------
                 stream.stage_started(OmrStep::CueBeams, &input_name, sheet)?;
                 let started = Instant::now();
-                let cue_beams = match recognize_native_cue_beams(&recognition, reduction, false) {
+                let cue_beams = match recognize_native_cue_beams(
+                    &recognition,
+                    reduction,
+                    small_heads_enabled(parameters),
+                ) {
                     Ok(cue_beams) => cue_beams,
                     Err(error) => {
                         let message = format!(
@@ -921,8 +938,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_native_step, json_string, omrscope_marker_line, run_native, run_native_stream,
-        sheets_to_process, stream_stages_through, take_stream_json_flag,
+        SMALL_HEADS_CONSTANT, is_native_step, json_string, omrscope_marker_line, run_native,
+        run_native_stream, sheets_to_process, small_heads_enabled, stream_stages_through,
+        take_stream_json_flag,
     };
     use audiveris_cli::Parameters;
     use audiveris_core::step::OmrStep;
@@ -961,6 +979,20 @@ mod tests {
             assert!(is_native_step(step), "{step} should be native");
         }
         assert!(!is_native_step(OmrStep::Symbols));
+    }
+
+    #[test]
+    fn small_heads_constant_uses_java_boolean_value_of_semantics() {
+        let mut parameters = Parameters::default();
+        assert!(!small_heads_enabled(&parameters));
+        parameters
+            .constants
+            .insert(SMALL_HEADS_CONSTANT.to_owned(), "TRUE".to_owned());
+        assert!(small_heads_enabled(&parameters));
+        parameters
+            .constants
+            .insert(SMALL_HEADS_CONSTANT.to_owned(), "yes".to_owned());
+        assert!(!small_heads_enabled(&parameters));
     }
 
     #[test]

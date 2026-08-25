@@ -12063,3 +12063,6 @@ routing tests, and all six dependency-light CUE_BEAMS lifecycle tests pass.
 This does not claim active cue-beam visual recognition. The next exact frontier
 is Java `BeamsBuilder.getCueAggregates()` and `CueAggregate.process()` for pages
 that explicitly enable small heads and lack a detected/manual small-beam scale.
+The native CLI honors the exact qualified `ProcessingSwitches.smallHeads`
+`-constant`; Java `Boolean.valueOf` semantics make only case-insensitive `true`
+active, and that path currently fails explicitly with no partial JSON.

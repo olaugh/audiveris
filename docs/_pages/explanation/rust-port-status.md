@@ -7077,4 +7077,6 @@ completes the Java-default path with zero mutations.
 `-step CUE_BEAMS -json` retains the complete REDUCTION payload and adds the
 skip reason and scale/switch evidence. It is the ninth byte-identical ordinary/
 streamed completed-stage snapshot. Active cue-aggregate recognition and
-linking remain the next frontier and are not claimed by this boundary.
+linking remain the next frontier and are not claimed by this boundary. The
+qualified `ProcessingSwitches.smallHeads` CLI constant is honored; explicitly
+enabling it currently produces a typed failure and no partial JSON.

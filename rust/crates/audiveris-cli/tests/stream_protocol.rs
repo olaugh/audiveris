@@ -5,6 +5,7 @@
 use std::{path::PathBuf, process::Command};
 
 const STEMS_EPILOG_ORACLE: &str = include_str!("../../../oracle/stems-epilog-chula.txt");
+const SMALL_HEADS_CONSTANT: &str = "org.audiveris.omr.sheet.ProcessingSwitches.smallHeads=true";
 
 fn binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_audiveris-cli")
@@ -235,6 +236,30 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
             assert_eq!(payload.matches("\"cue_beams\":").count(), 1);
         }
     }
+}
+
+#[test]
+fn active_cue_beams_switch_fails_at_the_first_unported_visual_dependency() {
+    let output = Command::new(binary())
+        .args([
+            "-batch",
+            "-step",
+            "CUE_BEAMS",
+            "-json",
+            "-constant",
+            SMALL_HEADS_CONSTANT,
+        ])
+        .arg(batuque())
+        .output()
+        .expect("run active CUE_BEAMS");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("CLI stderr is UTF-8");
+    assert!(stderr.contains("CUE_BEAMS failed"));
+    assert!(stderr.contains("BeamsBuilder.buildCueBeams"));
+    assert!(
+        output.stdout.is_empty(),
+        "failed sheet emits no partial JSON"
+    );
 }
 
 #[test]
