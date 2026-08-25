@@ -21,9 +21,9 @@ use audiveris_omr::{
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
     native_reduction::{
-        check_native_reduction_beam_groups, measure_native_reduction_stem_free_lengths,
-        native_stems_lossless_overlap_resolver, reduce_native_stems_foundations,
-        refine_native_stems_head_ends,
+        check_native_reduction_beam_groups, cleanup_native_reduction_glyph_index,
+        measure_native_reduction_stem_free_lengths, native_stems_lossless_overlap_resolver,
+        reduce_native_stems_foundations, refine_native_stems_head_ends,
     },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
@@ -8853,6 +8853,46 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             interlines: 83.0 / 21.0,
         })
     );
+    let glyph_cleanup = cleanup_native_reduction_glyph_index(&grid, &mut recognized)
+        .expect("Batuque exact REDUCTION modeled-glyph cleanup");
+    let id_sha = |ids: &[i32]| {
+        sha256_hex(
+            &ids.iter()
+                .flat_map(|id| id.to_be_bytes())
+                .collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(glyph_cleanup.registry_entries, 1_820);
+    assert_eq!(glyph_cleanup.active_before, 1_820);
+    assert_eq!(glyph_cleanup.keep_order.len(), 406);
+    assert_eq!(glyph_cleanup.opaque_live_inter_glyphs, 59);
+    assert_eq!(glyph_cleanup.retained_active.len(), 406);
+    assert_eq!(glyph_cleanup.removed.len(), 1_414);
+    assert_eq!(glyph_cleanup.active_after, 406);
+    assert_eq!(
+        id_sha(&glyph_cleanup.keep_order),
+        "04be33649fdcfbe7ea3b152d7bd4817c596543a852ac256bb5d2cf2d949cc8f4"
+    );
+    assert_eq!(
+        id_sha(&glyph_cleanup.retained_active),
+        "9b18830239ef0356f9bfd82d854f00ede0b6bc961a08d75694dbc43cfe7cc9ad"
+    );
+    assert_eq!(
+        id_sha(&glyph_cleanup.removed),
+        "fe95a7875ef07ee10d744136e96ed201a9646350b11db00e32522eaad256afec"
+    );
+    let repeated_cleanup = cleanup_native_reduction_glyph_index(&grid, &mut recognized)
+        .expect("Batuque idempotent REDUCTION modeled-glyph cleanup");
+    assert_eq!(repeated_cleanup.registry_entries, 1_820);
+    assert_eq!(repeated_cleanup.active_before, 406);
+    assert_eq!(repeated_cleanup.keep_order, glyph_cleanup.keep_order);
+    assert_eq!(repeated_cleanup.opaque_live_inter_glyphs, 59);
+    assert_eq!(
+        repeated_cleanup.retained_active,
+        glyph_cleanup.retained_active
+    );
+    assert!(repeated_cleanup.removed.is_empty());
+    assert_eq!(repeated_cleanup.active_after, 406);
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

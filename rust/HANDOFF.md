@@ -11986,3 +11986,32 @@ plus two ignored. Strict workspace Clippy for all targets/features,
 formatting, and diff checks pass. Resume at the final Java epilog operation:
 build the persistent staff-line + live-Inter glyph keep set and remove every
 other GlyphIndex entity, then publish/grade the complete REDUCTION stage.
+
+## Boundary 295: final epilog sweep over native-owned glyphs
+
+`cleanup_native_reduction_glyph_index` now ports Java's final REDUCTION
+keep/remove traversal over the complete modeled registry owned by Rust. It
+joins the final system's carried prefix with every strongly retained STEMS
+registration, then follows Java's system/staff-line/SIG insertion order to
+construct a deduplicated keep set. Stem vertices retain their direct canonical
+glyph IDs; other modeled vertices join by exact bounds, weight, and run table.
+
+Cleanup changes only active-index membership. Persistent allocators and the
+originals union do not move, registry entity order determines removals, a
+second call is a no-op, and an unknown keep identity rolls back. Batuque pins
+1,820 active modeled entries before cleanup, 406 retained, and 1,414 removed.
+The keep, retained, and removed ID-stream SHA-256 values are respectively
+`04be33649fdcfbe7ea3b152d7bd4817c596543a852ac256bb5d2cf2d949cc8f4`,
+`9b18830239ef0356f9bfd82d854f00ede0b6bc961a08d75694dbc43cfe7cc9ad`,
+and `fe95a7875ef07ee10d744136e96ed201a9646350b11db00e32522eaad256afec`.
+
+This is not yet permission to claim the whole Java `GlyphIndex`: Batuque has
+59 unique live Inter glyph contents from earlier Java-only registry domains.
+They are counted as opaque and never assigned fabricated identities or swept.
+The next exact frontier is to make those upstream glyph registrations
+persistent, then wire schema-1 REDUCTION publication and corpus parity.
+
+Focused REDUCTION is 42/42, the atomic cleanup kernel passes, the complete
+sibling suite is 35/35, frozen SIG remains ten active gates plus five ignored
+diagnostics, and the full library is 748 passed plus two ignored. Strict
+workspace Clippy for every target/feature, formatting, and diff checks pass.

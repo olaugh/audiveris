@@ -9,6 +9,8 @@
 //! foundations outer fixed point.  It also owns the enabled
 //! `StemInter.refineHeadEnd()` pass that immediately follows foundations and
 //! the sheet-epilog beam-group consistency and free-stem measurement passes.
+//! Its final epilog transaction also sweeps the complete native-owned modeled
+//! glyph registry while keeping Java-only opaque identities explicit.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -19,9 +21,10 @@ use std::{
 use audiveris_image::{
     beam_structure::Segment,
     run_table::{Orientation, RunTable},
+    section::Bounds,
 };
 
-use crate::grid_executor::HeadlessSkew;
+use crate::grid_executor::{HeadlessSkew, HeadlessStaffLine};
 use crate::head_scanner_slices::VerticalRibbonArea;
 use crate::native_sig::{
     NativeSigBounds, NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigError,
@@ -29,7 +32,11 @@ use crate::native_sig::{
     NativeSigSystemBindings, NativeSigVertexId,
 };
 use crate::native_stems::NativeStemsRecognition;
+use crate::native_stems_beam_vlink_transaction::{
+    NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphRegistryBootstrapEntry,
+};
 use crate::native_stems_beam_vlinkers::generic_intersection;
+use crate::recognize::GridLinesRecognition;
 use crate::stems_step::{
     NativeBeamPortion, NativeStemHeadSide, NativeStemLine, NativeStemPoint, NativeStemVerticalSide,
 };
@@ -416,6 +423,42 @@ pub struct NativeReductionStemFreeLengthTransaction {
     pub sorted_lengths: Vec<i32>,
     pub median: Option<crate::reduction_step::StemFreeLengthMedian>,
 }
+
+/// Java-order cleanup of every entity in the complete native-modeled glyph
+/// registry. Opaque Java-only glyphs are counted but never guessed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionGlyphCleanupTransaction {
+    pub registry_entries: usize,
+    pub active_before: usize,
+    /// `LinkedHashSet` discovery order: each system's staff lines, then live
+    /// SIG vertices in insertion order.
+    pub keep_order: Vec<i32>,
+    /// Live Inter glyph contents outside the deliberately modeled registry.
+    pub opaque_live_inter_glyphs: usize,
+    /// Java `GlyphIndex.getEntities()` order.
+    pub retained_active: Vec<i32>,
+    /// Java `GlyphIndex.getEntities()` order.
+    pub removed: Vec<i32>,
+    pub active_after: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionGlyphCleanupError {
+    pub phase: &'static str,
+    pub message: String,
+}
+
+impl fmt::Display for NativeReductionGlyphCleanupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "native REDUCTION glyph cleanup {}: {}",
+            self.phase, self.message
+        )
+    }
+}
+
+impl Error for NativeReductionGlyphCleanupError {}
 
 /// Exact head anchor lookup keyed by SIG head, horizontal side, vertical side.
 pub type NativeReductionHeadAnchorMap = BTreeMap<
@@ -1679,6 +1722,205 @@ pub fn measure_native_reduction_stem_free_lengths(
         systems,
         sorted_lengths,
         median,
+    })
+}
+
+fn cleanup_glyph_content(
+    left: i32,
+    top: i32,
+    run_table: &RunTable,
+) -> Result<NativeStemsBeamFixedGlyphContent, NativeReductionGlyphCleanupError> {
+    let x = usize::try_from(left).map_err(|_| NativeReductionGlyphCleanupError {
+        phase: "glyph geometry",
+        message: format!("negative glyph left coordinate {left}"),
+    })?;
+    let y = usize::try_from(top).map_err(|_| NativeReductionGlyphCleanupError {
+        phase: "glyph geometry",
+        message: format!("negative glyph top coordinate {top}"),
+    })?;
+    Ok(NativeStemsBeamFixedGlyphContent {
+        bounds: Bounds {
+            x,
+            y,
+            width: run_table.width(),
+            height: run_table.height(),
+        },
+        weight: run_table.weight(),
+        run_table: run_table.clone(),
+    })
+}
+
+fn modeled_cleanup_glyph_id(
+    entries: &[NativeStemsBeamGlyphRegistryBootstrapEntry],
+    content: &NativeStemsBeamFixedGlyphContent,
+) -> Option<i32> {
+    entries
+        .iter()
+        .find(|entry| entry.content == *content)
+        .map(|entry| entry.glyph_id)
+}
+
+/// Execute Java `ReductionStep.doEpilog()`'s final glyph sweep over the
+/// complete registry domain owned by native recognition.
+///
+/// The native registry deliberately never fabricated Java-only opaque glyphs.
+/// Live SIG glyph geometry outside that domain is counted and left outside the
+/// transaction; every modeled active entity is nevertheless retained or
+/// removed exactly once in registry order.
+pub fn cleanup_native_reduction_glyph_index(
+    grid: &GridLinesRecognition,
+    stems: &mut NativeStemsRecognition,
+) -> Result<NativeReductionGlyphCleanupTransaction, NativeReductionGlyphCleanupError> {
+    let final_index =
+        stems
+            .systems
+            .len()
+            .checked_sub(1)
+            .ok_or_else(|| NativeReductionGlyphCleanupError {
+                phase: "page registry",
+                message: "page has no finalized system".to_owned(),
+            })?;
+    let entries = {
+        let final_system = &stems.systems[final_index];
+        let completed = &final_system
+            .transaction
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state;
+        final_system
+            .registry
+            .completed_registry_entries(completed)
+            .map_err(|error| NativeReductionGlyphCleanupError {
+                phase: "completed registry",
+                message: error.to_string(),
+            })?
+    };
+    let active_before = entries.iter().filter(|entry| entry.active_in_index).count();
+    let mut keep_order = Vec::new();
+    let mut keep = BTreeSet::new();
+    let mut opaque = Vec::<NativeStemsBeamFixedGlyphContent>::new();
+    let mut push_keep = |glyph_id: i32| {
+        if keep.insert(glyph_id) {
+            keep_order.push(glyph_id);
+        }
+    };
+
+    for system in &stems.systems {
+        let beam_state = &system.transaction.state_after.beam_state;
+        for staff in &beam_state.bindings.reduction_staffs {
+            let native_staff = grid
+                .peak_graph
+                .sheet_staffs
+                .iter()
+                .find(|candidate| candidate.id == staff.staff_id)
+                .ok_or_else(|| NativeReductionGlyphCleanupError {
+                    phase: "staff-line keep set",
+                    message: format!("missing staff {}", staff.staff_id),
+                })?;
+            for line in &native_staff.lines {
+                let HeadlessStaffLine::Persistent { line, .. } = line else {
+                    continue;
+                };
+                let content = cleanup_glyph_content(
+                    i32::try_from(line.glyph.x).map_err(|_| NativeReductionGlyphCleanupError {
+                        phase: "staff-line keep set",
+                        message: "staff-line x exceeds i32".to_owned(),
+                    })?,
+                    i32::try_from(line.glyph.y).map_err(|_| NativeReductionGlyphCleanupError {
+                        phase: "staff-line keep set",
+                        message: "staff-line y exceeds i32".to_owned(),
+                    })?,
+                    &line.glyph.runs,
+                )?;
+                let glyph_id = modeled_cleanup_glyph_id(&entries, &content).ok_or_else(|| {
+                    NativeReductionGlyphCleanupError {
+                        phase: "staff-line keep set",
+                        message: format!(
+                            "staff {} persistent line is absent from registry",
+                            staff.staff_id
+                        ),
+                    }
+                })?;
+                push_keep(glyph_id);
+            }
+        }
+
+        let completed = &beam_state.latest_base_apply.transaction_state;
+        for vertex in beam_state
+            .sig
+            .vertices
+            .iter()
+            .filter(|vertex| vertex.active)
+        {
+            let vertex_id = NativeSigVertexId(vertex.ordinal);
+            if vertex.kind == NativeSigInterKind::Stem {
+                let identity = beam_state
+                    .bindings
+                    .stem_vertices
+                    .iter()
+                    .find_map(|(&identity, &bound)| (bound == vertex_id).then_some(identity))
+                    .ok_or_else(|| NativeReductionGlyphCleanupError {
+                        phase: "stem keep set",
+                        message: format!(
+                            "system {} stem {} has no binding",
+                            system.system_id, vertex.ordinal
+                        ),
+                    })?;
+                let stem = completed
+                    .system_stems
+                    .known_stems
+                    .iter()
+                    .find(|stem| stem.stem_identity == identity && stem.sig_attached)
+                    .ok_or_else(|| NativeReductionGlyphCleanupError {
+                        phase: "stem keep set",
+                        message: format!(
+                            "system {} stem {} has no registry identity",
+                            system.system_id, vertex.ordinal
+                        ),
+                    })?;
+                push_keep(stem.glyph_id);
+                continue;
+            }
+            let Some(glyph) = beam_state
+                .bindings
+                .overlap_geometry
+                .get(&vertex_id)
+                .and_then(|geometry| geometry.glyph.as_ref())
+            else {
+                continue;
+            };
+            let content = cleanup_glyph_content(glyph.left, glyph.top, &glyph.run_table)?;
+            if let Some(glyph_id) = modeled_cleanup_glyph_id(&entries, &content) {
+                push_keep(glyph_id);
+            } else if !opaque.contains(&content) {
+                opaque.push(content);
+            }
+        }
+    }
+
+    let final_system = &mut stems.systems[final_index];
+    let completed = &mut final_system
+        .transaction
+        .state_after
+        .beam_state
+        .latest_base_apply
+        .transaction_state;
+    let (retained_active, removed) = final_system
+        .registry
+        .retain_active_glyph_ids(completed, &keep)
+        .map_err(|error| NativeReductionGlyphCleanupError {
+            phase: "registry sweep",
+            message: error.to_string(),
+        })?;
+    Ok(NativeReductionGlyphCleanupTransaction {
+        registry_entries: entries.len(),
+        active_before,
+        keep_order,
+        opaque_live_inter_glyphs: opaque.len(),
+        active_after: retained_active.len(),
+        retained_active,
+        removed,
     })
 }
 

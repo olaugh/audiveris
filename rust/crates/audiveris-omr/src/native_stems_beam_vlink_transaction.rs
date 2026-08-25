@@ -16,7 +16,7 @@
 //! certificate whose candidate contains the full `RunTable`. The certificate
 //! makes no claim about unrelated future candidates.
 
-use std::{error::Error, fmt};
+use std::{collections::BTreeSet, error::Error, fmt};
 
 use audiveris_core::basic_line::BasicLine;
 use audiveris_image::{
@@ -209,6 +209,117 @@ pub trait NativeStemsGlyphRegistryAuthority {
 }
 
 impl NativeStemsModeledGlyphRegistry {
+    fn completed_entries(
+        &self,
+        completed: &NativeStemsBeamVLinkTransactionState,
+    ) -> Result<Vec<NativeStemsBeamGlyphRegistryBootstrapEntry>, NativeStemsBeamVLinkTransactionError>
+    {
+        validate_transaction_state(completed)?;
+        if completed.system_stems.system_id != self.system_id
+            || completed.glyph_index.alias_order
+                != NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal
+            || completed.glyph_index.persistent_ids.sheet_last_id
+                < self.persistent_ids.sheet_last_id
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "completed modeled glyph registry header",
+            });
+        }
+        let mut entries = self.entries.clone();
+        for known in &completed.glyph_index.known_canonical_glyphs {
+            if !known.strongly_retained {
+                return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
+            }
+            let identity = entries
+                .iter()
+                .position(|entry| entry.glyph_id == known.glyph_id);
+            let content = entries
+                .iter()
+                .position(|entry| entry.content == known.content);
+            match (identity, content) {
+                (Some(identity), Some(content)) if identity == content => {
+                    let entry = &mut entries[identity];
+                    if entry.canonical_alias != known.canonical_alias {
+                        return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                            phase: "completed modeled glyph registry alias",
+                        });
+                    }
+                    entry.active_in_index = known.active_in_index;
+                    entry.strongly_retained = true;
+                }
+                (None, None) => entries.push(NativeStemsBeamGlyphRegistryBootstrapEntry {
+                    canonical_alias: known.canonical_alias,
+                    glyph_id: known.glyph_id,
+                    content: known.content.clone(),
+                    active_in_index: known.active_in_index,
+                    strongly_retained: true,
+                }),
+                _ => {
+                    return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                        phase: "completed modeled glyph registry identity/content join",
+                    });
+                }
+            }
+        }
+        if entries.len() != completed.glyph_index.union_size {
+            return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
+        }
+        Ok(entries)
+    }
+
+    /// Materialize the exact page registry after this system's final STEMS
+    /// transaction. The result is in Java `GlyphIndex` entity order.
+    pub fn completed_registry_entries(
+        &self,
+        completed: &NativeStemsBeamVLinkTransactionState,
+    ) -> Result<Vec<NativeStemsBeamGlyphRegistryBootstrapEntry>, NativeStemsBeamVLinkTransactionError>
+    {
+        self.completed_entries(completed)
+    }
+
+    /// Apply Java REDUCTION's final `GlyphIndex.remove` sweep to the complete
+    /// native-modeled registry. Persistent identities and the originals union
+    /// remain stable; only active-index membership changes.
+    pub fn retain_active_glyph_ids(
+        &mut self,
+        completed: &mut NativeStemsBeamVLinkTransactionState,
+        keep: &BTreeSet<i32>,
+    ) -> Result<(Vec<i32>, Vec<i32>), NativeStemsBeamVLinkTransactionError> {
+        let mut entries = self.completed_entries(completed)?;
+        if keep
+            .iter()
+            .any(|glyph_id| !entries.iter().any(|entry| entry.glyph_id == *glyph_id))
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "modeled glyph cleanup keep identity",
+            });
+        }
+        let retained = entries
+            .iter()
+            .filter(|entry| entry.active_in_index && keep.contains(&entry.glyph_id))
+            .map(|entry| entry.glyph_id)
+            .collect::<Vec<_>>();
+        let removed = entries
+            .iter()
+            .filter(|entry| entry.active_in_index && !keep.contains(&entry.glyph_id))
+            .map(|entry| entry.glyph_id)
+            .collect::<Vec<_>>();
+        for entry in &mut entries {
+            if entry.active_in_index && !keep.contains(&entry.glyph_id) {
+                entry.active_in_index = false;
+            }
+        }
+        for known in &mut completed.glyph_index.known_canonical_glyphs {
+            if removed.contains(&known.glyph_id) {
+                known.active_in_index = false;
+            }
+        }
+        completed.glyph_index.exhaustive_lookup = None;
+        self.persistent_ids = completed.glyph_index.persistent_ids;
+        self.entries = entries;
+        Ok((retained, removed))
+    }
+
     /// Derive one system's visible canonical prefix from the production
     /// head-builder registry chronology.
     pub fn from_head_builder_recognition(
@@ -3470,6 +3581,70 @@ mod tests {
                 exhaustive_lookup: None,
             },
         }
+    }
+
+    #[test]
+    fn modeled_registry_cleanup_is_ordered_idempotent_and_rejects_unknown_keep_ids() {
+        let first = content(2, 1, 1, 2, &[(0, 0), (0, 1)]);
+        let second = content(4, 1, 1, 2, &[(0, 0), (0, 1)]);
+        let modeled = [first, second]
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, content)| NativeStemsModeledCanonicalGlyph {
+                modeled_canonical_ordinal: ordinal,
+                bounds: content.bounds,
+                weight: content.weight,
+                run_table: content.run_table,
+            })
+            .collect::<Vec<_>>();
+        let mut registry =
+            NativeStemsModeledGlyphRegistry::from_modeled_prefix(1, &modeled, modeled.len())
+                .expect("modeled registry");
+        let mut state = NativeStemsBeamVLinkTransactionState {
+            scope: NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id: 1 },
+            glyph_index: NativeStemsBeamGlyphIndexTransactionState {
+                persistent_ids: NativeStemsBeamPersistentIdState {
+                    sheet_last_id: 2,
+                    glyph_index_last_id: 2,
+                    inter_index_last_id: 2,
+                },
+                alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
+                union_size: 2,
+                known_canonical_glyphs: Vec::new(),
+                exhaustive_lookup: None,
+            },
+            selected_glyph_bindings: Vec::new(),
+            line_states: Vec::new(),
+            applied_line_deltas: Vec::new(),
+            system_stems: NativeStemsBeamSystemStemTransactionState {
+                system_id: 1,
+                next_stem_identity: 0,
+                known_stems: Vec::new(),
+                authority: NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline,
+                exhaustive_lookup: None,
+            },
+        };
+        assert_eq!(
+            registry
+                .retain_active_glyph_ids(&mut state, &BTreeSet::from([2]))
+                .expect("first cleanup"),
+            (vec![2], vec![1])
+        );
+        assert_eq!(
+            registry
+                .retain_active_glyph_ids(&mut state, &BTreeSet::from([2]))
+                .expect("repeated cleanup"),
+            (vec![2], Vec::new())
+        );
+        let before_registry = registry.clone();
+        let before_state = state.clone();
+        assert!(
+            registry
+                .retain_active_glyph_ids(&mut state, &BTreeSet::from([3]))
+                .is_err()
+        );
+        assert_eq!(registry, before_registry);
+        assert_eq!(state, before_state);
     }
 
     fn reference() -> NativeStemsBeamVLinkerRef {
