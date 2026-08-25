@@ -57,7 +57,7 @@ use crate::{
     },
     native_heads_scanner::{
         NativeHeadsScannerRecognition, NativeHeadsScannerRecognitionError,
-        recognize_native_heads_scanner_context,
+        recognize_native_heads_scanner_context_with_small_heads,
     },
     native_heads_scanner_pools::{
         NativeHeadScannerPoolError, NativeHeadScannerPoolsRecognition,
@@ -167,15 +167,33 @@ pub fn recognize_native_heads(
     beams: &NativeBeamRecognition,
     ledgers: &NativeLedgerRecognition,
 ) -> Result<NativeHeadsRecognition, NativeHeadsRecognitionError> {
+    recognize_native_heads_with_small_heads(grid, headers, stem_seeds, beams, ledgers, false)
+}
+
+/// Run HEADS with Java's `smallHeads` processing switch explicitly selected.
+pub fn recognize_native_heads_with_small_heads(
+    grid: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    beams: &NativeBeamRecognition,
+    ledgers: &NativeLedgerRecognition,
+    small_heads: bool,
+) -> Result<NativeHeadsRecognition, NativeHeadsRecognitionError> {
     let obstacles = materialize_native_heads_bar_obstacles(grid)
         .map_err(NativeHeadsRecognitionError::Obstacles)?;
     let competitors = materialize_native_heads_competitors(grid, beams)
         .map_err(NativeHeadsRecognitionError::Competitors)?;
     let prolog = recognize_native_heads_prolog(grid, beams, ledgers, stem_seeds)
         .map_err(NativeHeadsRecognitionError::Prolog)?;
-    let scanners =
-        recognize_native_heads_scanner_context(grid, headers, ledgers, stem_seeds, &prolog)
-            .map_err(NativeHeadsRecognitionError::Scanners)?;
+    let scanners = recognize_native_heads_scanner_context_with_small_heads(
+        grid,
+        headers,
+        ledgers,
+        stem_seeds,
+        &prolog,
+        small_heads,
+    )
+    .map_err(NativeHeadsRecognitionError::Scanners)?;
     let scanner_pools = materialize_native_head_scanner_pools(stem_seeds, &prolog, &scanners)
         .map_err(NativeHeadsRecognitionError::ScannerPools)?;
     let bar_slices = materialize_native_head_scanner_bar_slices(&scanner_pools, &obstacles)

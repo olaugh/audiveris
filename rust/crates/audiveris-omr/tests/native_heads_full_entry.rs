@@ -5,8 +5,9 @@
 use std::path::PathBuf;
 
 use audiveris_omr::{
+    head_template::HeadTemplateShape,
     native_headers::recognize_native_headers,
-    native_heads::recognize_native_heads,
+    native_heads::{recognize_native_heads, recognize_native_heads_with_small_heads},
     native_ledgers::recognize_native_ledgers,
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems_head_corners::materialize_native_stems_head_corners,
@@ -106,6 +107,57 @@ fn full_entry_owns_every_chula_heads_boundary() {
         stem_head_seeds.selected_seed_count + stem_head_seeds.section_fallback_count,
         stem_head_seeds.corner_count
     );
+}
+
+#[test]
+fn small_heads_switch_matches_batuque_live_java_shape_census() {
+    let grid = recognize_grid_lines(repo_path("data/examples/batuque.png")).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("LEDGERS");
+    let heads = recognize_native_heads_with_small_heads(
+        &grid,
+        &headers,
+        &stem_seeds,
+        &beams,
+        &ledgers,
+        true,
+    )
+    .expect("small-head HEADS");
+
+    let mut counts = [0_usize; 8];
+    for system in &heads.epilog.systems {
+        let staff_system = &heads.epilog.staff_epilog.systems[system.system_id - 1];
+        for reference in &system.final_heads {
+            let head = &staff_system.staffs[reference.staff_index].heads[reference.head_index];
+            counts[head.shape.factory_ordinal()] += 1;
+        }
+    }
+    assert_eq!(
+        counts,
+        [155, 170, 0, 0, 221, 150, 0, 0],
+        "exact Java live HEADS shape census"
+    );
+    assert_eq!(heads.epilog.final_head_count, 696);
+    assert!(heads.scanners.systems.iter().all(|system| {
+        system
+            .staffs
+            .iter()
+            .filter(|staff| !staff.tablature)
+            .flat_map(|staff| &staff.geometries)
+            .all(|geometry| {
+                geometry
+                    .all_shapes
+                    .contains(&HeadTemplateShape::NoteheadBlackSmall)
+            })
+    }));
+
+    let stem_corners = materialize_native_stems_head_corners(&heads, &stem_seeds)
+        .expect("small-head STEMS corner prolog");
+    assert_eq!(stem_corners.head_count, 696);
+    assert_eq!(stem_corners.corner_count, 2_784);
 }
 
 fn repo_path(path: &str) -> PathBuf {

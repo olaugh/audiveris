@@ -667,14 +667,10 @@ fn materialize_system(
         )
         .collect::<Vec<_>>();
 
-    // The current native HEADS product contains exactly the standard oval
-    // stem-head classes.  Do not silently reinterpret a stemless class as a
-    // small/standard head if an upstream producer violates that boundary.
+    // STEMS consumes the four oval stem-head classes. Stemless oval variants
+    // remain outside the head-linker arena.
     for head in &head_system.heads_in_sig_order {
-        if !matches!(
-            head.shape,
-            HeadTemplateShape::NoteheadBlack | HeadTemplateShape::NoteheadVoid
-        ) {
+        if !head.shape.is_stemmed() {
             return Err(NativeStemsBeamReachabilityError::UnsupportedHeadShape {
                 system_id,
                 head: head.reference,
@@ -1376,7 +1372,10 @@ fn filter_heads(
             };
             let lookup_contains =
                 lu_area_contains(v_linker.final_geometry.quadrilateral, corner.reference);
-            let is_half_head = head.shape == HeadTemplateShape::NoteheadVoid;
+            let is_half_head = matches!(
+                head.shape,
+                HeadTemplateShape::NoteheadVoid | HeadTemplateShape::NoteheadVoidSmall
+            );
             let half_head_side_accepted = void_side_ok(
                 lookup_contains,
                 is_half_head,

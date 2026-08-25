@@ -1321,15 +1321,16 @@ fn search_shape(
         outcome
     } else if let Some(best) = best {
         let hole = if original_shape == HeadTemplateShape::NoteheadBlack {
+            let void_shape = HeadTemplateShape::NoteheadVoid;
             let ratio = input
                 .catalog
-                .template(HeadTemplateShape::NoteheadVoid)
+                .template(void_shape)
                 .evaluate_hole(best.x, best.y, Some(anchor), input.distances)
                 .map_err(|source| template_error(input, source))?;
             let converted_to_void = ratio >= MIN_HOLE_WHITE_RATIO;
             black_to_void = Some(converted_to_void);
             if converted_to_void {
-                final_shape = HeadTemplateShape::NoteheadVoid;
+                final_shape = void_shape;
             }
             Some(NativeHeadRangeHoleEvidence {
                 ratio,
@@ -1400,7 +1401,10 @@ fn search_shape(
 fn stemless_evidence(shape: HeadTemplateShape, distance: f64) -> NativeHeadRangeStemlessEvidence {
     let applicable = matches!(
         shape,
-        HeadTemplateShape::WholeNote | HeadTemplateShape::Breve
+        HeadTemplateShape::WholeNote
+            | HeadTemplateShape::Breve
+            | HeadTemplateShape::WholeNoteSmall
+            | HeadTemplateShape::BreveSmall
     );
     let intrinsic_grade = head_grade_of(distance);
     let mut contextual_grade = intrinsic_grade;
@@ -1796,6 +1800,10 @@ const fn shape_name(shape: HeadTemplateShape) -> &'static str {
         HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
         HeadTemplateShape::WholeNote => "WHOLE_NOTE",
         HeadTemplateShape::Breve => "BREVE",
+        HeadTemplateShape::NoteheadBlackSmall => "NOTEHEAD_BLACK_SMALL",
+        HeadTemplateShape::NoteheadVoidSmall => "NOTEHEAD_VOID_SMALL",
+        HeadTemplateShape::WholeNoteSmall => "WHOLE_NOTE_SMALL",
+        HeadTemplateShape::BreveSmall => "BREVE_SMALL",
     }
 }
 

@@ -2406,15 +2406,23 @@ fn head_shape(shape: HeadTemplateShape) -> &'static str {
         HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
         HeadTemplateShape::WholeNote => "WHOLE_NOTE",
         HeadTemplateShape::Breve => "BREVE",
+        HeadTemplateShape::NoteheadBlackSmall => "NOTEHEAD_BLACK_SMALL",
+        HeadTemplateShape::NoteheadVoidSmall => "NOTEHEAD_VOID_SMALL",
+        HeadTemplateShape::WholeNoteSmall => "WHOLE_NOTE_SMALL",
+        HeadTemplateShape::BreveSmall => "BREVE_SMALL",
     }
 }
 
 fn java_head_seed_shape(shape: JavaHeadSeedShape) -> &'static str {
     match shape {
         JavaHeadSeedShape::Breve => "BREVE",
+        JavaHeadSeedShape::BreveSmall => "BREVE_SMALL",
         JavaHeadSeedShape::WholeNote => "WHOLE_NOTE",
+        JavaHeadSeedShape::WholeNoteSmall => "WHOLE_NOTE_SMALL",
         JavaHeadSeedShape::NoteheadVoid => "NOTEHEAD_VOID",
+        JavaHeadSeedShape::NoteheadVoidSmall => "NOTEHEAD_VOID_SMALL",
         JavaHeadSeedShape::NoteheadBlack => "NOTEHEAD_BLACK",
+        JavaHeadSeedShape::NoteheadBlackSmall => "NOTEHEAD_BLACK_SMALL",
     }
 }
 

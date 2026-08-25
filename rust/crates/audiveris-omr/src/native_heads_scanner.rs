@@ -22,8 +22,8 @@ use crate::{
     grid_executor::{HeadlessStaff, HeadlessStaffLine},
     head_scanner::{
         HeadScannerError, HeadScannerLedger, HeadScannerLine, HeadScannerParameters,
-        HeadTheoreticalOrdinateInput, NORMAL_HEAD_SCANNER_SHAPES, compute_y_offsets,
-        is_open_scanner, theoretical_ordinate,
+        HeadTheoreticalOrdinateInput, NORMAL_HEAD_SCANNER_SHAPES, SMALL_HEAD_SCANNER_SHAPES,
+        compute_y_offsets, is_open_scanner, theoretical_ordinate,
     },
     head_scanner_geometry::{
         HeadScannerAxis, HeadScannerGeometryError, LedgerScannerAdapter, StaffLineScannerAdapter,
@@ -319,6 +319,20 @@ pub fn recognize_native_heads_scanner_context(
     stem_seeds: &NativeStemSeedRecognition,
     heads: &NativeHeadsPrologRecognition,
 ) -> Result<NativeHeadsScannerRecognition, NativeHeadsScannerRecognitionError> {
+    recognize_native_heads_scanner_context_with_small_heads(
+        grid, headers, ledgers, stem_seeds, heads, false,
+    )
+}
+
+/// Compose scanner context with Java's `smallHeads` processing switch.
+pub fn recognize_native_heads_scanner_context_with_small_heads(
+    grid: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    ledgers: &NativeLedgerRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    heads: &NativeHeadsPrologRecognition,
+    small_heads: bool,
+) -> Result<NativeHeadsScannerRecognition, NativeHeadsScannerRecognitionError> {
     let system_count = grid.peak_graph.systems.len();
     if grid.peak_graph.sig.systems.len() != system_count {
         return Err(NativeHeadsScannerRecognitionError::SystemTopology);
@@ -500,6 +514,13 @@ pub fn recognize_native_heads_scanner_context(
                     &parameters,
                 )?
             };
+            if small_heads {
+                for geometry in &mut geometries {
+                    geometry.all_shapes = SMALL_HEAD_SCANNER_SHAPES.all.to_vec();
+                    geometry.stem_shapes = SMALL_HEAD_SCANNER_SHAPES.stem.to_vec();
+                    geometry.hollow_shapes = SMALL_HEAD_SCANNER_SHAPES.hollow.to_vec();
+                }
+            }
             geometries.shrink_to_fit();
             let schedule = scanner_schedule(geometries.len());
             staffs.push(NativeHeadsScannerStaff {

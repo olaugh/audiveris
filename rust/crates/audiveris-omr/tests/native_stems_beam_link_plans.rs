@@ -1276,6 +1276,10 @@ fn head_shape_token(shape: HeadTemplateShape) -> &'static str {
         HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
         HeadTemplateShape::WholeNote => "WHOLE_NOTE",
         HeadTemplateShape::Breve => "BREVE",
+        HeadTemplateShape::NoteheadBlackSmall => "NOTEHEAD_BLACK_SMALL",
+        HeadTemplateShape::NoteheadVoidSmall => "NOTEHEAD_VOID_SMALL",
+        HeadTemplateShape::WholeNoteSmall => "WHOLE_NOTE_SMALL",
+        HeadTemplateShape::BreveSmall => "BREVE_SMALL",
     }
 }
 

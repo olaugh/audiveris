@@ -343,10 +343,7 @@ pub fn materialize_native_stems_head_corners(
                     reference,
                 },
             )?;
-            if !matches!(
-                head.shape,
-                HeadTemplateShape::NoteheadBlack | HeadTemplateShape::NoteheadVoid
-            ) {
+            if !head.shape.is_stemmed() {
                 continue;
             }
             let selection = selections.get(&(system_id, staff_id)).copied().ok_or(

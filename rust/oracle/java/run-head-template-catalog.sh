@@ -28,13 +28,22 @@ probe_cp=$(sed -n '1p' "$probe_cp_file")
 run_probe ()
 {
     target=$1
+    small_heads=${AUDIVERIS_SMALL_HEADS:-false}
     (
         cd "$repo_root/app"
-        env -u JAVA_TOOL_OPTIONS "$JAVA_HOME/bin/java" \
-            -Djava.awt.headless=true \
-            -Dlogback.configurationFile="$repo_root/rust/oracle/java/logback-quiet.xml" \
-            -cp "$probe_classes:$probe_cp" \
-            org.audiveris.omr.rustport.HeadTemplateCatalogProbe "$target"
+        if [ "$small_heads" = true ]; then
+            env -u JAVA_TOOL_OPTIONS "$JAVA_HOME/bin/java" \
+                -Djava.awt.headless=true \
+                -Dlogback.configurationFile="$repo_root/rust/oracle/java/logback-quiet.xml" \
+                -cp "$probe_classes:$probe_cp" \
+                org.audiveris.omr.rustport.HeadTemplateCatalogProbe --small-heads "$target"
+        else
+            env -u JAVA_TOOL_OPTIONS "$JAVA_HOME/bin/java" \
+                -Djava.awt.headless=true \
+                -Dlogback.configurationFile="$repo_root/rust/oracle/java/logback-quiet.xml" \
+                -cp "$probe_classes:$probe_cp" \
+                org.audiveris.omr.rustport.HeadTemplateCatalogProbe "$target"
+        fi
     )
 }
 

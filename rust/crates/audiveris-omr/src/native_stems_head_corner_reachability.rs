@@ -822,12 +822,7 @@ fn materialize_system(
         .iter()
         .copied()
         .filter(|reference| {
-            staff_head(inputs.staff_epilog, *reference).is_some_and(|head| {
-                matches!(
-                    head.shape,
-                    HeadTemplateShape::NoteheadBlack | HeadTemplateShape::NoteheadVoid
-                )
-            })
+            staff_head(inputs.staff_epilog, *reference).is_some_and(|head| head.shape.is_stemmed())
         })
         .collect::<BTreeSet<_>>();
     let corner_heads = corner_system
@@ -1274,7 +1269,9 @@ fn head_duration(
 ) -> Result<NativeStemsHeadDuration, NativeStemsHeadCornerReachabilityError> {
     match shape {
         HeadTemplateShape::NoteheadBlack => Ok(NativeStemsHeadDuration::Quarter),
+        HeadTemplateShape::NoteheadBlackSmall => Ok(NativeStemsHeadDuration::Quarter),
         HeadTemplateShape::NoteheadVoid => Ok(NativeStemsHeadDuration::Half),
+        HeadTemplateShape::NoteheadVoidSmall => Ok(NativeStemsHeadDuration::Half),
         _ => Err(
             NativeStemsHeadCornerReachabilityError::UnsupportedHeadShape {
                 system_id,

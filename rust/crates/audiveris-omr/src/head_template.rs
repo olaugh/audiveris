@@ -59,14 +59,22 @@ pub enum HeadTemplateShape {
     NoteheadVoid = 1,
     WholeNote = 2,
     Breve = 3,
+    NoteheadBlackSmall = 4,
+    NoteheadVoidSmall = 5,
+    WholeNoteSmall = 6,
+    BreveSmall = 7,
 }
 
 impl HeadTemplateShape {
-    pub const FACTORY_ORDER: [Self; 4] = [
+    pub const FACTORY_ORDER: [Self; 8] = [
         Self::NoteheadBlack,
         Self::NoteheadVoid,
         Self::WholeNote,
         Self::Breve,
+        Self::NoteheadBlackSmall,
+        Self::NoteheadVoidSmall,
+        Self::WholeNoteSmall,
+        Self::BreveSmall,
     ];
 
     const STEMMED_ANCHORS: [HeadTemplateAnchor; 9] = HeadTemplateAnchor::ALL;
@@ -84,9 +92,55 @@ impl HeadTemplateShape {
     #[must_use]
     pub const fn required_anchors(self) -> &'static [HeadTemplateAnchor] {
         match self {
-            Self::NoteheadBlack | Self::NoteheadVoid => &Self::STEMMED_ANCHORS,
-            Self::WholeNote | Self::Breve => &Self::STEMLESS_ANCHORS,
+            Self::NoteheadBlack
+            | Self::NoteheadVoid
+            | Self::NoteheadBlackSmall
+            | Self::NoteheadVoidSmall => &Self::STEMMED_ANCHORS,
+            Self::WholeNote | Self::Breve | Self::WholeNoteSmall | Self::BreveSmall => {
+                &Self::STEMLESS_ANCHORS
+            }
         }
+    }
+
+    #[must_use]
+    pub const fn is_small(self) -> bool {
+        matches!(
+            self,
+            Self::NoteheadBlackSmall
+                | Self::NoteheadVoidSmall
+                | Self::WholeNoteSmall
+                | Self::BreveSmall
+        )
+    }
+
+    #[must_use]
+    pub const fn is_stemmed(self) -> bool {
+        matches!(
+            self,
+            Self::NoteheadBlack
+                | Self::NoteheadVoid
+                | Self::NoteheadBlackSmall
+                | Self::NoteheadVoidSmall
+        )
+    }
+
+    #[must_use]
+    pub const fn is_stemless(self) -> bool {
+        !self.is_stemmed()
+    }
+
+    #[must_use]
+    pub const fn void_variant(self) -> Option<Self> {
+        match self {
+            Self::NoteheadBlack | Self::NoteheadVoid => Some(Self::NoteheadVoid),
+            Self::NoteheadBlackSmall | Self::NoteheadVoidSmall => Some(Self::NoteheadVoidSmall),
+            Self::WholeNote | Self::Breve | Self::WholeNoteSmall | Self::BreveSmall => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_black(self) -> bool {
+        matches!(self, Self::NoteheadBlack | Self::NoteheadBlackSmall)
     }
 }
 
@@ -886,6 +940,12 @@ mod tests {
                     dy: 16.0,
                 },
             ],
+            HeadTemplateShape::NoteheadBlackSmall
+            | HeadTemplateShape::NoteheadVoidSmall
+            | HeadTemplateShape::WholeNoteSmall
+            | HeadTemplateShape::BreveSmall => {
+                panic!("small shape is outside the legacy test helper")
+            }
         }
     }
 

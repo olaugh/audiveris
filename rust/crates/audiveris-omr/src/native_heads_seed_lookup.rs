@@ -798,7 +798,8 @@ fn lookup_scan(
                     outcome = NativeHeadSeedSearchOutcome::AbandonedAtNominal { reason };
                 } else if let Some(best_location) = best {
                     let selected_shape = if original_shape == HeadTemplateShape::NoteheadBlack {
-                        let void_template = input.catalog.template(HeadTemplateShape::NoteheadVoid);
+                        let void_shape = HeadTemplateShape::NoteheadVoid;
+                        let void_template = input.catalog.template(void_shape);
                         let ratio = void_template
                             .evaluate_hole(
                                 best_location.x,
@@ -819,7 +820,7 @@ fn lookup_scan(
                             converted_to_void,
                         });
                         if converted_to_void {
-                            HeadTemplateShape::NoteheadVoid
+                            void_shape
                         } else {
                             original_shape
                         }
@@ -1205,6 +1206,10 @@ const fn shape_name(shape: HeadTemplateShape) -> &'static str {
         HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
         HeadTemplateShape::WholeNote => "WHOLE_NOTE",
         HeadTemplateShape::Breve => "BREVE",
+        HeadTemplateShape::NoteheadBlackSmall => "NOTEHEAD_BLACK_SMALL",
+        HeadTemplateShape::NoteheadVoidSmall => "NOTEHEAD_VOID_SMALL",
+        HeadTemplateShape::WholeNoteSmall => "WHOLE_NOTE_SMALL",
+        HeadTemplateShape::BreveSmall => "BREVE_SMALL",
     }
 }
 

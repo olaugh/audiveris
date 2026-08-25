@@ -5,7 +5,7 @@ use audiveris_core::step::OmrStep;
 use audiveris_image::ingest::Loader;
 use audiveris_omr::cue_beams_step::recognize_native_cue_beams;
 use audiveris_omr::native_headers::recognize_native_headers;
-use audiveris_omr::native_heads::recognize_native_heads;
+use audiveris_omr::native_heads::recognize_native_heads_with_small_heads;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
 use audiveris_omr::native_reduction::recognize_native_reduction;
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
@@ -202,12 +202,13 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                         );
                         continue;
                     }
-                    let heads = recognize_native_heads(
+                    let heads = recognize_native_heads_with_small_heads(
                         &recognition,
                         &headers,
                         &stem_seeds,
                         &beams,
                         &ledgers,
+                        small_heads_enabled(parameters),
                     )
                     .map_err(|error| {
                         format!("{} sheet {sheet}: HEADS failed: {error}", input.display())
@@ -695,12 +696,13 @@ fn run_native_stream(parameters: &Parameters, json: bool) -> Result<bool, String
                 // HEADS ------------------------------------------------------
                 stream.stage_started(OmrStep::Heads, &input_name, sheet)?;
                 let started = Instant::now();
-                let heads = match recognize_native_heads(
+                let heads = match recognize_native_heads_with_small_heads(
                     &recognition,
                     &headers,
                     &stem_seeds,
                     &beams,
                     &ledgers,
+                    small_heads_enabled(parameters),
                 ) {
                     Ok(heads) => heads,
                     Err(error) => {

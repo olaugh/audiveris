@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +33,8 @@ import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.step.OmrStep;
+import org.audiveris.omr.sig.inter.HeadInter;
+import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.ui.symbol.MusicFamily;
 import org.audiveris.omr.ui.symbol.MusicFont;
 
@@ -63,29 +66,41 @@ public class HeadTemplateCatalogProbe
             System.exit(0);
         }
 
-        if (args.length != 1) {
-            throw new IllegalArgumentException("expected exactly one <path>:<sheet> target");
+        final boolean smallHeads = (args.length == 2) && args[0].equals("--small-heads");
+        if ((!smallHeads && (args.length != 1)) || (smallHeads && (args.length != 2))) {
+            throw new IllegalArgumentException(
+                    "expected [--small-heads] <path>:<sheet> target");
         }
 
         final CLI cli = new CLI(WellKnowns.TOOL_NAME);
-        cli.parseParameters("-batch", "-step", "HEADS");
+        if (smallHeads) {
+            cli.parseParameters(
+                    "-batch",
+                    "-step",
+                    "HEADS",
+                    "-constant",
+                    "org.audiveris.omr.sheet.ProcessingSwitches.smallHeads=true");
+        } else {
+            cli.parseParameters("-batch", "-step", "HEADS");
+        }
         final Field cliField = Main.class.getDeclaredField("cli");
         cliField.setAccessible(true);
         cliField.set(null, cli);
         MusicFont.checkMusicFont();
 
-        final String[] parts = args[0].split(":");
+        final String[] parts = args[smallHeads ? 1 : 0].split(":");
         if (parts.length != 2) {
             throw new IllegalArgumentException("target must be <path>:<sheet>");
         }
         final Path path = Paths.get(parts[0]).toAbsolutePath();
         final int wanted = Integer.parseInt(parts[1]);
-        runPage(path, wanted);
+        runPage(path, wanted, smallHeads);
         System.exit(0);
     }
 
     private static void runPage (Path path,
-                                 int wanted)
+                                 int wanted,
+                                 boolean smallHeads)
         throws Exception
     {
         final Book book = new Book(path);
@@ -226,6 +241,39 @@ public class HeadTemplateCatalogProbe
                 staffCount,
                 catalogs.size(),
                 hash(pageRows));
+
+        if (smallHeads) {
+            printLiveHeadSummary(page, sheet);
+        }
+    }
+
+    private static void printLiveHeadSummary (String page,
+                                              Sheet sheet)
+    {
+        final Map<Shape, Integer> counts = new EnumMap<>(Shape.class);
+        int total = 0;
+
+        for (SystemInfo system : sheet.getSystems()) {
+            for (Inter inter : system.getSig().inters(HeadInter.class)) {
+                if (!inter.isRemoved()) {
+                    counts.merge(inter.getShape(), 1, Integer::sum);
+                    total++;
+                }
+            }
+        }
+
+        final List<String> parts = new ArrayList<>();
+        for (Shape shape : ShapeSet.Heads) {
+            final int count = counts.getOrDefault(shape, 0);
+            if (count != 0) {
+                parts.add(shape + ":" + count);
+            }
+        }
+        System.out.printf(
+                "headtemplateliveheads %s total %d shapes %s%n",
+                page,
+                total,
+                String.join(",", parts));
     }
 
     private static String printCatalog (String page,

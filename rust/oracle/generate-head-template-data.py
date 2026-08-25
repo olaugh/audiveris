@@ -12,12 +12,16 @@ import sys
 from dataclasses import dataclass, field
 
 
-MAGIC = b"AVHTPL01"
+MAGIC = b"AVHTPL02"
 SHAPES = {
     "NOTEHEAD_BLACK": 0,
     "NOTEHEAD_VOID": 1,
     "WHOLE_NOTE": 2,
     "BREVE": 3,
+    "NOTEHEAD_BLACK_SMALL": 4,
+    "NOTEHEAD_VOID_SMALL": 5,
+    "WHOLE_NOTE_SMALL": 6,
+    "BREVE_SMALL": 7,
 }
 ANCHORS = {
     "CENTER": 0,
@@ -77,7 +81,7 @@ class Template:
         if [anchor.kind for anchor in self.anchors] != list(range(len(self.anchors))):
             raise ValueError(f"shape {self.shape} anchors are not in enum order")
         expected_shape = self.shape
-        expected_anchor_count = 9 if expected_shape < 2 else 3
+        expected_anchor_count = 9 if expected_shape in (0, 1, 4, 5) else 3
         if len(self.anchors) != expected_anchor_count:
             raise ValueError(f"shape {self.shape} has the wrong active anchor set")
         if any(pixel.distance < -32768 or pixel.distance > 32767 for pixel in self.pixels):
@@ -217,15 +221,15 @@ def parse_oracle(path: pathlib.Path) -> tuple[bytes, dict[int, tuple[Template, .
             raise ValueError(f"{path}:{line_number}: {error}") from error
 
     finish_template()
-    if template_rows != 32 or len(page_catalogs) != 8:
+    if template_rows != 64 or len(page_catalogs) != 8:
         raise ValueError(
-            f"expected 32 templates in 8 page catalogs, got {template_rows} in {len(page_catalogs)}"
+            f"expected 64 templates in 8 page catalogs, got {template_rows} in {len(page_catalogs)}"
         )
 
     unique: dict[int, tuple[Template, ...]] = {}
     page_pixels = 0
     for page_key, templates in page_catalogs.items():
-        if [template.shape for template in templates] != list(range(4)):
+        if [template.shape for template in templates] != list(range(8)):
             raise ValueError(f"{page_key} templates are not in active factory order")
         if len({template.point_size for template in templates}) != 1:
             raise ValueError(f"{page_key} mixes point sizes")
@@ -237,7 +241,7 @@ def parse_oracle(path: pathlib.Path) -> tuple[bytes, dict[int, tuple[Template, .
         unique.setdefault(point_size, tuple(templates))
         page_pixels += sum(len(template.pixels) for template in templates)
 
-    if sorted(unique) != [78, 83, 84, 85, 87] or page_pixels != 27207:
+    if sorted(unique) != [78, 83, 84, 85, 87] or page_pixels != 41492:
         raise ValueError(
             f"unexpected corpus coverage: point sizes {sorted(unique)}, pixels {page_pixels}"
         )
@@ -300,7 +304,7 @@ def main() -> int:
         len(template.pixels) for templates in catalogs.values() for template in templates
     )
     print(
-        f"{len(catalogs)} catalogs, 20 templates, {unique_pixels} unique pixels, "
+        f"{len(catalogs)} catalogs, 40 templates, {unique_pixels} unique pixels, "
         f"{page_pixels} graded page pixels, {len(encoded)} bytes"
     )
     return 0

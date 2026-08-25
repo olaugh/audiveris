@@ -671,6 +671,16 @@ fn heads_products_derive_javas_head_ordinals() {
                 audiveris_omr::head_template::HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
                 audiveris_omr::head_template::HeadTemplateShape::WholeNote => "WHOLE_NOTE",
                 audiveris_omr::head_template::HeadTemplateShape::Breve => "BREVE",
+                audiveris_omr::head_template::HeadTemplateShape::NoteheadBlackSmall => {
+                    "NOTEHEAD_BLACK_SMALL"
+                }
+                audiveris_omr::head_template::HeadTemplateShape::NoteheadVoidSmall => {
+                    "NOTEHEAD_VOID_SMALL"
+                }
+                audiveris_omr::head_template::HeadTemplateShape::WholeNoteSmall => {
+                    "WHOLE_NOTE_SMALL"
+                }
+                audiveris_omr::head_template::HeadTemplateShape::BreveSmall => "BREVE_SMALL",
             };
             (
                 shape.to_owned(),

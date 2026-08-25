@@ -39,16 +39,20 @@ pub struct NativeHeadsEpilogInput<'a> {
     pub beams: &'a NativeBeamRecognition,
 }
 
-/// Java `Shape` declaration order for the four native template head shapes.
+/// Java `Shape` declaration order for the eight oval template head shapes.
 ///
 /// This is deliberately distinct from `HeadTemplateShape`, whose discriminants
 /// preserve `TemplateFactory` construction order (black, void, whole, breve).
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum JavaHeadSeedShape {
     Breve,
+    BreveSmall,
     WholeNote,
+    WholeNoteSmall,
     NoteheadVoid,
+    NoteheadVoidSmall,
     NoteheadBlack,
+    NoteheadBlackSmall,
 }
 
 /// One surviving key in a system tally's insertion-preserving side map.
@@ -436,9 +440,19 @@ fn option_bits(value: Option<f64>) -> Option<u64> {
 pub const fn java_shape(shape: crate::head_template::HeadTemplateShape) -> JavaHeadSeedShape {
     match shape {
         crate::head_template::HeadTemplateShape::Breve => JavaHeadSeedShape::Breve,
+        crate::head_template::HeadTemplateShape::BreveSmall => JavaHeadSeedShape::BreveSmall,
         crate::head_template::HeadTemplateShape::WholeNote => JavaHeadSeedShape::WholeNote,
+        crate::head_template::HeadTemplateShape::WholeNoteSmall => {
+            JavaHeadSeedShape::WholeNoteSmall
+        }
         crate::head_template::HeadTemplateShape::NoteheadVoid => JavaHeadSeedShape::NoteheadVoid,
+        crate::head_template::HeadTemplateShape::NoteheadVoidSmall => {
+            JavaHeadSeedShape::NoteheadVoidSmall
+        }
         crate::head_template::HeadTemplateShape::NoteheadBlack => JavaHeadSeedShape::NoteheadBlack,
+        crate::head_template::HeadTemplateShape::NoteheadBlackSmall => {
+            JavaHeadSeedShape::NoteheadBlackSmall
+        }
     }
 }
 

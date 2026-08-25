@@ -107,6 +107,37 @@ pub const NORMAL_HEAD_SCANNER_SHAPES: HeadScannerShapeSets = HeadScannerShapeSet
     ],
 };
 
+/// Java normal-staff scanner shape intersections when `smallHeads` is enabled.
+///
+/// Entries preserve `Shape`/`EnumSet` declaration order, not template-factory
+/// order.
+pub const SMALL_HEAD_SCANNER_SHAPES: HeadScannerShapeSets = HeadScannerShapeSets {
+    all: &[
+        HeadTemplateShape::Breve,
+        HeadTemplateShape::BreveSmall,
+        HeadTemplateShape::WholeNote,
+        HeadTemplateShape::WholeNoteSmall,
+        HeadTemplateShape::NoteheadVoid,
+        HeadTemplateShape::NoteheadVoidSmall,
+        HeadTemplateShape::NoteheadBlack,
+        HeadTemplateShape::NoteheadBlackSmall,
+    ],
+    stem: &[
+        HeadTemplateShape::NoteheadVoid,
+        HeadTemplateShape::NoteheadVoidSmall,
+        HeadTemplateShape::NoteheadBlack,
+        HeadTemplateShape::NoteheadBlackSmall,
+    ],
+    hollow: &[
+        HeadTemplateShape::Breve,
+        HeadTemplateShape::BreveSmall,
+        HeadTemplateShape::WholeNote,
+        HeadTemplateShape::WholeNoteSmall,
+        HeadTemplateShape::NoteheadVoid,
+        HeadTemplateShape::NoteheadVoidSmall,
+    ],
+};
+
 /// Abstract precise ordinate provider for either a staff line or ledger axis.
 pub trait HeadScannerLine {
     fn y_at(&self, x: f64) -> f64;

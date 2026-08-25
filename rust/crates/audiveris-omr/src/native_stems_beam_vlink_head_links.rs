@@ -650,13 +650,20 @@ fn native_head_shape(shape: HeadTemplateShape) -> &'static str {
         HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
         HeadTemplateShape::WholeNote => "WHOLE_NOTE",
         HeadTemplateShape::Breve => "BREVE",
+        HeadTemplateShape::NoteheadBlackSmall => "NOTEHEAD_BLACK_SMALL",
+        HeadTemplateShape::NoteheadVoidSmall => "NOTEHEAD_VOID_SMALL",
+        HeadTemplateShape::WholeNoteSmall => "WHOLE_NOTE_SMALL",
+        HeadTemplateShape::BreveSmall => "BREVE_SMALL",
     }
 }
 
 fn native_head_reads_head_stem(shape: HeadTemplateShape) -> bool {
     matches!(
         shape,
-        HeadTemplateShape::NoteheadBlack | HeadTemplateShape::NoteheadVoid
+        HeadTemplateShape::NoteheadBlack
+            | HeadTemplateShape::NoteheadVoid
+            | HeadTemplateShape::NoteheadBlackSmall
+            | HeadTemplateShape::NoteheadVoidSmall
     )
 }
 
@@ -2151,6 +2158,10 @@ fn decision_shape_token(shape: HeadTemplateShape) -> &'static str {
         HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
         HeadTemplateShape::WholeNote => "WHOLE_NOTE",
         HeadTemplateShape::Breve => "BREVE",
+        HeadTemplateShape::NoteheadBlackSmall => "NOTEHEAD_BLACK_SMALL",
+        HeadTemplateShape::NoteheadVoidSmall => "NOTEHEAD_VOID_SMALL",
+        HeadTemplateShape::WholeNoteSmall => "WHOLE_NOTE_SMALL",
+        HeadTemplateShape::BreveSmall => "BREVE_SMALL",
     }
 }
 

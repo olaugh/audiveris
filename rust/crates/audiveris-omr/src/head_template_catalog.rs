@@ -12,15 +12,15 @@ use crate::head_template::{
 };
 
 const ASSET: &[u8] = include_bytes!("data/bravura-head-templates.bin");
-const MAGIC: &[u8; 8] = b"AVHTPL01";
+const MAGIC: &[u8; 8] = b"AVHTPL02";
 const ORACLE_DIGEST: [u8; 32] = [
-    0x84, 0xc3, 0x92, 0x08, 0x89, 0x15, 0x30, 0x96, 0x5f, 0x5d, 0x9c, 0xe7, 0x1f, 0xf9, 0xb7, 0x9c,
-    0xf3, 0x73, 0xc1, 0x01, 0xf4, 0xda, 0x80, 0x36, 0x05, 0x9c, 0xdb, 0xf2, 0x5e, 0x2a, 0x2e, 0xa6,
+    0x0f, 0x1c, 0x86, 0xff, 0x8a, 0x83, 0x18, 0x52, 0x0f, 0xae, 0xeb, 0x43, 0xe3, 0x37, 0x5b, 0x5c,
+    0x76, 0x30, 0x1e, 0xb1, 0x63, 0xba, 0x0c, 0xd4, 0x44, 0x2b, 0x8c, 0xcb, 0x11, 0x80, 0xf8, 0x32,
 ];
 
 /// SHA-256 of the complete fresh-JVM Java catalog oracle encoded by this asset.
 pub const BRAVURA_HEAD_TEMPLATE_ORACLE_SHA256: &str =
-    "84c39208891530965f5d9ce71ff9b79cf373c101f4da8036059cdbf25e2a2ea6";
+    "0f1c86ff8a8318520faeeb43e3375b5c76301eb163ba0cd4442b8ccb1180f832";
 
 /// The exact point sizes selected by the measured normal-staff corpus.
 pub const BRAVURA_HEAD_TEMPLATE_POINT_SIZES: [i32; 5] = [78, 83, 84, 85, 87];
@@ -183,6 +183,10 @@ fn decode_shape(value: u8) -> Result<HeadTemplateShape, HeadTemplateCatalogAsset
         1 => Ok(HeadTemplateShape::NoteheadVoid),
         2 => Ok(HeadTemplateShape::WholeNote),
         3 => Ok(HeadTemplateShape::Breve),
+        4 => Ok(HeadTemplateShape::NoteheadBlackSmall),
+        5 => Ok(HeadTemplateShape::NoteheadVoidSmall),
+        6 => Ok(HeadTemplateShape::WholeNoteSmall),
+        7 => Ok(HeadTemplateShape::BreveSmall),
         value => Err(HeadTemplateCatalogAssetError::UnsupportedShape(value)),
     }
 }

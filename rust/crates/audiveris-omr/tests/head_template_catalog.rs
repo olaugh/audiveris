@@ -10,6 +10,8 @@ use audiveris_omr::head_template_catalog::{
 };
 
 const ORACLE: &str = include_str!("../../../oracle/head-template-catalog.txt");
+const SMALL_HEADS_ORACLE: &str =
+    include_str!("../../../oracle/head-template-catalog-small-heads.txt");
 
 struct CurrentTemplate<'a> {
     page: String,
@@ -39,6 +41,39 @@ impl CurrentTemplate<'_> {
 
 #[test]
 fn native_catalog_asset_matches_every_fresh_jvm_page_record() {
+    assert_oracle(ORACLE, 32, 192, 27_207);
+}
+
+#[test]
+fn native_catalog_asset_matches_every_small_heads_page_record() {
+    assert_oracle(SMALL_HEADS_ORACLE, 64, 384, 41_492);
+}
+
+#[test]
+fn small_heads_oracle_pins_live_java_shape_census() {
+    for expected in [
+        "headtemplateliveheads chula.png#1 total 730 shapes NOTEHEAD_BLACK:153,NOTEHEAD_VOID:171,NOTEHEAD_BLACK_SMALL:254,NOTEHEAD_VOID_SMALL:152",
+        "headtemplateliveheads allegretto.png#1 total 709 shapes NOTEHEAD_BLACK:150,NOTEHEAD_VOID:175,NOTEHEAD_BLACK_SMALL:228,NOTEHEAD_VOID_SMALL:156",
+        "headtemplateliveheads batuque.png#1 total 696 shapes NOTEHEAD_BLACK:155,NOTEHEAD_VOID:170,NOTEHEAD_BLACK_SMALL:221,NOTEHEAD_VOID_SMALL:150",
+        "headtemplateliveheads carmen.png#1 total 980 shapes NOTEHEAD_BLACK:191,NOTEHEAD_VOID:232,NOTEHEAD_BLACK_SMALL:367,NOTEHEAD_VOID_SMALL:190",
+        "headtemplateliveheads cucaracha.png#1 total 847 shapes NOTEHEAD_BLACK:170,NOTEHEAD_VOID:230,NOTEHEAD_BLACK_SMALL:250,NOTEHEAD_VOID_SMALL:197",
+        "headtemplateliveheads hove.png#1 total 719 shapes NOTEHEAD_BLACK:143,NOTEHEAD_VOID:197,NOTEHEAD_BLACK_SMALL:231,NOTEHEAD_VOID_SMALL:148",
+        "headtemplateliveheads zizi.png#1 total 477 shapes NOTEHEAD_BLACK:104,NOTEHEAD_VOID:116,NOTEHEAD_BLACK_SMALL:152,NOTEHEAD_VOID_SMALL:105",
+        "headtemplateliveheads BachInvention5.jpg#1 total 2480 shapes NOTEHEAD_BLACK:507,NOTEHEAD_VOID:595,NOTEHEAD_BLACK_SMALL:965,NOTEHEAD_VOID_SMALL:413",
+    ] {
+        assert!(
+            SMALL_HEADS_ORACLE.lines().any(|line| line == expected),
+            "missing exact Java live-head census: {expected}"
+        );
+    }
+}
+
+fn assert_oracle(
+    oracle: &str,
+    expected_templates: usize,
+    expected_anchors: usize,
+    expected_pixels: usize,
+) {
     let catalogs = load_bravura_head_template_catalogs().unwrap();
     let mut current: Option<CurrentTemplate<'_>> = None;
     let mut pages = BTreeSet::new();
@@ -48,7 +83,7 @@ fn native_catalog_asset_matches_every_fresh_jvm_page_record() {
     let mut anchor_rows = 0;
     let mut pixel_rows = 0;
 
-    for (line_index, line) in ORACLE.lines().enumerate() {
+    for (line_index, line) in oracle.lines().enumerate() {
         let fields = line.split_whitespace().collect::<Vec<_>>();
         let Some(kind) = fields.first().copied() else {
             continue;
@@ -153,9 +188,9 @@ fn native_catalog_asset_matches_every_fresh_jvm_page_record() {
 
     assert_eq!(catalog_rows, 8);
     assert_eq!(pages.len(), 8);
-    assert_eq!(template_rows, 32);
-    assert_eq!(anchor_rows, 192);
-    assert_eq!(pixel_rows, 27_207);
+    assert_eq!(template_rows, expected_templates);
+    assert_eq!(anchor_rows, expected_anchors);
+    assert_eq!(pixel_rows, expected_pixels);
     assert_eq!(
         point_sizes.into_iter().collect::<Vec<_>>(),
         BRAVURA_HEAD_TEMPLATE_POINT_SIZES
@@ -175,6 +210,10 @@ fn parse_shape(value: &str) -> HeadTemplateShape {
         "NOTEHEAD_VOID" => HeadTemplateShape::NoteheadVoid,
         "WHOLE_NOTE" => HeadTemplateShape::WholeNote,
         "BREVE" => HeadTemplateShape::Breve,
+        "NOTEHEAD_BLACK_SMALL" => HeadTemplateShape::NoteheadBlackSmall,
+        "NOTEHEAD_VOID_SMALL" => HeadTemplateShape::NoteheadVoidSmall,
+        "WHOLE_NOTE_SMALL" => HeadTemplateShape::WholeNoteSmall,
+        "BREVE_SMALL" => HeadTemplateShape::BreveSmall,
         _ => panic!("unexpected template shape {value}"),
     }
 }

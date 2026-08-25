@@ -35,7 +35,11 @@ require `-json` and compose in Java stage order rather than accepting invented
 downstream inputs. It runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS ->
 HEADS -> STEMS -> REDUCTION -> CUE_BEAMS, retains every upstream product, and
 adds the atomic Java-order reduction trace, free-stem median, and modeled glyph
-cleanup census without fabricating Java SIG, Inter, or Glyph IDs.
+cleanup census without fabricating Java SIG, Inter, or Glyph IDs. An explicit
+qualified `ProcessingSwitches.smallHeads=true` request now also drives HEADS
+through Java's exact eight-shape normal-plus-small template catalog and retains
+the resulting stemmed small heads into STEMS; CUE_BEAMS still refuses before
+the unported active aggregate/morphology builder and emits no partial JSON.
 
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
@@ -112,7 +116,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Native ledger composition | all 581 final Java inters and 95 inferred ledger-line paths across the 8 beam sheets are exact; chula traces 9915 runs → 4052 sections → 104 candidates → 19 builder survivors → 18 final inters |
 | Final ledger glyphs | every non-removed ledger retains a 1:1 positioned fixed raster built from its referenced filtered sections; no median approximation |
 | Registered beam glyphs consumed by HEADS | all 191 narrow-beam bounds, weights, and vertical run digests exact after Java-equivalent `NO_STAFF` masking inside each final parallelogram |
-| Complete native HEADS | the owned production entry point is exact for 3,609 epilog inputs, 62 duplicate removals, 2,725 overlap exclusions, 26 beam-defeated heads, 3,521 final heads, 1,451 tally inputs, and 18 scale rows; schema-1 CLI publication is live |
+| Complete native HEADS | the default owned production entry point is exact for 3,609 epilog inputs, 62 duplicate removals, 2,725 overlap exclusions, 26 beam-defeated heads, 3,521 final heads, 1,451 tally inputs, and 18 scale rows; schema-1 CLI publication is live. With `smallHeads=true`, the same entry point selects Java's exact eight-shape catalog; Batuque matches the live Java final census at 155 normal black, 170 normal void, 221 small black, and 150 small void heads, and all 696 stem-capable heads reach 2,784 STEMS corners. |
 | First semantic STEMS boundary | the production head-corner compositor consumes live HEADS/STEM_SEEDS products and matches 3,521 heads plus all 14,084 constructor-order reference/outside/inside corner points across 30 systems at exact double bits; it stops before stump lookup and mutation |
 | STEMS no-stem purge and existing-seed boundary | the production compositor consumes live GRID/STEM_SEEDS/head-corner products, matches 1,906 seeds -> 1,749 kept / 157 purged, 29,394 purge visits, 36,736 neighbors, 7,114 candidates, 4,182 selections, and 9,902 explicit section fallbacks across all 14,084 corners; it stops before section-built stump registration |
 | STEMS section-built head-stump boundary | the production compositor consumes all 9,902 explicit fallbacks, matches 18,398 section/compound steps and 3,660 subsection attempts, and reproduces all 8,933 registrations: 758 accepted / 8,175 rejected and 5,591 new / 3,342 reused, with stable canonical aliases |
@@ -12066,3 +12070,38 @@ that explicitly enable small heads and lack a detected/manual small-beam scale.
 The native CLI honors the exact qualified `ProcessingSwitches.smallHeads`
 `-constant`; Java `Boolean.valueOf` semantics make only case-insensitive `true`
 active, and that path currently fails explicitly with no partial JSON.
+
+## Boundary 298: exact small-head HEADS prerequisite for active CUE_BEAMS
+
+The active processing-switch path now reaches CUE_BEAMS with a genuine
+small-head HEADS product rather than rerunning the normal four-shape catalog.
+The CLI passes the exact qualified `ProcessingSwitches.smallHeads` Boolean into
+HEADS, which selects Java's eight-shape scanner order and template-factory
+order while the default wrapper remains behaviorally unchanged.
+
+A fresh Temurin-25 Java oracle freezes the five real point sizes and all 64
+page catalogs across the eight-page corpus: 384 anchors and 41,492 keyed
+pixels. The exact fixture SHA-256 is
+`0f1c86ff8a8318520faeeb43e3375b5c76301eb163ba0cd4442b8ccb1180f832`.
+The generated 160,857-byte production asset contains 40 unique templates and
+has SHA-256
+`30b60d5d27f6d7bc8ee71413539b7ca159844e29e6f0abcd06e00e1a4304ddea`;
+probe, runner, and generator hashes are respectively
+`d6dbbb963859f4a4c85b62ce2f2a34bb011f4bb06b75dc66180aebdcf85d0249`,
+`1a7fee309e83987a56cb092363707e281c66b300dfb7c9a337b27012bac5a0fa`,
+and `dee8e814092870c76295c5661919e15588c44498561f87ddf036176534d9269c`.
+
+The same oracle records the final live normal/small HEADS shape census for
+every page. Batuque is the production regression: Rust exactly matches Java at
+155 normal black, 170 normal void, 221 small black, and 150 small void heads
+(696 total). The measured correction preserves Java's intentional asymmetry:
+black-to-void hole conversion applies only to normal `NOTEHEAD_BLACK`, never
+to `NOTEHEAD_BLACK_SMALL`. All 696 stemmed heads then enter the existing STEMS
+corner compositor and produce 2,784 corners, proving that the prerequisite is
+not discarded at the next stage boundary.
+
+This boundary does not claim active cue-beam recognition. The typed failure
+remains at `BeamsBuilder.buildCueBeams`, after exact HEADS and before any cue
+mutation or JSON. Resume with Java's `getCueAggregates()` over live small black
+heads and their HeadStem relations, then `CueAggregate.process()` morphology
+and linking.
