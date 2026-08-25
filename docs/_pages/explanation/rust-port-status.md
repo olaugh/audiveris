@@ -7151,3 +7151,11 @@ containment, and pairwise `BeamBeamRelation` graph objects with focused bounds,
 identity, rounding, and relation-order coverage. The eight-page active corpus
 remains an exact empty grouping/no-mutation result. Cue HeadLinker resolution,
 stem mutation, and BeamStem linking are next.
+
+## Boundary 304: cue HeadLinker lookup
+
+Each cue head/stem pair now resolves its exact STEMS corner and applies Java's
+aggregate crop, direction filter, skew-aware beam ordering, minimum head gap,
+and insertion-ordered group deduplication. Focused tests cover the rejected and
+accepted lookup branches; the active corpus remains an exact empty plan. Cue
+`BeamStemRelation` checking and group-wide extension are next.

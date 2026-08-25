@@ -12212,3 +12212,25 @@ workspace/all-target/all-feature Clippy, and diff checks are clean.
 Resume at the next Java statements inside `CueAggregate.process()`: resolve
 the aggregate heads' `HeadLinker`s and created cue-beam group, create or extend
 the appropriate stems, and add the ordered `BeamStemRelation`s.
+
+## Boundary 304: cue HeadLinker beam-group lookup
+
+`plan_native_cue_beam_stem_links` now ports the mutation-free
+`connectStemToBeams` and `HeadLinker.lookupBeamGroups` prefix. For every cue
+head/stem pair it selects the exact previously materialized STEMS head corner,
+clips created cue beams against Java's horizontally grown stem box reset to the
+aggregate y span, rejects beams on the wrong vertical side, and uses the sheet
+skew line for near/far border crossings.
+
+The remaining beams are stably sorted from the head. Java's rounded
+`cueMinBeamHeadDy` gate is reevaluated until the first group is accepted, after
+which group identities are deduplicated in linked-set encounter order. A
+focused branch test pins wrong-direction rejection, a too-near first beam, the
+gate retry, and duplicate membership. The eight-page active differential
+remains an exact empty plan after singleton purge; 767 library tests pass with
+two ignored, plus formatting, strict workspace Clippy, and diff checks.
+
+Resume with `linkStemToCueBeams`: sort each selected group's members from the
+reference point, run `BeamStemRelation.checkLink` on its first beam, then copy
+the successful grade across remaining group members with exact extension
+points and beam portions.

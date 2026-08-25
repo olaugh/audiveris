@@ -6663,3 +6663,14 @@ eight-page active corpus remains an exact empty grouping/no-mutation result;
 766 library tests pass with two ignored, and format, strict workspace Clippy,
 and diff checks pass. HeadLinker lookup, stem creation/extension, and
 `BeamStemRelation` insertion remain next.
+
+## Boundary 304: cue beam-group lookup from each head
+
+Rust now carries each aggregate head/stem pair through Java's read-only
+`connectStemToBeams` lookup: exact STEMS corner selection, aggregate-height
+fat-stem intersection, wrong-direction rejection, skew-aware border distance,
+stable from-head sorting, minimum head-gap retry, and linked-set group
+deduplication. A focused test covers all lookup branches and the eight-page
+active differential remains empty after singleton purge. The full library,
+format, strict workspace Clippy, and diff gates pass. First-beam relation
+checking and group-wide relation extension remain next.

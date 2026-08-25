@@ -11,7 +11,7 @@ use std::{collections::BTreeSet, error::Error, fmt};
 
 use audiveris_image::{
     beam_groups::{BeamGroupEvidence, BeamGroupParameters, GroupingBeam, group_beam_evidence},
-    beam_structure::BeamRaster,
+    beam_structure::{BeamRaster, Segment},
     glyph_factory::{GlyphComponent, build_glyph_components},
     morphology::{BEAM_CIRCLE_DIAMETER_RATIO, close_with_disk, digest},
     run_table::{Orientation, RunTable, RunTableError},
@@ -31,7 +31,9 @@ use crate::native_sig::{
     NativeSigBounds, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem, NativeSigVertexId,
     append_native_cue_beam_groups, append_native_cue_beam_vertex,
 };
+use crate::native_stems_beam_vlinkers::generic_intersection;
 use crate::recognize::GridLinesRecognition;
+use crate::stems_step::{NativeStemHeadSide, NativeStemPoint, NativeStemVerticalSide};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CueSpotOrientation {
@@ -460,6 +462,51 @@ pub struct NativeCueBeamGroupingSystem {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeCueBeamGroupingRecognition {
     pub systems: Vec<NativeCueBeamGroupingSystem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamLookupDecision {
+    pub beam_sig_ordinal: NativeSigVertexId,
+    pub group_sig_ordinal: NativeSigVertexId,
+    pub direction_distance: f64,
+    pub direction_accepted: bool,
+    pub sorted_ordinal: Option<usize>,
+    pub near_gate_evaluated: bool,
+    pub near_distance: Option<f64>,
+    pub near_accepted: bool,
+    pub group_inserted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamHeadLinkPlan {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub head_sig_ordinal: NativeSigVertexId,
+    pub stem_sig_ordinal: NativeSigVertexId,
+    pub horizontal_side: NativeStemHeadSide,
+    pub vertical_side: NativeStemVerticalSide,
+    pub reference_point: NativeStemPoint,
+    pub candidate_beams: Vec<NativeSigVertexId>,
+    pub decisions: Vec<NativeCueBeamLookupDecision>,
+    pub beam_groups: Vec<NativeSigVertexId>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamStemLookupSystem {
+    pub system_id: usize,
+    pub plans: Vec<NativeCueBeamHeadLinkPlan>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamStemLookupRecognition {
+    pub systems: Vec<NativeCueBeamStemLookupSystem>,
+}
+
+#[derive(Clone, Copy)]
+struct CueLookupBeam {
+    beam_sig_ordinal: NativeSigVertexId,
+    group_sig_ordinal: NativeSigVertexId,
+    beam: RawBeam,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -979,6 +1026,286 @@ fn cue_group_parameters(interline: i32) -> BeamGroupParameters {
         min_x_overlap: (f64::from(interline) * 0.7).round_ties_even(),
         max_y_distance: (f64::from(interline) * 1.0).round_ties_even(),
         max_slope_diff: 0.2,
+    }
+}
+
+/// Reproduce the read-only `connectStemToBeams` / `lookupBeamGroups` prefix
+/// for every head in an aggregate which actually created cue beams.
+pub fn plan_native_cue_beam_stem_links(
+    reduction: &NativeReductionRecognition,
+    aggregates: &NativeCueAggregateRecognition,
+    processing: &NativeCueAggregateProcessRecognition,
+    mutations: &NativeCueBeamMutationRecognition,
+    grouping: &NativeCueBeamGroupingRecognition,
+) -> Result<NativeCueBeamStemLookupRecognition, NativeCueBeamMutationError> {
+    let parameters = SheetParameters::new(reduction.stems.reduction_interline);
+    let slope = reduction.stems.sheet_skew_slope;
+    let mut systems = Vec::with_capacity(grouping.systems.len());
+    for grouping_system in &grouping.systems {
+        let system_id = grouping_system.system_id;
+        let aggregate_system = aggregates
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing cue aggregate system"))?;
+        let process_system = processing
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing cue process system"))?;
+        let mutation_system = mutations
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing cue mutation system"))?;
+        let corner_system = reduction
+            .stems
+            .components
+            .head_corners
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing STEMS head-corner system"))?;
+        let mut plans = Vec::new();
+        for grouped in &grouping_system.aggregates {
+            let aggregate_ordinal = grouped.aggregate_ordinal;
+            let aggregate = aggregate_system
+                .aggregates
+                .iter()
+                .find(|aggregate| aggregate.ordinal == aggregate_ordinal)
+                .ok_or_else(|| {
+                    cue_lookup_error(system_id, aggregate_ordinal, "missing cue aggregate")
+                })?;
+            let process = process_system
+                .plans
+                .iter()
+                .find(|plan| plan.aggregate_ordinal == aggregate_ordinal)
+                .ok_or_else(|| {
+                    cue_lookup_error(system_id, aggregate_ordinal, "missing cue process plan")
+                })?;
+            let local_beams = mutation_system
+                .beams
+                .iter()
+                .filter(|beam| beam.aggregate_ordinal == aggregate_ordinal)
+                .collect::<Vec<_>>();
+            if local_beams.is_empty() {
+                continue;
+            }
+            for &(head_sig_ordinal, stem_sig_ordinal) in &aggregate.members {
+                let head = grouping_system
+                    .sig_after
+                    .vertices
+                    .get(head_sig_ordinal.0)
+                    .ok_or_else(|| {
+                        cue_lookup_error(system_id, aggregate_ordinal, "missing head")
+                    })?;
+                let stem = grouping_system
+                    .sig_after
+                    .vertices
+                    .get(stem_sig_ordinal.0)
+                    .ok_or_else(|| {
+                        cue_lookup_error(system_id, aggregate_ordinal, "missing stem")
+                    })?;
+                let head_x = f64::from(head.bounds.x) + (f64::from(head.bounds.width) / 2.0);
+                let stem_x = f64::from(stem.bounds.x) + (f64::from(stem.bounds.width) / 2.0);
+                let horizontal_side = if head_x <= stem_x {
+                    NativeStemHeadSide::Left
+                } else {
+                    NativeStemHeadSide::Right
+                };
+                let vertical_side = if process.global_direction > 0 {
+                    NativeStemVerticalSide::Bottom
+                } else {
+                    NativeStemVerticalSide::Top
+                };
+                let reference_point = corner_system
+                    .heads_in_sig_order
+                    .iter()
+                    .find(|head| head.system_creation_ordinal == head_sig_ordinal.0)
+                    .and_then(|head| {
+                        head.corners_in_constructor_order.iter().find(|corner| {
+                            corner.horizontal == horizontal_side && corner.vertical == vertical_side
+                        })
+                    })
+                    .map(|corner| corner.reference)
+                    .ok_or_else(|| {
+                        cue_lookup_error(system_id, aggregate_ordinal, "missing head corner")
+                    })?;
+
+                let mut fat_stem = rectangle(stem.bounds);
+                fat_stem = java_rectangle_grow(fat_stem, parameters.cue_box_dx, 0);
+                fat_stem.y = aggregate.bounds.y;
+                fat_stem.height = aggregate.bounds.height;
+                let candidates = local_beams
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, beam)| {
+                        let bounds = grouping_system.sig_after.vertices[beam.sig_ordinal.0].bounds;
+                        fat_stem.intersects(rectangle(bounds))
+                    })
+                    .map(|(local_id, beam)| (local_id, *beam))
+                    .collect::<Vec<_>>();
+                let lookup_beams = candidates
+                    .iter()
+                    .map(|&(local_id, beam)| {
+                        let group_index = grouped
+                            .evidence
+                            .groups
+                            .iter()
+                            .position(|group| group.contains(&local_id))
+                            .ok_or_else(|| {
+                                cue_lookup_error(system_id, aggregate_ordinal, "ungrouped cue beam")
+                            })?;
+                        let group_sig_ordinal =
+                            *grouped.group_sig_ordinals.get(group_index).ok_or_else(|| {
+                                cue_lookup_error(
+                                    system_id,
+                                    aggregate_ordinal,
+                                    "missing cue BeamGroup",
+                                )
+                            })?;
+                        Ok(CueLookupBeam {
+                            beam_sig_ordinal: beam.sig_ordinal,
+                            group_sig_ordinal,
+                            beam: beam.beam,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, NativeCueBeamMutationError>>()?;
+                let (decisions, beam_groups) = lookup_cue_beam_groups(
+                    &lookup_beams,
+                    reference_point,
+                    vertical_side,
+                    slope,
+                    parameters.cue_min_beam_head_dy,
+                );
+                plans.push(NativeCueBeamHeadLinkPlan {
+                    system_id,
+                    aggregate_ordinal,
+                    head_sig_ordinal,
+                    stem_sig_ordinal,
+                    horizontal_side,
+                    vertical_side,
+                    reference_point,
+                    candidate_beams: candidates
+                        .iter()
+                        .map(|(_, beam)| beam.sig_ordinal)
+                        .collect(),
+                    decisions,
+                    beam_groups,
+                });
+            }
+        }
+        systems.push(NativeCueBeamStemLookupSystem { system_id, plans });
+    }
+    Ok(NativeCueBeamStemLookupRecognition { systems })
+}
+
+fn lookup_cue_beam_groups(
+    candidates: &[CueLookupBeam],
+    reference_point: NativeStemPoint,
+    vertical_side: NativeStemVerticalSide,
+    slope: f64,
+    min_beam_head_dy: i32,
+) -> (Vec<NativeCueBeamLookupDecision>, Vec<NativeSigVertexId>) {
+    let y_direction = if vertical_side == NativeStemVerticalSide::Bottom {
+        1
+    } else {
+        -1
+    };
+    let mut decisions = Vec::with_capacity(candidates.len());
+    let mut directed = Vec::new();
+    for &beam in candidates {
+        let near = cue_beam_border(beam.beam, opposite_vertical(vertical_side));
+        let direction_distance = f64::from(y_direction)
+            * (cue_target_point(reference_point, near, slope).y - reference_point.y);
+        let direction_accepted = direction_distance > 0.0;
+        if direction_accepted {
+            directed.push(beam);
+        }
+        decisions.push(NativeCueBeamLookupDecision {
+            beam_sig_ordinal: beam.beam_sig_ordinal,
+            group_sig_ordinal: beam.group_sig_ordinal,
+            direction_distance,
+            direction_accepted,
+            sorted_ordinal: None,
+            near_gate_evaluated: false,
+            near_distance: None,
+            near_accepted: false,
+            group_inserted: false,
+        });
+    }
+    directed.sort_by(|left, right| {
+        let distance = |beam: CueLookupBeam| {
+            let far = cue_beam_border(beam.beam, vertical_side);
+            f64::from(y_direction)
+                * (cue_target_point(reference_point, far, slope).y - reference_point.y)
+        };
+        distance(*left).total_cmp(&distance(*right))
+    });
+    let mut beam_groups = Vec::new();
+    for (sorted_ordinal, beam) in directed.into_iter().enumerate() {
+        let decision = decisions
+            .iter_mut()
+            .find(|decision| decision.beam_sig_ordinal == beam.beam_sig_ordinal)
+            .expect("one cue lookup decision per directed beam");
+        decision.sorted_ordinal = Some(sorted_ordinal);
+        decision.near_gate_evaluated = beam_groups.is_empty();
+        decision.near_accepted = if decision.near_gate_evaluated {
+            decision.near_distance = Some(decision.direction_distance);
+            decision.direction_distance >= f64::from(min_beam_head_dy)
+        } else {
+            true
+        };
+        if decision.near_accepted && !beam_groups.contains(&beam.group_sig_ordinal) {
+            beam_groups.push(beam.group_sig_ordinal);
+            decision.group_inserted = true;
+        }
+    }
+    (decisions, beam_groups)
+}
+
+fn cue_lookup_error(
+    system_id: usize,
+    aggregate_ordinal: usize,
+    message: &str,
+) -> NativeCueBeamMutationError {
+    NativeCueBeamMutationError {
+        system_id,
+        aggregate_ordinal,
+        message: message.to_owned(),
+    }
+}
+
+fn cue_beam_border(beam: RawBeam, side: NativeStemVerticalSide) -> Segment {
+    let delta = if side == NativeStemVerticalSide::Top {
+        -beam.item.height / 2.0
+    } else {
+        beam.item.height / 2.0
+    };
+    Segment {
+        x1: beam.item.median.x1,
+        y1: beam.item.median.y1 + delta,
+        x2: beam.item.median.x2,
+        y2: beam.item.median.y2 + delta,
+    }
+}
+
+fn cue_target_point(reference: NativeStemPoint, limit: Segment, slope: f64) -> NativeStemPoint {
+    generic_intersection(
+        Segment {
+            x1: reference.x,
+            y1: reference.y,
+            x2: reference.x - (100.0 * slope),
+            y2: reference.y + 100.0,
+        },
+        limit,
+    )
+}
+
+const fn opposite_vertical(side: NativeStemVerticalSide) -> NativeStemVerticalSide {
+    match side {
+        NativeStemVerticalSide::Top => NativeStemVerticalSide::Bottom,
+        NativeStemVerticalSide::Bottom => NativeStemVerticalSide::Top,
     }
 }
 
@@ -1724,6 +2051,82 @@ mod tests {
         assert_eq!(parameters.min_x_overlap, 10.0);
         assert_eq!(parameters.max_y_distance, 15.0);
         assert_eq!(parameters.max_slope_diff, 0.2);
+    }
+
+    #[test]
+    fn cue_group_lookup_rejects_direction_then_retries_near_gate_until_first_group() {
+        use audiveris_image::beam_structure::{BeamImpacts, BeamItem, BeamRasterEvidence};
+
+        let beam = |y: f64| RawBeam {
+            kind: BeamKind::SmallBeam,
+            item: BeamItem {
+                median: Segment {
+                    x1: 20.0,
+                    y1: y,
+                    x2: 80.0,
+                    y2: y,
+                },
+                height: 4.0,
+            },
+            impacts: BeamImpacts {
+                width: 1.0,
+                min_height: 1.0,
+                max_height: 1.0,
+                core: 1.0,
+                belt: 1.0,
+                distance: 1.0,
+                raster: BeamRasterEvidence {
+                    core_foreground: 1,
+                    core_count: 1,
+                    belt_foreground: 0,
+                    belt_count: 1,
+                    core_ratio: 1.0,
+                    belt_ratio: 0.0,
+                    rounded_width: 61,
+                },
+            },
+            grade: 1.0,
+        };
+        let candidates = [
+            CueLookupBeam {
+                beam_sig_ordinal: NativeSigVertexId(1),
+                group_sig_ordinal: NativeSigVertexId(11),
+                beam: beam(40.0),
+            },
+            CueLookupBeam {
+                beam_sig_ordinal: NativeSigVertexId(2),
+                group_sig_ordinal: NativeSigVertexId(12),
+                beam: beam(56.0),
+            },
+            CueLookupBeam {
+                beam_sig_ordinal: NativeSigVertexId(3),
+                group_sig_ordinal: NativeSigVertexId(13),
+                beam: beam(70.0),
+            },
+            CueLookupBeam {
+                beam_sig_ordinal: NativeSigVertexId(4),
+                group_sig_ordinal: NativeSigVertexId(13),
+                beam: beam(80.0),
+            },
+        ];
+
+        let (decisions, groups) = lookup_cue_beam_groups(
+            &candidates,
+            NativeStemPoint { x: 50.0, y: 50.0 },
+            NativeStemVerticalSide::Bottom,
+            0.0,
+            10,
+        );
+
+        assert!(!decisions[0].direction_accepted);
+        assert_eq!(decisions[0].sorted_ordinal, None);
+        assert!(decisions[1].near_gate_evaluated);
+        assert!(!decisions[1].near_accepted);
+        assert!(decisions[2].near_gate_evaluated);
+        assert!(decisions[2].group_inserted);
+        assert!(!decisions[3].near_gate_evaluated);
+        assert!(!decisions[3].group_inserted);
+        assert_eq!(groups, [NativeSigVertexId(13)]);
     }
 
     #[derive(Default)]
