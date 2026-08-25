@@ -20,7 +20,10 @@ use audiveris_omr::{
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
-    native_reduction::{native_stems_lossless_overlap_resolver, reduce_native_stems_foundations},
+    native_reduction::{
+        native_stems_lossless_overlap_resolver, reduce_native_stems_foundations,
+        refine_native_stems_head_ends,
+    },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
         assemble_native_sig,
@@ -8776,6 +8779,19 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         } else {
             assert!(!epoch.requires_outer_repeat);
         }
+        let refinement = refine_native_stems_head_ends(&mut recognized, system_id)
+            .expect("Batuque exact REDUCTION stem head-end refinement");
+        assert_eq!(refinement.system_id, system_id);
+        assert_eq!(
+            refinement.refinements.len() + refinement.no_head_stems.len(),
+            refinement.stem_order.len()
+        );
+        assert!(
+            refinement
+                .refinements
+                .iter()
+                .all(|item| item.median_after.start.y < item.median_after.stop.y)
+        );
     }
     assert!(
         foundation_outer_repeats > 0,

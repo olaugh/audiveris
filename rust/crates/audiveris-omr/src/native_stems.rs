@@ -319,6 +319,10 @@ pub struct NativeStemsBeamFinalizationTransaction {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsRecognition {
     pub components: NativeStemsComponentRecognition,
+    /// Sheet main interline retained for REDUCTION stem endpoint refinement.
+    pub reduction_interline: i32,
+    /// Java `Skew.slope`, used by the short-stem reliable-line fallback.
+    pub sheet_skew_slope: f64,
     pub systems: Vec<NativeStemsSystemFinalizeDrive>,
     pub beam_finalizations: Vec<NativeStemsBeamFinalizationTransaction>,
     pub contextualizations: Vec<NativeSigContextualization>,
@@ -1864,6 +1868,8 @@ pub fn recognize_native_stems(
         .collect();
     Ok(NativeStemsRecognition {
         components: prepared.components,
+        reduction_interline: grid.scale.scale.interline.main,
+        sheet_skew_slope: grid.global_slope,
         systems: finalized.systems,
         beam_finalizations,
         contextualizations,

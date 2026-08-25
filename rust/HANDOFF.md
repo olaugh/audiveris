@@ -11903,3 +11903,31 @@ diagnostics; the full library passes 743 tests with two ignored. Strict
 all-target/all-feature Clippy, formatting, and diff checks pass. Java's next
 system action is `ReductionStep` stem head-end refinement; tail refinement is
 disabled by default and follows separately.
+
+## Boundary 292: refine stem head ends after foundations
+
+Production REDUCTION now performs Java's enabled per-system
+`StemInter.refineHeadEnd()` loop after the complete foundations transaction.
+Stems follow SIG insertion order; their live heads are stably ordered by the
+integer bounds-center ordinate; the existing Java-exact direction rule picks
+the first or last head and its exact retained corner anchor. Direction also
+selects BOTTOM versus TOP and which median endpoint is replaced.
+
+The reliable-line split is exact. A stem at least one main interline tall uses
+its median. A shorter stem uses the sheet-skewed vertical through its integer
+bounds center. The shared Java-determinant intersection kernel projects the
+head reference ordinate and the native vertical-ribbon area recomputes integer
+bounds. The terminal STEMS carrier therefore now retains the main interline
+and sheet skew explicitly, while production synchronizes changed geometry to
+both the SIG vertex and canonical known-stem registry. The dependency-light
+kernel is clone-and-swap atomic; its trace also makes no-head stems and every
+geometry choice reviewable.
+
+Focused REDUCTION coverage is 40/40, with long/short reliable-line cases and
+rollback on missing anchor. The production Batuque regression runs foundations
+and refinement for every system. The frozen SIG baseline is ten active passes
+plus five ignored diagnostics; the complete library is 745 passed plus two
+ignored. Strict workspace Clippy with all targets/features, formatting, and
+diff checks pass. Tail refinement stays disabled, matching Java's default.
+Resume at `BeamGroupInter.checkBeamGroups(system)` in the REDUCTION epilog;
+then port free-stem length measurement and glyph cleanup before publication.

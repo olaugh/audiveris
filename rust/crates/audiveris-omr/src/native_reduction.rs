@@ -6,8 +6,8 @@
 //! system ordering.  This module starts the production bridge from terminal
 //! native STEMS SIGs with Java's deterministic `SIGraph.reduceExclusions()`
 //! algorithm, lossless overlap discovery, chord prolog, and the complete
-//! foundations consistency fixed point, remaining-exclusion reduction, and
-//! the first foundations late-consistency invocation.
+//! foundations outer fixed point.  It also owns the enabled
+//! `StemInter.refineHeadEnd()` pass that immediately follows foundations.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -15,15 +15,22 @@ use std::{
     fmt,
 };
 
-use audiveris_image::run_table::{Orientation, RunTable};
+use audiveris_image::{
+    beam_structure::Segment,
+    run_table::{Orientation, RunTable},
+};
 
+use crate::head_scanner_slices::VerticalRibbonArea;
 use crate::native_sig::{
     NativeSigBounds, NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigError,
     NativeSigInterKind, NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSystem,
     NativeSigSystemBindings, NativeSigVertexId,
 };
 use crate::native_stems::NativeStemsRecognition;
-use crate::stems_step::{NativeBeamPortion, NativeStemHeadSide, NativeStemLine, NativeStemPoint};
+use crate::native_stems_beam_vlinkers::generic_intersection;
+use crate::stems_step::{
+    NativeBeamPortion, NativeStemHeadSide, NativeStemLine, NativeStemPoint, NativeStemVerticalSide,
+};
 
 /// One selected exclusion and the branch Java removed from it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -299,6 +306,50 @@ pub struct NativeReductionFoundationsTransaction {
     pub all_removed_vertices: Vec<NativeSigVertexId>,
 }
 
+/// Why Java selected the line used to project one refined stem endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeReductionReliableStemLineSource {
+    Median,
+    SkewedVertical,
+}
+
+/// One Java `StemInter.refineHeadEnd()` mutation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeReductionStemHeadEndRefinement {
+    pub stem: NativeSigVertexId,
+    pub direction: i8,
+    pub leading_head: NativeSigVertexId,
+    pub head_stem_relation: NativeSigEdgeId,
+    pub head_side: NativeStemHeadSide,
+    pub vertical_side: NativeStemVerticalSide,
+    pub reference_point: NativeStemPoint,
+    pub reliable_line_source: NativeReductionReliableStemLineSource,
+    pub reliable_line: NativeStemLine,
+    pub median_before: NativeStemLine,
+    pub median_after: NativeStemLine,
+    pub bounds_before: NativeSigBounds,
+    pub bounds_after: NativeSigBounds,
+}
+
+/// Complete enabled stem-head-end refinement for one system.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionStemHeadEndTransaction {
+    pub system_id: usize,
+    pub stem_order: Vec<NativeSigVertexId>,
+    pub no_head_stems: Vec<NativeSigVertexId>,
+    pub refinements: Vec<NativeReductionStemHeadEndRefinement>,
+}
+
+/// Exact head anchor lookup keyed by SIG head, horizontal side, vertical side.
+pub type NativeReductionHeadAnchorMap = BTreeMap<
+    (
+        NativeSigVertexId,
+        NativeStemHeadSide,
+        NativeStemVerticalSide,
+    ),
+    NativeStemPoint,
+>;
+
 /// Compatibility name retained while callers migrate from Boundary 288.
 pub type NativeReductionFoundationPrefixTransaction =
     NativeReductionFoundationFixedPointTransaction;
@@ -324,6 +375,23 @@ pub enum NativeReductionFoundationPrefixError {
     UnsupportedHeadShape {
         system_id: usize,
         head: NativeSigVertexId,
+    },
+    InvalidStemRefinementContext {
+        system_id: usize,
+    },
+    MissingStemThickness {
+        system_id: usize,
+        stem: NativeSigVertexId,
+    },
+    MissingStemHeadAnchor {
+        system_id: usize,
+        head: NativeSigVertexId,
+        horizontal: NativeStemHeadSide,
+        vertical: NativeStemVerticalSide,
+    },
+    InvalidRefinedStemGeometry {
+        system_id: usize,
+        stem: NativeSigVertexId,
     },
 }
 
@@ -365,6 +433,30 @@ impl fmt::Display for NativeReductionFoundationPrefixError {
                 "REDUCTION system {system_id} chord analysis has unsupported head shape at {}",
                 head.0
             ),
+            Self::InvalidStemRefinementContext { system_id } => write!(
+                formatter,
+                "REDUCTION system {system_id} has invalid stem-refinement scale or skew"
+            ),
+            Self::MissingStemThickness { system_id, stem } => write!(
+                formatter,
+                "REDUCTION system {system_id} has no thickness for refined stem {}",
+                stem.0
+            ),
+            Self::MissingStemHeadAnchor {
+                system_id,
+                head,
+                horizontal,
+                vertical,
+            } => write!(
+                formatter,
+                "REDUCTION system {system_id} has no {horizontal:?}/{vertical:?} anchor for head {}",
+                head.0
+            ),
+            Self::InvalidRefinedStemGeometry { system_id, stem } => write!(
+                formatter,
+                "REDUCTION system {system_id} produced invalid refined geometry for stem {}",
+                stem.0
+            ),
         }
     }
 }
@@ -379,7 +471,11 @@ impl Error for NativeReductionFoundationPrefixError {
             | Self::MissingStemMedian { .. }
             | Self::MissingHeadIdentity { .. }
             | Self::MissingLedgerStaff { .. }
-            | Self::UnsupportedHeadShape { .. } => None,
+            | Self::UnsupportedHeadShape { .. }
+            | Self::InvalidStemRefinementContext { .. }
+            | Self::MissingStemThickness { .. }
+            | Self::MissingStemHeadAnchor { .. }
+            | Self::InvalidRefinedStemGeometry { .. } => None,
         }
     }
 }
@@ -1109,6 +1205,307 @@ pub fn reduce_native_foundations(
         continuation_epochs,
         all_removed_vertices,
     })
+}
+
+/// Execute Java's enabled `StemInter.refineHeadEnd()` loop against terminal
+/// native STEMS ownership after foundations reduction.
+pub fn refine_native_stems_head_ends(
+    stems: &mut NativeStemsRecognition,
+    system_id: usize,
+) -> Result<NativeReductionStemHeadEndTransaction, NativeReductionFoundationPrefixError> {
+    let system_index = stems
+        .systems
+        .iter()
+        .position(|system| system.system_id == system_id)
+        .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
+            system_id,
+        ))?;
+    let head_system = stems
+        .components
+        .head_corners
+        .systems
+        .iter()
+        .find(|system| system.system_id == system_id)
+        .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
+            system_id,
+        ))?;
+    let beam_state = &stems.systems[system_index]
+        .transaction
+        .state_after
+        .beam_state;
+    let bindings = &beam_state.bindings;
+    let known_stems = &beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems;
+    let mut medians = BTreeMap::new();
+    let mut thicknesses = BTreeMap::new();
+    for (&identity, &vertex) in &bindings.stem_vertices {
+        let stem = known_stems
+            .iter()
+            .find(|stem| stem.stem_identity == identity && stem.sig_attached)
+            .ok_or(NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id,
+                stem: vertex,
+            })?;
+        medians.insert(vertex, stem.geometry.median);
+        thicknesses.insert(vertex, stem.geometry.mean_thickness);
+    }
+    let mut anchors = NativeReductionHeadAnchorMap::new();
+    for head in &head_system.heads_in_sig_order {
+        let Some(&vertex) = bindings.head_vertices.get(&head.reference) else {
+            continue;
+        };
+        for corner in &head.corners_in_constructor_order {
+            anchors.insert(
+                (vertex, corner.horizontal, corner.vertical),
+                corner.reference,
+            );
+        }
+    }
+
+    let beam_state = &mut stems.systems[system_index]
+        .transaction
+        .state_after
+        .beam_state;
+    let transaction = refine_native_reduction_stem_head_ends(
+        &mut beam_state.sig,
+        &mut medians,
+        &thicknesses,
+        &anchors,
+        stems.reduction_interline,
+        stems.sheet_skew_slope,
+    )?;
+    for refinement in &transaction.refinements {
+        let (&stem_identity, _) = beam_state
+            .bindings
+            .stem_vertices
+            .iter()
+            .find(|(_, vertex)| **vertex == refinement.stem)
+            .ok_or(NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id,
+                stem: refinement.stem,
+            })?;
+        let stem = beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter_mut()
+            .find(|stem| stem.stem_identity == stem_identity && stem.sig_attached)
+            .ok_or(NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id,
+                stem: refinement.stem,
+            })?;
+        stem.geometry.median = refinement.median_after;
+        stem.geometry.ribbon_bounds = crate::head_scanner_slices::JavaRectangle::new(
+            refinement.bounds_after.x,
+            refinement.bounds_after.y,
+            refinement.bounds_after.width,
+            refinement.bounds_after.height,
+        );
+    }
+    Ok(transaction)
+}
+
+/// Dependency-light port of the enabled stem head-end refinement loop.
+pub fn refine_native_reduction_stem_head_ends(
+    sig: &mut NativeSigSystem,
+    stem_medians: &mut BTreeMap<NativeSigVertexId, NativeStemLine>,
+    stem_thicknesses: &BTreeMap<NativeSigVertexId, f64>,
+    head_anchors: &NativeReductionHeadAnchorMap,
+    interline: i32,
+    sheet_skew_slope: f64,
+) -> Result<NativeReductionStemHeadEndTransaction, NativeReductionFoundationPrefixError> {
+    let mut shadow_sig = sig.clone();
+    let mut shadow_medians = stem_medians.clone();
+    let transaction = apply_native_reduction_stem_head_ends(
+        &mut shadow_sig,
+        &mut shadow_medians,
+        stem_thicknesses,
+        head_anchors,
+        interline,
+        sheet_skew_slope,
+    )?;
+    *sig = shadow_sig;
+    *stem_medians = shadow_medians;
+    Ok(transaction)
+}
+
+fn apply_native_reduction_stem_head_ends(
+    sig: &mut NativeSigSystem,
+    stem_medians: &mut BTreeMap<NativeSigVertexId, NativeStemLine>,
+    stem_thicknesses: &BTreeMap<NativeSigVertexId, f64>,
+    head_anchors: &NativeReductionHeadAnchorMap,
+    interline: i32,
+    sheet_skew_slope: f64,
+) -> Result<NativeReductionStemHeadEndTransaction, NativeReductionFoundationPrefixError> {
+    if interline <= 0 || !sheet_skew_slope.is_finite() {
+        return Err(
+            NativeReductionFoundationPrefixError::InvalidStemRefinementContext {
+                system_id: sig.system_id,
+            },
+        );
+    }
+    sig.validate_integrity()?;
+    let stem_order = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Stem)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut no_head_stems = Vec::new();
+    let mut refinements = Vec::new();
+    for &stem in &stem_order {
+        let mut relations = active_head_stem_relations_to(sig, stem);
+        if relations.is_empty() {
+            no_head_stems.push(stem);
+            continue;
+        }
+        relations.sort_by_key(|relation| {
+            let head = sig.edges[relation.0].source;
+            let bounds = sig.vertices[head].bounds;
+            bounds.y.saturating_add(bounds.height / 2)
+        });
+        let direction = native_stem_direction(sig, stem, stem_medians)?;
+        let relation = if direction > 0 {
+            relations[0]
+        } else {
+            *relations.last().expect("nonempty head relations")
+        };
+        let edge = sig.edges[relation.0];
+        let leading_head = NativeSigVertexId(edge.source);
+        let payload = edge.head_stem.expect("validated HeadStem payload");
+        let vertical_side = if direction > 0 {
+            NativeStemVerticalSide::Bottom
+        } else {
+            NativeStemVerticalSide::Top
+        };
+        let reference_point = *head_anchors
+            .get(&(leading_head, payload.head_side, vertical_side))
+            .ok_or(
+                NativeReductionFoundationPrefixError::MissingStemHeadAnchor {
+                    system_id: sig.system_id,
+                    head: leading_head,
+                    horizontal: payload.head_side,
+                    vertical: vertical_side,
+                },
+            )?;
+        let median_before = *stem_medians.get(&stem).ok_or(
+            NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id: sig.system_id,
+                stem,
+            },
+        )?;
+        let bounds_before = sig.vertices[stem.0].bounds;
+        let (reliable_line_source, reliable_line) = if bounds_before.height >= interline {
+            (NativeReductionReliableStemLineSource::Median, median_before)
+        } else {
+            let center = NativeStemPoint {
+                x: f64::from(bounds_before.x.saturating_add(bounds_before.width / 2)),
+                y: f64::from(bounds_before.y.saturating_add(bounds_before.height / 2)),
+            };
+            (
+                NativeReductionReliableStemLineSource::SkewedVertical,
+                NativeStemLine {
+                    start: center,
+                    stop: NativeStemPoint {
+                        x: center.x - (1000.0 * sheet_skew_slope),
+                        y: center.y + 1000.0,
+                    },
+                },
+            )
+        };
+        let cross = generic_intersection(
+            stem_segment(reliable_line),
+            Segment {
+                x1: 0.0,
+                y1: reference_point.y,
+                x2: 1000.0,
+                y2: reference_point.y,
+            },
+        );
+        let median_after = if direction > 0 {
+            NativeStemLine {
+                start: cross,
+                stop: median_before.stop,
+            }
+        } else {
+            NativeStemLine {
+                start: median_before.start,
+                stop: cross,
+            }
+        };
+        let thickness = *stem_thicknesses.get(&stem).ok_or(
+            NativeReductionFoundationPrefixError::MissingStemThickness {
+                system_id: sig.system_id,
+                stem,
+            },
+        )?;
+        let bounds =
+            VerticalRibbonArea::new(stem_segment(median_after), thickness).integer_bounds();
+        let bounds_after = NativeSigBounds {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+        };
+        if ![
+            median_after.start.x,
+            median_after.start.y,
+            median_after.stop.x,
+            median_after.stop.y,
+            thickness,
+        ]
+        .into_iter()
+        .all(f64::is_finite)
+            || median_after.start.y >= median_after.stop.y
+            || thickness <= 0.0
+            || bounds_after.width <= 0
+            || bounds_after.height <= 0
+        {
+            return Err(
+                NativeReductionFoundationPrefixError::InvalidRefinedStemGeometry {
+                    system_id: sig.system_id,
+                    stem,
+                },
+            );
+        }
+        stem_medians.insert(stem, median_after);
+        sig.vertices[stem.0].bounds = bounds_after;
+        refinements.push(NativeReductionStemHeadEndRefinement {
+            stem,
+            direction,
+            leading_head,
+            head_stem_relation: relation,
+            head_side: payload.head_side,
+            vertical_side,
+            reference_point,
+            reliable_line_source,
+            reliable_line,
+            median_before,
+            median_after,
+            bounds_before,
+            bounds_after,
+        });
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionStemHeadEndTransaction {
+        system_id: sig.system_id,
+        stem_order,
+        no_head_stems,
+        refinements,
+    })
+}
+
+const fn stem_segment(line: NativeStemLine) -> Segment {
+    Segment {
+        x1: line.start.x,
+        y1: line.start.y,
+        x2: line.stop.x,
+        y2: line.stop.y,
+    }
 }
 
 fn reduce_native_foundation_continuation_epoch(
@@ -4472,6 +4869,154 @@ mod tests {
         );
         assert_eq!(transaction.continuation_epochs.len(), 1);
         assert!(!transaction.continuation_epochs[0].requires_outer_repeat);
+    }
+
+    #[test]
+    fn stem_head_end_refinement_uses_leading_head_anchor_and_median() {
+        let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
+        stem.bounds = NativeSigBounds {
+            x: 10,
+            y: 10,
+            width: 2,
+            height: 80,
+        };
+        let head = shaped_head(1, "NOTEHEAD_BLACK", 8);
+        let mut relation = head_stem_edge(0, 1, 0);
+        relation
+            .head_stem
+            .as_mut()
+            .expect("payload")
+            .extension_point = NativeStemPoint { x: 11.0, y: 10.0 };
+        let mut sig = NativeSigSystem {
+            system_id: 47,
+            vertices: vec![stem, head],
+            edges: vec![relation],
+        };
+        let mut medians = BTreeMap::from([(
+            NativeSigVertexId(0),
+            NativeStemLine {
+                start: NativeStemPoint { x: 11.0, y: 10.0 },
+                stop: NativeStemPoint { x: 11.0, y: 90.0 },
+            },
+        )]);
+        let thicknesses = BTreeMap::from([(NativeSigVertexId(0), 2.0)]);
+        let anchors = BTreeMap::from([(
+            (
+                NativeSigVertexId(1),
+                NativeStemHeadSide::Left,
+                NativeStemVerticalSide::Bottom,
+            ),
+            NativeStemPoint { x: 9.0, y: 14.0 },
+        )]);
+
+        let transaction = refine_native_reduction_stem_head_ends(
+            &mut sig,
+            &mut medians,
+            &thicknesses,
+            &anchors,
+            10,
+            0.02,
+        )
+        .unwrap();
+
+        assert!(transaction.no_head_stems.is_empty());
+        assert_eq!(transaction.refinements.len(), 1);
+        let refinement = transaction.refinements[0];
+        assert_eq!(refinement.direction, 1);
+        assert_eq!(refinement.leading_head, NativeSigVertexId(1));
+        assert_eq!(refinement.vertical_side, NativeStemVerticalSide::Bottom);
+        assert_eq!(
+            refinement.reliable_line_source,
+            NativeReductionReliableStemLineSource::Median
+        );
+        assert_eq!(
+            refinement.median_after,
+            NativeStemLine {
+                start: NativeStemPoint { x: 11.0, y: 14.0 },
+                stop: NativeStemPoint { x: 11.0, y: 90.0 },
+            }
+        );
+        assert_eq!(sig.vertices[0].bounds, refinement.bounds_after);
+        assert_eq!(medians[&NativeSigVertexId(0)], refinement.median_after);
+    }
+
+    #[test]
+    fn short_stem_head_end_refinement_uses_skewed_vertical_and_is_atomic() {
+        let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
+        stem.bounds = NativeSigBounds {
+            x: 49,
+            y: 10,
+            width: 2,
+            height: 8,
+        };
+        let mut head = shaped_head(1, "NOTEHEAD_BLACK", 14);
+        head.bounds.height = 4;
+        let orphan = vertex(2, NativeSigInterKind::Stem, 0.9);
+        let mut relation = head_stem_edge(0, 1, 0);
+        let payload = relation.head_stem.as_mut().expect("payload");
+        payload.head_side = NativeStemHeadSide::Right;
+        payload.extension_point = NativeStemPoint { x: 50.0, y: 17.0 };
+        let mut sig = NativeSigSystem {
+            system_id: 48,
+            vertices: vec![stem, head, orphan],
+            edges: vec![relation],
+        };
+        let mut medians = BTreeMap::from([(
+            NativeSigVertexId(0),
+            NativeStemLine {
+                start: NativeStemPoint { x: 50.0, y: 10.0 },
+                stop: NativeStemPoint { x: 50.0, y: 18.0 },
+            },
+        )]);
+        let thicknesses = BTreeMap::from([(NativeSigVertexId(0), 2.0)]);
+        let anchors = BTreeMap::from([(
+            (
+                NativeSigVertexId(1),
+                NativeStemHeadSide::Right,
+                NativeStemVerticalSide::Top,
+            ),
+            NativeStemPoint { x: 55.0, y: 17.0 },
+        )]);
+
+        let transaction = refine_native_reduction_stem_head_ends(
+            &mut sig,
+            &mut medians,
+            &thicknesses,
+            &anchors,
+            10,
+            0.01,
+        )
+        .unwrap();
+
+        assert_eq!(transaction.no_head_stems, vec![NativeSigVertexId(2)]);
+        let refinement = transaction.refinements[0];
+        assert_eq!(refinement.direction, -1);
+        assert_eq!(
+            refinement.reliable_line_source,
+            NativeReductionReliableStemLineSource::SkewedVertical
+        );
+        assert_eq!(refinement.reliable_line.start.x, 50.0);
+        assert_eq!(refinement.reliable_line.start.y, 14.0);
+        assert_eq!(refinement.median_after.stop.y, 17.0);
+        assert!((refinement.median_after.stop.x - 49.97).abs() < 1.0e-12);
+
+        let sig_before_error = sig.clone();
+        let medians_before_error = medians.clone();
+        let error = refine_native_reduction_stem_head_ends(
+            &mut sig,
+            &mut medians,
+            &thicknesses,
+            &BTreeMap::new(),
+            10,
+            0.01,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            NativeReductionFoundationPrefixError::MissingStemHeadAnchor { .. }
+        ));
+        assert_eq!(sig, sig_before_error);
+        assert_eq!(medians, medians_before_error);
     }
 
     #[test]
