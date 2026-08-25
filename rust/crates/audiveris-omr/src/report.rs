@@ -29,7 +29,10 @@
 //! grades and impacts is that they are exact against Java. Rounding them for
 //! looks would throw away the only property that makes them checkable.
 
-use std::{collections::BTreeMap, fmt::Write as _};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
+};
 
 use audiveris_image::bars_logic::{PeakWidthClass, VerticalInterKind};
 use audiveris_image::beam_structure::BeamImpacts;
@@ -60,7 +63,8 @@ use crate::native_heads_staff_epilog::{
 use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
 use crate::native_reduction::NativeReductionRecognition;
 use crate::native_sig::{
-    NativeSigInterKind, NativeSigRelationKind, NativeSigVertex, NativeSigVertexId,
+    NativeSigBounds, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem, NativeSigVertex,
+    NativeSigVertexId,
 };
 use crate::native_stem_seeds::{
     NativeStemSeedDecision, NativeStemSeedGate, NativeStemSeedGlyph, NativeStemSeedRecognition,
@@ -2221,6 +2225,357 @@ fn cue_beams_product(json: &mut Json, recognition: &NativeCueBeamsRecognition) {
         "mutation_count",
         (beam_count + group_count + relation_count) as i64,
     );
+    if let Some(active) = recognition.active.as_deref() {
+        cue_graph(json, recognition, active);
+    }
+    json.close('}');
+}
+
+fn cue_graph(
+    json: &mut Json,
+    recognition: &NativeCueBeamsRecognition,
+    active: &crate::cue_beams_step::NativeActiveCueBeamsRecognition,
+) {
+    json.key("systems");
+    json.open('[');
+    for relation_system in &active.stem_relations.systems {
+        let system_id = relation_system.system_id;
+        let sig = &relation_system.sig_after;
+        let aggregates = active
+            .aggregates
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .expect("active cue relations retain their aggregate system");
+        let mutation_system = active
+            .mutations
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .expect("active cue relations retain their mutation system");
+        let grouping_system = active
+            .grouping
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .expect("active cue relations retain their grouping system");
+        let finalized = recognition
+            .reduction
+            .stems
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .expect("active cue relations retain their STEMS system");
+        let live_stems = live_stem_inters(&finalized.transaction.state_after).collect::<Vec<_>>();
+
+        let head_ids = aggregates
+            .qualified_heads
+            .iter()
+            .map(|head| head.sig_ordinal.0)
+            .collect::<BTreeSet<_>>();
+        let stem_ids = aggregates
+            .qualified_heads
+            .iter()
+            .map(|head| head.stem_sig_ordinal.0)
+            .collect::<BTreeSet<_>>();
+        let beam_ids = mutation_system
+            .beams
+            .iter()
+            .map(|beam| beam.sig_ordinal.0)
+            .collect::<BTreeSet<_>>();
+        let group_ids = grouping_system
+            .aggregates
+            .iter()
+            .flat_map(|aggregate| aggregate.group_sig_ordinals.iter().map(|id| id.0))
+            .collect::<BTreeSet<_>>();
+
+        json.open('{');
+        json.field_integer("system", system_id as i64);
+        json.key("heads");
+        json.open('[');
+        for head_id in &head_ids {
+            let vertex = sig
+                .vertex(*head_id)
+                .expect("qualified cue head remains live in terminal SIG");
+            cue_vertex_prefix(json, system_id, vertex, "ordinary");
+            json.close('}');
+        }
+        json.close(']');
+
+        json.key("stems");
+        json.open('[');
+        for stem_id in &stem_ids {
+            let vertex = sig
+                .vertex(*stem_id)
+                .expect("qualified cue stem remains live in terminal SIG");
+            cue_vertex_prefix(json, system_id, vertex, "ordinary");
+            if let Some((stem, _, _)) = live_stems
+                .iter()
+                .find(|(_, vertex_id, _)| vertex_id.0 == *stem_id)
+            {
+                json.key("median");
+                json.open('{');
+                json.field_number("x1", stem.geometry.median.start.x);
+                json.field_number("y1", stem.geometry.median.start.y);
+                json.field_number("x2", stem.geometry.median.stop.x);
+                json.field_number("y2", stem.geometry.median.stop.y);
+                json.close('}');
+                json.field_number("thickness", stem.geometry.mean_thickness);
+            }
+            json.close('}');
+        }
+        json.close(']');
+
+        json.key("beams");
+        json.open('[');
+        for beam in &mutation_system.beams {
+            let vertex = sig
+                .vertex(beam.sig_ordinal.0)
+                .expect("created cue beam remains live in terminal SIG");
+            cue_vertex_prefix(json, system_id, vertex, "cue");
+            json.field_integer("aggregate_ordinal", beam.aggregate_ordinal as i64);
+            json.field_string(
+                "aggregate_id",
+                &format!("s{system_id}:a{}", beam.aggregate_ordinal),
+            );
+            json.field_integer("source_spot_ordinal", beam.spot_ordinal as i64);
+            json.field_string(
+                "kind",
+                match vertex.kind {
+                    NativeSigInterKind::SmallBeam => "BEAM_SMALL",
+                    NativeSigInterKind::BeamHook => "BEAM_HOOK",
+                    _ => "BEAM",
+                },
+            );
+            if let Some(geometry) = vertex.beam_geometry {
+                json.key("median");
+                json.open('{');
+                json.field_number("x1", geometry.x1);
+                json.field_number("y1", geometry.y1);
+                json.field_number("x2", geometry.x2);
+                json.field_number("y2", geometry.y2);
+                json.close('}');
+                json.field_number("thickness", geometry.height);
+            }
+            json.close('}');
+        }
+        json.close(']');
+
+        cue_groups(json, system_id, grouping_system, mutation_system, sig);
+        cue_aggregates(json, system_id, aggregates);
+        cue_relations(
+            json, system_id, sig, &head_ids, &stem_ids, &beam_ids, &group_ids,
+        );
+        json.close('}');
+    }
+    json.close(']');
+}
+
+fn cue_vertex_prefix(
+    json: &mut Json,
+    system_id: usize,
+    vertex: &NativeSigVertex,
+    provenance: &str,
+) {
+    json.open('{');
+    json.field_string("id", &cue_vertex_id(system_id, vertex.ordinal));
+    json.field_integer("sig_ordinal", vertex.ordinal as i64);
+    json.field_string("provenance", provenance);
+    json.key("shape");
+    match &vertex.shape {
+        Some(shape) => json.string(shape),
+        None => json.null(),
+    }
+    sig_bounds(json, "bounds", vertex.bounds);
+    json.field_number("grade", vertex.grade);
+    json.key("contextual_grade");
+    match vertex.contextual_grade {
+        Some(grade) => json.number(grade),
+        None => json.null(),
+    }
+    json.field_boolean("abnormal", vertex.abnormal);
+}
+
+fn cue_groups(
+    json: &mut Json,
+    system_id: usize,
+    grouping: &crate::cue_beams_step::NativeCueBeamGroupingSystem,
+    mutations: &crate::cue_beams_step::NativeCueBeamMutationSystem,
+    sig: &NativeSigSystem,
+) {
+    json.key("groups");
+    json.open('[');
+    for aggregate in &grouping.aggregates {
+        let local_beams = mutations
+            .beams
+            .iter()
+            .filter(|beam| beam.aggregate_ordinal == aggregate.aggregate_ordinal)
+            .collect::<Vec<_>>();
+        for (group_index, group_id) in aggregate.group_sig_ordinals.iter().enumerate() {
+            let vertex = sig
+                .vertex(group_id.0)
+                .expect("cue group remains live in terminal SIG");
+            cue_vertex_prefix(json, system_id, vertex, "cue");
+            json.field_integer("aggregate_ordinal", aggregate.aggregate_ordinal as i64);
+            json.field_string(
+                "aggregate_id",
+                &format!("s{system_id}:a{}", aggregate.aggregate_ordinal),
+            );
+            json.key("member_ids");
+            json.open('[');
+            for &member_index in &aggregate.evidence.groups[group_index] {
+                json.string(&cue_vertex_id(
+                    system_id,
+                    local_beams[member_index].sig_ordinal.0,
+                ));
+            }
+            json.close(']');
+            json.close('}');
+        }
+    }
+    json.close(']');
+}
+
+fn cue_aggregates(
+    json: &mut Json,
+    system_id: usize,
+    aggregates: &crate::cue_beams_step::NativeCueAggregateSystem,
+) {
+    json.key("aggregates");
+    json.open('[');
+    for aggregate in &aggregates.aggregates {
+        json.open('{');
+        json.field_string("id", &format!("s{system_id}:a{}", aggregate.ordinal));
+        json.field_integer("ordinal", aggregate.ordinal as i64);
+        json.field_string("provenance", "cue");
+        sig_bounds(json, "bounds", aggregate.bounds);
+        json.key("members");
+        json.open('[');
+        for (head, stem) in &aggregate.members {
+            json.open('{');
+            json.field_string("head_id", &cue_vertex_id(system_id, head.0));
+            json.field_string("stem_id", &cue_vertex_id(system_id, stem.0));
+            json.close('}');
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+}
+
+fn cue_relations(
+    json: &mut Json,
+    system_id: usize,
+    sig: &NativeSigSystem,
+    head_ids: &BTreeSet<usize>,
+    stem_ids: &BTreeSet<usize>,
+    beam_ids: &BTreeSet<usize>,
+    group_ids: &BTreeSet<usize>,
+) {
+    json.key("relations");
+    json.open('[');
+    for edge in sig.edges.iter().filter(|edge| {
+        edge.active
+            && match edge.kind {
+                NativeSigRelationKind::HeadStem => {
+                    head_ids.contains(&edge.source) && stem_ids.contains(&edge.target)
+                }
+                NativeSigRelationKind::BeamStem => {
+                    beam_ids.contains(&edge.source) && stem_ids.contains(&edge.target)
+                }
+                NativeSigRelationKind::Containment => {
+                    group_ids.contains(&edge.source) && beam_ids.contains(&edge.target)
+                }
+                _ => false,
+            }
+    }) {
+        json.open('{');
+        json.field_string("id", &format!("s{system_id}:e{}", edge.ordinal));
+        json.field_integer("sig_ordinal", edge.ordinal as i64);
+        json.field_string(
+            "kind",
+            match edge.kind {
+                NativeSigRelationKind::HeadStem => "HeadStem",
+                NativeSigRelationKind::BeamStem => "BeamStem",
+                NativeSigRelationKind::Containment => "Containment",
+                _ => unreachable!(),
+            },
+        );
+        json.field_string("source_id", &cue_vertex_id(system_id, edge.source));
+        json.field_string("target_id", &cue_vertex_id(system_id, edge.target));
+        json.field_string(
+            "provenance",
+            if matches!(
+                edge.kind,
+                NativeSigRelationKind::BeamStem | NativeSigRelationKind::Containment
+            ) {
+                "cue"
+            } else {
+                "ordinary"
+            },
+        );
+        json.key("grade");
+        match edge.support {
+            Some(support) => json.number(support.grade),
+            None => json.null(),
+        }
+        json.key("portion");
+        match edge.beam_portion {
+            Some(crate::stems_step::NativeBeamPortion::Left) => json.string("LEFT"),
+            Some(crate::stems_step::NativeBeamPortion::Center) => json.string("CENTER"),
+            Some(crate::stems_step::NativeBeamPortion::Right) => json.string("RIGHT"),
+            None => json.null(),
+        }
+        json.key("dx");
+        match edge.head_stem {
+            Some(payload) => json.number(payload.dx),
+            None => json.null(),
+        }
+        json.key("dy");
+        match edge.head_stem {
+            Some(payload) => json.number(payload.dy),
+            None => json.null(),
+        }
+        json.key("head_side");
+        match edge.head_stem {
+            Some(payload) => json.string(stem_head_side(payload.head_side)),
+            None => json.null(),
+        }
+        json.key("consistency");
+        match edge.head_stem {
+            Some(payload) => json.number(payload.consistency),
+            None => json.null(),
+        }
+        json.key("extension");
+        if let Some(extension) = edge.stem_extension {
+            json.open('{');
+            json.field_number("x", extension.x);
+            json.field_number("y", extension.y);
+            json.close('}');
+        } else if let Some(payload) = edge.head_stem {
+            json.open('{');
+            json.field_number("x", payload.extension_point.x);
+            json.field_number("y", payload.extension_point.y);
+            json.close('}');
+        } else {
+            json.null();
+        }
+        json.close('}');
+    }
+    json.close(']');
+}
+
+fn cue_vertex_id(system_id: usize, ordinal: usize) -> String {
+    format!("s{system_id}:i{ordinal}")
+}
+
+fn sig_bounds(json: &mut Json, name: &str, bounds: NativeSigBounds) {
+    json.key(name);
+    json.open('{');
+    json.field_integer("x", i64::from(bounds.x));
+    json.field_integer("y", i64::from(bounds.y));
+    json.field_integer("width", i64::from(bounds.width));
+    json.field_integer("height", i64::from(bounds.height));
     json.close('}');
 }
 

@@ -51,11 +51,17 @@ env -u JAVA_TOOL_OPTIONS "$JAVA_HOME/bin/java" \
     -cp "$probe_classes:$probe_cp" \
     org.audiveris.omr.rustport.HeadTemplateCatalogProbe --header
 
-run_probe "$repo_root/data/examples/chula.png:1"
-run_probe "$repo_root/data/examples/allegretto.png:1"
-run_probe "$repo_root/data/examples/batuque.png:1"
-run_probe "$repo_root/data/examples/carmen.png:1"
-run_probe "$repo_root/data/examples/cucaracha.png:1"
-run_probe "$repo_root/data/examples/hove.png:1"
-run_probe "$repo_root/data/examples/zizi.png:1"
-run_probe "$repo_root/data/examples/BachInvention5.jpg:1"
+if [ "$#" -gt 0 ]; then
+    for target in "$@"; do
+        run_probe "$target"
+    done
+else
+    run_probe "$repo_root/data/examples/chula.png:1"
+    run_probe "$repo_root/data/examples/allegretto.png:1"
+    run_probe "$repo_root/data/examples/batuque.png:1"
+    run_probe "$repo_root/data/examples/carmen.png:1"
+    run_probe "$repo_root/data/examples/cucaracha.png:1"
+    run_probe "$repo_root/data/examples/hove.png:1"
+    run_probe "$repo_root/data/examples/zizi.png:1"
+    run_probe "$repo_root/data/examples/BachInvention5.jpg:1"
+fi

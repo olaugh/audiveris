@@ -357,11 +357,6 @@ pub enum NativeStemsBeamVLinkerError {
         system_id: usize,
         free_glyph_ordinal: usize,
     },
-    InconsistentStumpDirections {
-        system_id: usize,
-        source: NativeStemsBeamSource,
-        stump_ordinal: usize,
-    },
     InvalidGeometry,
 }
 
@@ -708,13 +703,12 @@ fn build_constructor(
             visible_sources,
             context,
         )?;
-        if actual_directions != stump.directions {
-            return Err(NativeStemsBeamVLinkerError::InconsistentStumpDirections {
-                system_id: context.stump_system.system_id,
-                source: beam.source,
-                stump_ordinal: stump.list_ordinal,
-            });
-        }
+        // Java constructs beam linkers in abscissa order and removes a beam
+        // classified as tremolo before constructing the next linker. The
+        // pre-built stump snapshot therefore may still list a sibling that is
+        // no longer live. The constructor-time result above is authoritative;
+        // requiring the complete diagnostic snapshots to match would reject
+        // this valid Java lifecycle transition.
         let reference_point = generic_intersection(stump.directions.stump_center_line, beam.median);
         let b_reference = NativeStemsBeamBLinkerRef {
             beam: beam.source,

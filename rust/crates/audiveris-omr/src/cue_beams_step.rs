@@ -19,7 +19,7 @@ use audiveris_image::{
 };
 
 use crate::beam_inters::{
-    BeamKind, RawBeam, RegisteredBeamGlyph, create_beam_inters, retrieve_beam_glyph,
+    BeamKind, RawBeam, RegisteredBeamGlyph, create_small_beam_inters, retrieve_beam_glyph,
 };
 use crate::beam_parameters::{ItemParameters, SheetParameters};
 use crate::beam_recognizer::{BeamCheck, BeamRejection, check_cue_beam_glyph};
@@ -1010,9 +1010,7 @@ pub fn check_native_cue_beam_spots(
                 })?;
             let check = check_cue_beam_glyph(glyph, &raster, &item, &sheet);
             let created_cues = check.structure.as_ref().map_or_else(Vec::new, |structure| {
-                create_beam_inters(
-                    structure, &raster, glyph.left, glyph.top, source, &item, &sheet,
-                )
+                create_small_beam_inters(structure, source, &item, &sheet)
             });
             let failure = check
                 .rejection

@@ -41,14 +41,14 @@ run_probe ()
 run_stage_probe ()
 {
     step=$1
-    target=$2
+    shift
     (
         cd "$repo_root/app"
         env -u JAVA_TOOL_OPTIONS "$JAVA_HOME/bin/java" \
             -Djava.awt.headless=true \
             -Dlogback.configurationFile="$repo_root/rust/oracle/java/logback-quiet.xml" \
             -cp "$probe_classes:$probe_cp" \
-            org.audiveris.omr.rustport.CueAggregatesProbe --stage "$step" "$target"
+            org.audiveris.omr.rustport.CueAggregatesProbe --stage "$step" "$@"
     )
 }
 
@@ -56,8 +56,10 @@ env -u JAVA_TOOL_OPTIONS "$JAVA_HOME/bin/java" \
     -cp "$probe_classes:$probe_cp" \
     org.audiveris.omr.rustport.CueAggregatesProbe --header
 
-if [ "$#" -eq 3 ] && [ "$1" = --stage ]; then
-    run_stage_probe "$2" "$3"
+if [ "$#" -ge 3 ] && [ "$1" = --stage ]; then
+    step=$2
+    shift 2
+    run_stage_probe "$step" "$@"
 elif [ "$#" -eq 1 ]; then
     run_probe "$1"
 else

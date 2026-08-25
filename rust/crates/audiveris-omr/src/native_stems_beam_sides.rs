@@ -15714,19 +15714,14 @@ fn advance_native_stems_head_c_link_at_frontier(
                 .head_vertices
                 .get(&frontier.next_corner.head)
                 .ok_or_else(|| stage("HEADS-CLink-head-binding", "selected head is unbound"))?;
-            if shadow
+            let existing_head_stem_edge = shadow
                 .beam_state
                 .sig
                 .directed_edges(head_vertex.0, stem_vertex.0)
                 .map_err(|error| stage("HEADS-CLink-pair", error))?
                 .iter()
-                .any(|edge| edge.kind == NativeSigRelationKind::HeadStem)
-            {
-                return Err(stage(
-                    "HEADS-CLink-pair",
-                    "reused HeadStem relation already exists",
-                ));
-            }
+                .find(|edge| edge.kind == NativeSigRelationKind::HeadStem)
+                .map(|edge| NativeSigEdgeId(edge.ordinal));
             let consistency = head_stem_consistency(
                 head_corners.heads_in_sig_order[frontier.next_corner.sig_ordinal]
                     .shape
@@ -15741,42 +15736,47 @@ fn advance_native_stems_head_c_link_at_frontier(
                     "accepted reused relation has no extension point",
                 )
             })?;
-            let head_stem_edge = NativeSigEdgeId(shadow.beam_state.sig.edges.len());
-            shadow
-                .beam_state
-                .sig
-                .append_edge(NativeSigEdge {
-                    ordinal: head_stem_edge.0,
-                    active: true,
-                    source: head_vertex.0,
-                    target: stem_vertex.0,
-                    kind: NativeSigRelationKind::HeadStem,
-                    origin: NativeSigRelationOrigin::HeadCLinkDraft {
-                        head_sig_ordinal: frontier.next_corner.sig_ordinal,
-                        constructor_ordinal: selected_constructor_ordinal,
-                    },
-                    support: Some(NativeSigSupport {
-                        grade: relation.grade,
-                        bar_connection_impacts: None,
-                    }),
-                    beam_portion: None,
-                    stem_extension: None,
-                    head_stem: Some(NativeSigHeadStemPayload {
-                        dx: relation.dx,
-                        dy: relation.dy,
-                        head_side: relation.derived_horizontal,
-                        extension_point: extension,
-                        consistency,
-                        manual: false,
-                    }),
-                })
-                .map_err(|error| stage("HEADS-CLink-HeadStem", error))?;
-            shadow
-                .beam_state
-                .sig
-                .set_abnormal(head_vertex, false)
-                .and_then(|()| shadow.beam_state.sig.set_abnormal(stem_vertex, false))
-                .map_err(|error| stage("HEADS-CLink-callback", error))?;
+            let head_stem_edge = if let Some(existing) = existing_head_stem_edge {
+                existing
+            } else {
+                let edge = NativeSigEdgeId(shadow.beam_state.sig.edges.len());
+                shadow
+                    .beam_state
+                    .sig
+                    .append_edge(NativeSigEdge {
+                        ordinal: edge.0,
+                        active: true,
+                        source: head_vertex.0,
+                        target: stem_vertex.0,
+                        kind: NativeSigRelationKind::HeadStem,
+                        origin: NativeSigRelationOrigin::HeadCLinkDraft {
+                            head_sig_ordinal: frontier.next_corner.sig_ordinal,
+                            constructor_ordinal: selected_constructor_ordinal,
+                        },
+                        support: Some(NativeSigSupport {
+                            grade: relation.grade,
+                            bar_connection_impacts: None,
+                        }),
+                        beam_portion: None,
+                        stem_extension: None,
+                        head_stem: Some(NativeSigHeadStemPayload {
+                            dx: relation.dx,
+                            dy: relation.dy,
+                            head_side: relation.derived_horizontal,
+                            extension_point: extension,
+                            consistency,
+                            manual: false,
+                        }),
+                    })
+                    .map_err(|error| stage("HEADS-CLink-HeadStem", error))?;
+                shadow
+                    .beam_state
+                    .sig
+                    .set_abnormal(head_vertex, false)
+                    .and_then(|()| shadow.beam_state.sig.set_abnormal(stem_vertex, false))
+                    .map_err(|error| stage("HEADS-CLink-callback", error))?;
+                edge
+            };
             let additional_head_relations = append_head_c_link_additional_head_relations(
                 &mut shadow,
                 head_corners,

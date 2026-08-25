@@ -2,6 +2,8 @@
 package org.audiveris.omr.rustport;
 
 import java.awt.Rectangle;
+import java.awt.geom.Line2D;
+import java.awt.geom.Point2D;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -25,9 +27,13 @@ import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.beam.BeamsBuilder;
 import org.audiveris.omr.sig.SIGraph;
+import org.audiveris.omr.sig.GradeImpacts;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.Inters;
+import org.audiveris.omr.sig.inter.BeamGroupInter;
+import org.audiveris.omr.sig.inter.SmallBeamInter;
 import org.audiveris.omr.sig.inter.StemInter;
+import org.audiveris.omr.sig.relation.BeamStemRelation;
 import org.audiveris.omr.sig.relation.HeadStemRelation;
 import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.step.OmrStep;
@@ -48,7 +54,7 @@ public final class CueAggregatesProbe
             System.out.println("# Java reaches REDUCTION with the qualified smallHeads switch true.");
             System.exit(0);
         }
-        final boolean stageAudit = (args.length == 3) && args[0].equals("--stage");
+        final boolean stageAudit = (args.length >= 3) && args[0].equals("--stage");
         if ((args.length != 1) && !stageAudit) {
             throw new IllegalArgumentException("expected [--stage STEP] <path>:<sheet>");
         }
@@ -65,16 +71,31 @@ public final class CueAggregatesProbe
         cliField.set(null, cli);
         MusicFont.checkMusicFont();
 
-        final String target = args[stageAudit ? 2 : 0];
-        final String[] parts = target.split(":");
-        if (parts.length != 2) {
-            throw new IllegalArgumentException("target must be <path>:<sheet>");
+        final int firstTarget = stageAudit ? 2 : 0;
+        for (int targetIndex = firstTarget; targetIndex < args.length; targetIndex++) {
+            final String target = args[targetIndex];
+            final String[] parts = target.split(":");
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("target must be <path>:<sheet>");
+            }
+            try {
+                runPage(
+                        Paths.get(parts[0]).toAbsolutePath(),
+                        Integer.parseInt(parts[1]),
+                        stageAudit ? OmrStep.valueOf(args[1]) : OmrStep.REDUCTION,
+                        stageAudit);
+            } catch (Exception error) {
+                if (!stageAudit) {
+                    throw error;
+                }
+                System.out.printf(
+                        "cueaggregatestageerror %s step %s type %s message %s%n",
+                        Paths.get(parts[0]).getFileName() + "#" + parts[1],
+                        args[1],
+                        error.getClass().getName(),
+                        String.valueOf(error.getMessage()).replace('\n', ' '));
+            }
         }
-        runPage(
-                Paths.get(parts[0]).toAbsolutePath(),
-                Integer.parseInt(parts[1]),
-                stageAudit ? OmrStep.valueOf(args[1]) : OmrStep.REDUCTION,
-                stageAudit);
         System.exit(0);
     }
 
@@ -218,16 +239,22 @@ public final class CueAggregatesProbe
                                               Sheet sheet)
     {
         for (SystemInfo system : sheet.getSystems()) {
+            final SIGraph sig = system.getSig();
+            final List<Inter> sigOrder = new ArrayList<>(sig.vertexSet());
+            final Map<Inter, Integer> ordinals = new IdentityHashMap<>();
+            for (int ordinal = 0; ordinal < sigOrder.size(); ordinal++) {
+                ordinals.put(sigOrder.get(ordinal), ordinal);
+            }
             int count = 0;
-            for (Inter inter : system.getSig().vertexSet()) {
+            for (Inter inter : sigOrder) {
                 if (!inter.isRemoved() && inter.getShape() == Shape.NOTEHEAD_BLACK_SMALL) {
                     final Rectangle bounds = inter.getBounds();
                     System.out.printf(
-                            "cueaggregatestage %s step %s system %d id %d bounds %d %d %d %d gradeBits %016x contextual %s%n",
+                            "cueaggregatestage %s step %s system %d ordinal %d bounds %d %d %d %d gradeBits %016x contextual %s%n",
                             page,
                             step,
                             system.getId(),
-                            inter.getId(),
+                            ordinals.get(inter),
                             bounds.x,
                             bounds.y,
                             bounds.width,
@@ -236,19 +263,19 @@ public final class CueAggregatesProbe
                             inter.getContextualGrade() == null
                                     ? "-"
                                     : String.format("%016x", Double.doubleToLongBits(inter.getContextualGrade())));
-                    for (Relation relation : system.getSig().getRelations(
+                    for (Relation relation : sig.getRelations(
                             inter,
                             HeadStemRelation.class)) {
                         final HeadStemRelation headStem = (HeadStemRelation) relation;
-                        final StemInter stem = (StemInter) system.getSig().getEdgeTarget(relation);
+                        final StemInter stem = (StemInter) sig.getEdgeTarget(relation);
                         final Rectangle stemBounds = stem.getBounds();
                         System.out.printf(
-                                "cueaggregatestagerelation %s step %s system %d head %d stem %d stemBounds %d %d %d %d gradeBits %016x dxBits %016x dyBits %016x side %s extension %s consistencyBits %016x%n",
+                                "cueaggregatestagerelation %s step %s system %d headOrdinal %d stemOrdinal %d stemBounds %d %d %d %d gradeBits %016x dxBits %016x dyBits %016x side %s extension %s consistencyBits %016x%n",
                                 page,
                                 step,
                                 system.getId(),
-                                inter.getId(),
-                                stem.getId(),
+                                ordinals.get(inter),
+                                ordinals.get(stem),
                                 stemBounds.x,
                                 stemBounds.y,
                                 stemBounds.width,
@@ -263,12 +290,88 @@ public final class CueAggregatesProbe
                     count++;
                 }
             }
+            int smallBeamCount = 0;
+            int beamStemCount = 0;
+            for (Inter inter : sigOrder) {
+                if (!inter.isRemoved() && inter instanceof SmallBeamInter beam) {
+                    final Rectangle bounds = beam.getBounds();
+                    final Line2D median = beam.getMedian();
+                    final GradeImpacts impacts = beam.getImpacts();
+                    final List<String> impactBits = new ArrayList<>();
+                    for (int impact = 0; impact < impacts.getImpactCount(); impact++) {
+                        impactBits.add(
+                                impacts.getName(impact) + ":"
+                                        + String.format(
+                                                "%016x",
+                                                Double.doubleToLongBits(impacts.getImpact(impact))));
+                    }
+                    System.out.printf(
+                            "cueaggregatestagebeam %s step %s system %d ordinal %d bounds %d %d %d %d medianBits %016x %016x %016x %016x heightBits %016x gradeBits %016x impacts %s abnormal %s%n",
+                            page,
+                            step,
+                            system.getId(),
+                            ordinals.get(beam),
+                            bounds.x,
+                            bounds.y,
+                            bounds.width,
+                            bounds.height,
+                            Double.doubleToLongBits(median.getX1()),
+                            Double.doubleToLongBits(median.getY1()),
+                            Double.doubleToLongBits(median.getX2()),
+                            Double.doubleToLongBits(median.getY2()),
+                            Double.doubleToLongBits(beam.getHeight()),
+                            Double.doubleToLongBits(beam.getGrade()),
+                            String.join(",", impactBits),
+                            beam.isAbnormal());
+                    for (Relation relation : sig.getRelations(beam, BeamStemRelation.class)) {
+                        final BeamStemRelation beamStem = (BeamStemRelation) relation;
+                        final Inter source = sig.getEdgeSource(relation);
+                        final Inter target = sig.getEdgeTarget(relation);
+                        final Point2D extension = beamStem.getExtensionPoint();
+                        System.out.printf(
+                                "cueaggregatestagebeamstem %s step %s system %d sourceOrdinal %d targetOrdinal %d gradeBits %016x dxBits %016x dyBits %016x portion %s extensionBits %016x %016x%n",
+                                page,
+                                step,
+                                system.getId(),
+                                ordinals.get(source),
+                                ordinals.get(target),
+                                Double.doubleToLongBits(beamStem.getGrade()),
+                                Double.doubleToLongBits(beamStem.getDx()),
+                                Double.doubleToLongBits(beamStem.getDy()),
+                                beamStem.getBeamPortion(),
+                                Double.doubleToLongBits(extension.getX()),
+                                Double.doubleToLongBits(extension.getY()));
+                        beamStemCount++;
+                    }
+                    smallBeamCount++;
+                }
+            }
+            int groupCount = 0;
+            for (Inter inter : sigOrder) {
+                if (!inter.isRemoved() && inter instanceof BeamGroupInter group) {
+                    final List<String> members = new ArrayList<>();
+                    for (Inter member : group.getMembers()) {
+                        members.add(Integer.toString(ordinals.get(member)));
+                    }
+                    System.out.printf(
+                            "cueaggregatestagegroup %s step %s system %d ordinal %d members %s%n",
+                            page,
+                            step,
+                            system.getId(),
+                            ordinals.get(group),
+                            String.join(",", members));
+                    groupCount++;
+                }
+            }
             System.out.printf(
-                    "cueaggregatestagesummary %s step %s system %d smallBlack %d%n",
+                    "cueaggregatestagesummary %s step %s system %d smallBlack %d smallBeams %d groups %d beamStemRelations %d%n",
                     page,
                     step,
                     system.getId(),
-                    count);
+                    count,
+                    smallBeamCount,
+                    groupCount,
+                    beamStemCount);
         }
     }
 

@@ -7188,6 +7188,32 @@ recognition and supplemental hook recovery have separate qualified constants,
 so either control can be disabled without changing the other path.
 
 The existing eight-page Java differential remains a strict zero-delta result
-because every qualified cue head is a singleton on both runtimes. A real Chopin
-non-empty fixture and connected sidecar identities/relations remain the next
-publication boundary.
+because every qualified cue head is a singleton on both runtimes. Boundary 308
+below adds the real non-empty Chopin and connected-sidecar gate.
+
+## Boundary 308: connected CUE_BEAMS on a real Chopin system
+
+A lossless page-23 crop now exercises the complete non-empty path. Fresh Java
+and Rust runs retain one non-abnormal cue beam with exact bounds, median,
+thickness, and grade bits, one cue group, and four BeamStem relations. Rust
+also retains the two source aggregates and seven morphology spots, and repeated
+execution is structurally identical.
+
+The schema-1 payload publishes a stable connected graph under
+`cue_beams.systems`: qualified small heads, live stems, cue beams, cue groups,
+aggregate/group membership, and HeadStem/BeamStem/Containment endpoints with
+geometry, grades, portions, extensions, abnormal state, and provenance. The
+black-box CLI gate runs the crop twice and confirms byte-identical IDs/order and
+six HeadStem plus four BeamStem plus one Containment relation.
+
+Java parity required its cue-specific mean-border-distance grade impact and
+three source-order STEMS prerequisite corrections for post-tremolo visibility
+and existing relation reuse. Supplemental Bravura catalogs at point sizes
+52/53/54 are measured from the real Chopin inputs. Exact pins are image
+`40d14bf054640e925dccebe2f765525cbdc35748a16067bb06bba0d6c475a98e`,
+Java result `f7eebd22e603bb066d4b0619ef78487a80f30e8d89cd3364dfecfa00c9a155ff`,
+and catalog asset
+`82397efc76d2c51da8aff124d5a428ab24c63be1d665f873991a4ea82338d001`.
+The two-test cue differential, connected CLI test, 760 library tests (two
+ignored), formatting, and strict workspace Clippy are green; the pre-existing
+Cucaracha CLI stem-count drift remains unchanged.

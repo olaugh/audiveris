@@ -21,6 +21,11 @@ fn batuque() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../data/examples/batuque.png")
 }
 
+fn chopin_cue() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../rust/oracle/chopin-nocturne-page23-system4-cue.png")
+}
+
 fn example(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../../data/examples/{name}"))
 }
@@ -261,6 +266,56 @@ fn active_cue_beams_switch_completes_the_native_lifecycle() {
     assert!(payload.contains("\"stage\":\"CUE_BEAMS\""));
     assert!(payload.contains("\"status\":\"completed\""));
     assert!(payload.contains("\"ordinary_enabled\":true"));
+}
+
+#[test]
+fn active_chopin_cue_beams_publish_a_connected_stable_graph() {
+    let run = || {
+        let output = Command::new(binary())
+            .args([
+                "-batch",
+                "-step",
+                "CUE_BEAMS",
+                "-json",
+                "-constant",
+                SMALL_HEADS_CONSTANT,
+            ])
+            .arg(chopin_cue())
+            .output()
+            .expect("run connected Chopin CUE_BEAMS");
+        assert!(
+            output.status.success(),
+            "connected Chopin CUE_BEAMS failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("CLI stdout is UTF-8")
+    };
+    let payload = run();
+    assert_eq!(payload, run(), "connected sidecar IDs and order are stable");
+    for exact in [
+        "\"aggregate_count\":2",
+        "\"spot_count\":7",
+        "\"beam_count\":1",
+        "\"group_count\":1",
+        "\"relation_count\":4",
+        "\"id\":\"s1:i1015\",\"sig_ordinal\":1015,\"provenance\":\"cue\",\"shape\":\"BEAM_SMALL\"",
+        "\"id\":\"s1:i1016\",\"sig_ordinal\":1016,\"provenance\":\"cue\"",
+        "\"aggregate_id\":\"s1:a0\"",
+        "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i995\",\"provenance\":\"cue\"",
+        "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i989\",\"provenance\":\"cue\"",
+        "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i993\",\"provenance\":\"cue\"",
+        "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i974\",\"provenance\":\"cue\"",
+        "\"kind\":\"Containment\",\"source_id\":\"s1:i1016\",\"target_id\":\"s1:i1015\",\"provenance\":\"cue\"",
+    ] {
+        assert!(
+            payload.contains(exact),
+            "connected sidecar is missing {exact}"
+        );
+    }
+    assert_eq!(payload.matches("\"kind\":\"BeamStem\"").count(), 4);
+    assert_eq!(payload.matches("\"kind\":\"HeadStem\"").count(), 6);
+    assert_eq!(payload.matches("\"kind\":\"Containment\"").count(), 1);
+    assert_eq!(payload.matches("\"shape\":\"BEAM_SMALL\"").count(), 1);
 }
 
 #[test]

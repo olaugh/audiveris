@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use audiveris_omr::{
+    beam_inters::BeamKind,
     cue_beams_step::{
         NativeCueAggregateRecognition, NativeCueBeamsOptions, apply_native_cue_beam_stem_relations,
         check_native_cue_beam_spots, check_native_cue_beam_stem_links, extract_native_cue_spots,
@@ -19,9 +20,88 @@ use audiveris_omr::{
     recognize::{
         GridLinesRecognition, recognize_grid_lines, recognize_native_beams_with_stem_seeds,
     },
+    stems_step::NativeBeamPortion,
 };
 
 const ORACLE: &str = include_str!("../../../oracle/cue-aggregates.txt");
+const CHOPIN_CUE_ORACLE: &str = include_str!("../../../oracle/cue-beams-chopin-page23-system4.txt");
+
+#[test]
+fn chopin_cue_fixture_exposes_terminal_active_evidence() {
+    let (grid, reduction, _) = recognize_page("rust/oracle/chopin-nocturne-page23-system4-cue.png");
+    let completed = recognize_native_cue_beams_with_options(
+        &grid,
+        reduction,
+        true,
+        NativeCueBeamsOptions::default(),
+    )
+    .expect("Chopin CUE_BEAMS");
+    let active = completed.active.as_deref().expect("active CUE_BEAMS");
+    assert_eq!(active.aggregates.systems[0].aggregates.len(), 2);
+    assert_eq!(
+        active
+            .spots
+            .aggregates
+            .iter()
+            .map(|spots| spots.glyphs.len())
+            .sum::<usize>(),
+        7
+    );
+    let cue_beams = &active.mutations.systems[0].beams;
+    assert_eq!(cue_beams.len(), 1);
+    let cue = cue_beams[0].beam;
+    assert_eq!(cue.kind, BeamKind::SmallBeam);
+    assert_eq!(cue.item.median.x1.to_bits(), 0x4082_5800_0000_0000);
+    assert_eq!(cue.item.median.y1.to_bits(), 0x4054_d2a7_f7be_9065);
+    assert_eq!(cue.item.median.x2.to_bits(), 0x4083_a800_0000_0000);
+    assert_eq!(cue.item.median.y2.to_bits(), 0x4056_24d8_27a0_2247);
+    assert_eq!(cue.item.height.to_bits(), 0x4015_84bb_b403_8f78);
+    assert_eq!(cue.grade.to_bits(), 0x3fe1_c8ae_eec7_4dc1);
+    assert_eq!(
+        active.grouping.systems[0]
+            .aggregates
+            .iter()
+            .map(|aggregate| aggregate.group_sig_ordinals.len())
+            .sum::<usize>(),
+        1
+    );
+    assert_eq!(active.stem_checks.checks.len(), 4);
+    assert!(active.stem_checks.checks.iter().all(|check| check.accepted));
+    assert_eq!(
+        active
+            .stem_checks
+            .checks
+            .iter()
+            .map(|check| check.beam_portion)
+            .collect::<Vec<_>>(),
+        vec![
+            NativeBeamPortion::Left,
+            NativeBeamPortion::Center,
+            NativeBeamPortion::Center,
+            NativeBeamPortion::Right,
+        ]
+    );
+    assert_eq!(active.stem_relations.systems[0].mutations.len(), 4);
+    assert!(CHOPIN_CUE_ORACLE.contains(
+        "cueaggregatestagebeam chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS \
+         system 1 ordinal 212 bounds 587 80 42 12 medianBits 4082580000000000 \
+         4054d2a7f7be9065 4083a80000000000 405624d827a02247 heightBits 401584bbb4038f78 \
+         gradeBits 3fe1c8aeeec74dc1"
+    ));
+    assert!(CHOPIN_CUE_ORACLE.contains(
+        "cueaggregatestagesummary chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS \
+         system 1 smallBlack 7 smallBeams 1 groups 12 beamStemRelations 4"
+    ));
+
+    let repeated = recognize_native_cue_beams_with_options(
+        &grid,
+        completed.reduction.clone(),
+        true,
+        NativeCueBeamsOptions::default(),
+    )
+    .expect("repeat Chopin CUE_BEAMS");
+    assert_eq!(completed, repeated);
+}
 
 #[test]
 fn active_cue_aggregate_corpus_matches_java() {

@@ -12,10 +12,15 @@ use crate::head_template::{
 };
 
 const ASSET: &[u8] = include_bytes!("data/bravura-head-templates.bin");
+const CHOPIN_CUE_ASSET: &[u8] = include_bytes!("data/bravura-head-templates-chopin-cue.bin");
 const MAGIC: &[u8; 8] = b"AVHTPL02";
 const ORACLE_DIGEST: [u8; 32] = [
     0x0f, 0x1c, 0x86, 0xff, 0x8a, 0x83, 0x18, 0x52, 0x0f, 0xae, 0xeb, 0x43, 0xe3, 0x37, 0x5b, 0x5c,
     0x76, 0x30, 0x1e, 0xb1, 0x63, 0xba, 0x0c, 0xd4, 0x44, 0x2b, 0x8c, 0xcb, 0x11, 0x80, 0xf8, 0x32,
+];
+const CHOPIN_CUE_ORACLE_DIGEST: [u8; 32] = [
+    0x00, 0x05, 0xd6, 0x5f, 0x3b, 0x0e, 0xe4, 0xdd, 0x66, 0xa9, 0x26, 0x00, 0xef, 0xd2, 0xec, 0x3e,
+    0x3a, 0xf7, 0x64, 0x3c, 0x9e, 0xba, 0x56, 0xa6, 0xd2, 0x78, 0xc2, 0xc7, 0xa2, 0x06, 0xd6, 0xc2,
 ];
 
 /// SHA-256 of the complete fresh-JVM Java catalog oracle encoded by this asset.
@@ -23,7 +28,9 @@ pub const BRAVURA_HEAD_TEMPLATE_ORACLE_SHA256: &str =
     "0f1c86ff8a8318520faeeb43e3375b5c76301eb163ba0cd4442b8ccb1180f832";
 
 /// The exact point sizes selected by the measured normal-staff corpus.
-pub const BRAVURA_HEAD_TEMPLATE_POINT_SIZES: [i32; 5] = [78, 83, 84, 85, 87];
+pub const BRAVURA_HEAD_TEMPLATE_POINT_SIZES: [i32; 8] = [52, 53, 54, 78, 83, 84, 85, 87];
+const BASE_POINT_SIZES: [i32; 5] = [78, 83, 84, 85, 87];
+const CHOPIN_CUE_POINT_SIZES: [i32; 3] = [52, 53, 54];
 
 /// Decode the versioned checked-in catalog asset.
 ///
@@ -31,20 +38,29 @@ pub const BRAVURA_HEAD_TEMPLATE_POINT_SIZES: [i32; 5] = [78, 83, 84, 85, 87];
 /// distance. The source oracle is not read by production code.
 pub fn load_bravura_head_template_catalogs()
 -> Result<Vec<HeadTemplateCatalog>, HeadTemplateCatalogAssetError> {
-    decode_catalogs(ASSET)
+    let mut catalogs = decode_catalogs(ASSET, ORACLE_DIGEST, &BASE_POINT_SIZES)?;
+    catalogs.extend(decode_catalogs(
+        CHOPIN_CUE_ASSET,
+        CHOPIN_CUE_ORACLE_DIGEST,
+        &CHOPIN_CUE_POINT_SIZES,
+    )?);
+    catalogs.sort_by_key(HeadTemplateCatalog::point_size);
+    Ok(catalogs)
 }
 
 fn decode_catalogs(
     bytes: &[u8],
+    expected_digest: [u8; 32],
+    expected_point_sizes: &[i32],
 ) -> Result<Vec<HeadTemplateCatalog>, HeadTemplateCatalogAssetError> {
     let mut reader = AssetReader::new(bytes);
     if reader.array::<8>()? != *MAGIC {
         return Err(HeadTemplateCatalogAssetError::BadMagic);
     }
     let actual_digest = reader.array::<32>()?;
-    if actual_digest != ORACLE_DIGEST {
+    if actual_digest != expected_digest {
         return Err(HeadTemplateCatalogAssetError::OracleDigestMismatch {
-            expected: ORACLE_DIGEST,
+            expected: expected_digest,
             actual: actual_digest,
         });
     }
@@ -54,11 +70,7 @@ fn decode_catalogs(
         value => return Err(HeadTemplateCatalogAssetError::UnsupportedFamily(value)),
     };
     let catalog_count = usize::from(reader.u8()?);
-    require_count(
-        "catalogs",
-        BRAVURA_HEAD_TEMPLATE_POINT_SIZES.len(),
-        catalog_count,
-    )?;
+    require_count("catalogs", expected_point_sizes.len(), catalog_count)?;
     let mut catalogs = Vec::with_capacity(catalog_count);
     let mut prior_point_size = None;
 
@@ -149,7 +161,7 @@ fn decode_catalogs(
     if catalogs
         .iter()
         .map(HeadTemplateCatalog::point_size)
-        .ne(BRAVURA_HEAD_TEMPLATE_POINT_SIZES)
+        .ne(expected_point_sizes.iter().copied())
     {
         return Err(HeadTemplateCatalogAssetError::UnexpectedPointSizes(
             catalogs
@@ -322,7 +334,7 @@ mod tests {
     #[test]
     fn checked_in_asset_has_the_complete_active_catalog_set() {
         let catalogs = load_bravura_head_template_catalogs().unwrap();
-        assert_eq!(catalogs.len(), 5);
+        assert_eq!(catalogs.len(), 8);
         assert_eq!(
             catalogs
                 .iter()
@@ -335,7 +347,7 @@ mod tests {
                 .iter()
                 .flat_map(HeadTemplateCatalog::templates)
                 .count(),
-            40
+            64
         );
         assert_eq!(
             catalogs
@@ -343,20 +355,20 @@ mod tests {
                 .flat_map(HeadTemplateCatalog::templates)
                 .flat_map(HeadTemplate::key_points)
                 .count(),
-            26_000
+            31_854
         );
     }
 
     #[test]
     fn decoder_rejects_truncation_and_trailing_data() {
         assert!(matches!(
-            decode_catalogs(&ASSET[..ASSET.len() - 1]),
+            decode_catalogs(&ASSET[..ASSET.len() - 1], ORACLE_DIGEST, &BASE_POINT_SIZES),
             Err(HeadTemplateCatalogAssetError::Truncated { .. })
         ));
         let mut extended = ASSET.to_vec();
         extended.push(0);
         assert!(matches!(
-            decode_catalogs(&extended),
+            decode_catalogs(&extended, ORACLE_DIGEST, &BASE_POINT_SIZES),
             Err(HeadTemplateCatalogAssetError::TrailingBytes { .. })
         ));
     }

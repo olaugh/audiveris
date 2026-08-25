@@ -125,7 +125,12 @@ def rounded_anchor(kind: int, dx: float, dy: float) -> tuple[int, int]:
     return x, java_round(dy - 0.5)
 
 
-def parse_oracle(path: pathlib.Path) -> tuple[bytes, dict[int, tuple[Template, ...]], int]:
+def parse_oracle(
+    path: pathlib.Path,
+    expected_pages: int,
+    expected_point_sizes: list[int],
+    expected_page_pixels: int | None,
+) -> tuple[bytes, dict[int, tuple[Template, ...]], int]:
     raw = path.read_bytes()
     page_catalogs: dict[tuple[str, int], list[Template]] = {}
     current_key: tuple[str, int] | None = None
@@ -221,9 +226,11 @@ def parse_oracle(path: pathlib.Path) -> tuple[bytes, dict[int, tuple[Template, .
             raise ValueError(f"{path}:{line_number}: {error}") from error
 
     finish_template()
-    if template_rows != 64 or len(page_catalogs) != 8:
+    expected_templates = expected_pages * 8
+    if template_rows != expected_templates or len(page_catalogs) != expected_pages:
         raise ValueError(
-            f"expected 64 templates in 8 page catalogs, got {template_rows} in {len(page_catalogs)}"
+            f"expected {expected_templates} templates in {expected_pages} page catalogs, "
+            f"got {template_rows} in {len(page_catalogs)}"
         )
 
     unique: dict[int, tuple[Template, ...]] = {}
@@ -241,7 +248,9 @@ def parse_oracle(path: pathlib.Path) -> tuple[bytes, dict[int, tuple[Template, .
         unique.setdefault(point_size, tuple(templates))
         page_pixels += sum(len(template.pixels) for template in templates)
 
-    if sorted(unique) != [78, 83, 84, 85, 87] or page_pixels != 41492:
+    if sorted(unique) != expected_point_sizes or (
+        expected_page_pixels is not None and page_pixels != expected_page_pixels
+    ):
         raise ValueError(
             f"unexpected corpus coverage: point sizes {sorted(unique)}, pixels {page_pixels}"
         )
@@ -283,6 +292,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("oracle", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
+    parser.add_argument("--expected-pages", type=int, default=8)
+    parser.add_argument(
+        "--expected-point-sizes",
+        default="78,83,84,85,87",
+        help="comma-separated sorted point sizes",
+    )
+    parser.add_argument("--expected-page-pixels", type=int, default=41492)
     parser.add_argument(
         "--check",
         action="store_true",
@@ -290,7 +306,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    raw, catalogs, page_pixels = parse_oracle(args.oracle)
+    expected_point_sizes = [int(value) for value in args.expected_point_sizes.split(",")]
+    raw, catalogs, page_pixels = parse_oracle(
+        args.oracle,
+        args.expected_pages,
+        expected_point_sizes,
+        args.expected_page_pixels,
+    )
     encoded = encode(raw, catalogs)
     if args.check:
         if not args.output.is_file() or args.output.read_bytes() != encoded:
@@ -304,7 +326,7 @@ def main() -> int:
         len(template.pixels) for templates in catalogs.values() for template in templates
     )
     print(
-        f"{len(catalogs)} catalogs, 40 templates, {unique_pixels} unique pixels, "
+        f"{len(catalogs)} catalogs, {len(catalogs) * 8} templates, {unique_pixels} unique pixels, "
         f"{page_pixels} graded page pixels, {len(encoded)} bytes"
     )
     return 0

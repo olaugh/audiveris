@@ -41,6 +41,9 @@ through Java's exact eight-shape normal-plus-small template catalog and retains
 the resulting stemmed small heads into STEMS. CUE_BEAMS now composes aggregate
 discovery, morphology, cue-beam creation/grouping, relation checks, and terminal
 BeamStem SIG mutation; the default `smallHeads=false` path remains an exact no-op.
+The first non-empty real Chopin gate now publishes stable connected
+head/stem/beam/group/aggregate IDs and exact endpoint metadata: one cue beam,
+one cue group, and four BeamStem relations survive to the terminal SIG.
 
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
@@ -12304,5 +12307,42 @@ Clippy, and diff checks pass. The untouched `origin/master` and this branch both
 retain one pre-existing CLI fixture failure: Cucaracha emits stem count 115
 where `stream_protocol` still expects 114.
 
-Next freeze a non-empty real Chopin cue aggregate, then expose stable connected
-head/stem/beam/group identities and relation metadata in the CUE_BEAMS sidecar.
+## Boundary 308: connected real-score CUE_BEAMS publication
+
+A lossless `1530x320` crop from Chopin Nocturne page 23 now provides the first
+non-empty active gate. Fresh Temurin-25 runs retain one non-abnormal
+`SmallBeamInter`, one cue `BeamGroupInter`, and four `BeamStemRelation`s. Rust
+matches the cue beam's bounds (`587,80,42,12`), median, thickness, and intrinsic
+grade at exact `f64` bits, including Java's cue-only mean-border-distance
+impact rather than ordinary-beam jitter. The Rust transaction is deterministic
+and retains two aggregates, seven spots, one beam, one group, and four accepted
+LEFT/CENTER/CENTER/RIGHT relation checks.
+
+Schema 1 now emits a connected per-system cue graph. Stable IDs cover qualified
+small heads, their live stems, cue beams, cue groups, aggregate memberships,
+HeadStem/BeamStem/Containment edges, geometry, grades, portions, extensions,
+abnormal state, and ordinary/cue provenance. Two black-box CLI runs are
+byte-identical and every published endpoint resolves in that graph.
+
+The real crop also closed three Java lifecycle gaps in the STEMS prerequisite:
+constructor-time stump directions use the post-tremolo live beam set, head
+reachability scopes its beam map to surviving constructors, and a reused stem
+with an existing HeadStem edge skips duplicate insertion like Java rather than
+failing. Supplemental Bravura point sizes 52/53/54 are frozen from three real
+Chopin inputs (24 templates, 144 anchors, 5,854 pixels).
+
+Pins: crop SHA-256
+`40d14bf054640e925dccebe2f765525cbdc35748a16067bb06bba0d6c475a98e`;
+Java result fixture
+`f7eebd22e603bb066d4b0619ef78487a80f30e8d89cd3364dfecfa00c9a155ff`;
+Java probe/runner
+`5e467e66a97ec6aa2a153431997617b7fa0b2b7386e9a45d66e68c80f2793db2` /
+`b4db73784a5847b8a01cd42575988a6ff5b7a5ca18979305507bf09488f2a37c`;
+catalog oracle/asset
+`0005d65f3b0ee4dd66a92600efd2ec3e3af7643c9eba56a6d278c2c7a206d6c2` /
+`82397efc76d2c51da8aff124d5a428ab24c63be1d665f873991a4ea82338d001`.
+Two fresh Java runs are byte-identical. The two-test cue differential passes in
+97.11s, the connected CLI gate passes in 15.51s, all 760 library tests pass
+with two ignored, and formatting plus strict workspace Clippy are clean. The
+known baseline Cucaracha CLI fixture drift (115 emitted stems versus 114
+expected) remains unrelated and unchanged.

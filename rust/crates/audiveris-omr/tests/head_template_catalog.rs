@@ -5,13 +5,13 @@ use std::collections::BTreeSet;
 use audiveris_omr::head_template::{
     HeadTemplate, HeadTemplateAnchor, HeadTemplateCatalog, HeadTemplateFamily, HeadTemplateShape,
 };
-use audiveris_omr::head_template_catalog::{
-    BRAVURA_HEAD_TEMPLATE_POINT_SIZES, load_bravura_head_template_catalogs,
-};
+use audiveris_omr::head_template_catalog::load_bravura_head_template_catalogs;
 
 const ORACLE: &str = include_str!("../../../oracle/head-template-catalog.txt");
 const SMALL_HEADS_ORACLE: &str =
     include_str!("../../../oracle/head-template-catalog-small-heads.txt");
+const CHOPIN_CUE_ORACLE: &str =
+    include_str!("../../../oracle/head-template-catalog-small-heads-chopin-cue.txt");
 
 struct CurrentTemplate<'a> {
     page: String,
@@ -41,12 +41,24 @@ impl CurrentTemplate<'_> {
 
 #[test]
 fn native_catalog_asset_matches_every_fresh_jvm_page_record() {
-    assert_oracle(ORACLE, 32, 192, 27_207);
+    assert_oracle(ORACLE, 8, 32, 192, 27_207, &[78, 83, 84, 85, 87]);
 }
 
 #[test]
 fn native_catalog_asset_matches_every_small_heads_page_record() {
-    assert_oracle(SMALL_HEADS_ORACLE, 64, 384, 41_492);
+    assert_oracle(
+        SMALL_HEADS_ORACLE,
+        8,
+        64,
+        384,
+        41_492,
+        &[78, 83, 84, 85, 87],
+    );
+}
+
+#[test]
+fn native_catalog_asset_matches_the_real_chopin_cue_crop() {
+    assert_oracle(CHOPIN_CUE_ORACLE, 3, 24, 144, 5_854, &[52, 53, 54]);
 }
 
 #[test]
@@ -70,9 +82,11 @@ fn small_heads_oracle_pins_live_java_shape_census() {
 
 fn assert_oracle(
     oracle: &str,
+    expected_pages: usize,
     expected_templates: usize,
     expected_anchors: usize,
     expected_pixels: usize,
+    expected_point_sizes: &[i32],
 ) {
     let catalogs = load_bravura_head_template_catalogs().unwrap();
     let mut current: Option<CurrentTemplate<'_>> = None;
@@ -186,14 +200,14 @@ fn assert_oracle(
         .expect("oracle must contain templates")
         .assert_complete();
 
-    assert_eq!(catalog_rows, 8);
-    assert_eq!(pages.len(), 8);
+    assert_eq!(catalog_rows, expected_pages);
+    assert_eq!(pages.len(), expected_pages);
     assert_eq!(template_rows, expected_templates);
     assert_eq!(anchor_rows, expected_anchors);
     assert_eq!(pixel_rows, expected_pixels);
     assert_eq!(
         point_sizes.into_iter().collect::<Vec<_>>(),
-        BRAVURA_HEAD_TEMPLATE_POINT_SIZES
+        expected_point_sizes
     );
 }
 

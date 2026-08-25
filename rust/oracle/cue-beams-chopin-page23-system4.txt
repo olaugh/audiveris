@@ -1,0 +1,34 @@
+# Temurin-25 BeamsBuilder.getCueAggregates oracle.
+# Java reaches REDUCTION with the qualified smallHeads switch true.
+cueaggregatestage chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 77 bounds 619 112 10 8 gradeBits 3fe7b8431c0f0ab4 contextual 3fecdf7176f8f476
+cueaggregatestagerelation chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 headOrdinal 77 stemOrdinal 191 stemBounds 626 85 4 28 gradeBits 3fea52dca2a3e115 dxBits bfc08d9e3e6b1155 dyBits 0000000000000000 side RIGHT extension Point2D.Double[627.1634642285368, 119.0] consistencyBits 3fef9f9f9f9f9f9e
+cueaggregatestage chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 79 bounds 606 119 10 8 gradeBits 3fe6396396396397 contextual 3febc286beb523af
+cueaggregatestagerelation chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 headOrdinal 79 stemOrdinal 205 stemBounds 612 84 4 36 gradeBits 3fe97756ac4d4619 dxBits bfc2c6126ec4d000 dyBits 0000000000000000 side RIGHT extension Point2D.Double[613.9552902065259, 126.0] consistencyBits 3fe86fb586fb5870
+cueaggregatestage chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 88 bounds 580 106 10 8 gradeBits 3fe4c6dd1fe8414d contextual 3feb6a521d6b049c
+cueaggregatestagerelation chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 headOrdinal 88 stemOrdinal 206 stemBounds 587 81 4 26 gradeBits 3fe9a3a2db66e261 dxBits bfc254e137bed155 dyBits 0000000000000000 side RIGHT extension Point2D.Double[587.996742444993, 113.0] consistencyBits 3ff04a7904a7904a
+cueaggregatestage chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 90 bounds 592 114 10 8 gradeBits 3fe6bc1b6804fba4 contextual 3febf4c0d43c9912
+cueaggregatestagerelation chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 headOrdinal 90 stemOrdinal 203 stemBounds 599 82 3 33 gradeBits 3fe9eb86bd536a77 dxBits bfc19b8cb7f5c400 dyBits 0000000000000000 side RIGHT extension Point2D.Double[600.0646123454507, 121.0] consistencyBits 3feb91b91b91b91b
+cueaggregatestage chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 136 bounds 1352 235 10 8 gradeBits 3fe6f1b007151987 contextual 3fece0dcecba6a9f
+cueaggregatestagerelation chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 headOrdinal 136 stemOrdinal 198 stemBounds 1360 204 4 32 gradeBits 3fef4e7f32a306c4 dxBits 3f808cea1ce08000 dyBits 0000000000000000 side RIGHT extension Point2D.Double[1361.812301617345, 242.0] consistencyBits 3fedddddddddddde
+cueaggregatestage chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 142 bounds 781 247 10 8 gradeBits 3fe41788d34f3db8 contextual 3fe9db52257cd1ff
+cueaggregatestagerelation chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 headOrdinal 142 stemOrdinal 207 stemBounds 778 227 6 25 gradeBits 3fecc2a54d193b04 dxBits 3fa2eff8700faaab dyBits 0000000000000000 side LEFT extension Point2D.Double[780.3408287078989, 254.0] consistencyBits 3ff0cccccccccccd
+cueaggregatestage chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 143 bounds 775 251 10 8 gradeBits 3fd4914914914915 contextual 3fe12799a839160b
+cueaggregatestagerelation chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 headOrdinal 143 stemOrdinal 207 stemBounds 778 227 6 25 gradeBits 3febb6e6805ebe7e dxBits bfb997453c983800 dyBits 0000000000000000 side RIGHT extension Point2D.Double[783.5157528925998, 258.0] consistencyBits 3ff0cccccccccccd
+cueaggregatestagebeam chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 212 bounds 587 80 42 12 medianBits 4082580000000000 4054d2a7f7be9065 4083a80000000000 405624d827a02247 heightBits 401584bbb4038f78 gradeBits 3fe1c8aeeec74dc1 impacts wdth:3feb8e38e38e38e4,minH:3fe4f89791d6ef6c,maxH:3ff0000000000000,core:3fe5b5256d495b54,belt:3fe092f113840498,jit:3fe8d4efa1d758c0 abnormal false
+cueaggregatestagebeamstem chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 sourceOrdinal 212 targetOrdinal 206 gradeBits 3fefcc177c298213 dxBits 3f79a096552dd555 dyBits 0000000000000000 portion LEFT extensionBits 40826499c385ff13 40547330dfb600ea
+cueaggregatestagebeamstem chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 sourceOrdinal 212 targetOrdinal 203 gradeBits 3ff0000000000000 dxBits 0000000000000000 dyBits 0000000000000000 portion CENTER extensionBits 4082c3db0b5a210d 4054d310f73f8086
+cueaggregatestagebeamstem chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 sourceOrdinal 212 targetOrdinal 205 gradeBits 3ff0000000000000 dxBits 0000000000000000 dyBits 0000000000000000 portion CENTER extensionBits 408334393659c38f 4055442a79df690a
+cueaggregatestagebeamstem chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 sourceOrdinal 212 targetOrdinal 191 gradeBits 3fefc8860d27be9b dxBits 3f7b5d72942aaaab dyBits 0000000000000000 portion RIGHT extensionBits 40839ca430af7900 4055ad438ab79922
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 33 members 22
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 34 members 23
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 35 members 24
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 36 members 25
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 37 members 26
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 38 members 27
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 39 members 28
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 40 members 29
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 41 members 30
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 42 members 31
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 43 members 32
+cueaggregatestagegroup chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 ordinal 213 members 212
+cueaggregatestagesummary chopin-nocturne-page23-system4-cue.png#1 step CUE_BEAMS system 1 smallBlack 7 smallBeams 1 groups 12 beamStemRelations 4

@@ -739,17 +739,28 @@ fn materialize_system(
         return Err(NativeStemsHeadCornerReachabilityError::InvalidParameters { system_id });
     }
 
+    // Java removes tremolo-like beams from `systemBeams` while constructing
+    // beam linkers, before head reachability starts. The stump snapshot still
+    // retains their geometry, so scope every downstream beam view to the
+    // constructor survivors recorded by beam reachability.
+    let live_beam_sources = reach_system
+        .beam_sources_in_inspection_order
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
     let beam_map = beam_system
         .beams_by_abscissa
         .iter()
+        .filter(|beam| live_beam_sources.contains(&beam.source))
         .map(|beam| (beam.source, beam))
         .collect::<BTreeMap<_, _>>();
-    if beam_map.len() != beam_system.beams_by_abscissa.len() {
+    if beam_map.len() != live_beam_sources.len() {
         return Err(NativeStemsHeadCornerReachabilityError::InvalidParameters { system_id });
     }
     let beam_sources_by_abscissa = beam_system
         .beams_by_abscissa
         .iter()
+        .filter(|beam| live_beam_sources.contains(&beam.source))
         .map(|beam| beam.source)
         .collect::<Vec<_>>();
     if beam_system.beams_by_abscissa.windows(2).any(|pair| {
@@ -761,12 +772,11 @@ fn materialize_system(
     if reach_system.beam_sources_in_inspection_order != beam_sources_by_abscissa {
         return Err(NativeStemsHeadCornerReachabilityError::InvalidParameters { system_id });
     }
-    let mut beams_by_sig = beam_system.beams_by_abscissa.iter().collect::<Vec<_>>();
+    let mut beams_by_sig = beam_map.values().copied().collect::<Vec<_>>();
     beams_by_sig.sort_by_key(|beam| beam.sig_ordinal);
     if beams_by_sig
-        .iter()
-        .enumerate()
-        .any(|(ordinal, beam)| beam.sig_ordinal != ordinal)
+        .windows(2)
+        .any(|pair| pair[0].sig_ordinal == pair[1].sig_ordinal)
     {
         return Err(NativeStemsHeadCornerReachabilityError::InvalidParameters { system_id });
     }

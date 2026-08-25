@@ -330,6 +330,29 @@ pub fn create_beam_inters(
         return Vec::new();
     };
 
+    create_beam_inters_with_distance(structure, pixels, item_parameters, sheet, distance)
+}
+
+/// Java `createSmallBeamInters`: cue beams use `computeLines` mean border
+/// distance, not the top/bottom jitter kernel used by ordinary beams.
+#[must_use]
+pub fn create_small_beam_inters(
+    structure: &BeamStructureAnalysis,
+    pixels: BeamRaster<'_>,
+    item_parameters: &ItemParameters,
+    sheet: &SheetParameters,
+) -> Vec<RawBeam> {
+    let distance = 1.0 - (structure.global_distance / sheet.max_distance_to_border);
+    create_beam_inters_with_distance(structure, pixels, item_parameters, sheet, distance)
+}
+
+fn create_beam_inters_with_distance(
+    structure: &BeamStructureAnalysis,
+    pixels: BeamRaster<'_>,
+    item_parameters: &ItemParameters,
+    sheet: &SheetParameters,
+    distance: f64,
+) -> Vec<RawBeam> {
     let line_count = structure.lines.len();
     let mut beams = Vec::new();
 
