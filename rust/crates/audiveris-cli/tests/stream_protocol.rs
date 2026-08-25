@@ -6,6 +6,8 @@ use std::{path::PathBuf, process::Command};
 
 const STEMS_EPILOG_ORACLE: &str = include_str!("../../../oracle/stems-epilog-chula.txt");
 const SMALL_HEADS_CONSTANT: &str = "org.audiveris.omr.sheet.ProcessingSwitches.smallHeads=true";
+const CUE_RECOVERY_CONSTANT: &str =
+    "org.audiveris.omr.sheet.beam.CueBeamsStep.supplementalHookRecovery=true";
 
 fn binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_audiveris-cli")
@@ -316,6 +318,51 @@ fn active_chopin_cue_beams_publish_a_connected_stable_graph() {
     assert_eq!(payload.matches("\"kind\":\"HeadStem\"").count(), 6);
     assert_eq!(payload.matches("\"kind\":\"Containment\"").count(), 1);
     assert_eq!(payload.matches("\"shape\":\"BEAM_SMALL\"").count(), 1);
+}
+
+#[test]
+fn supplemental_chopin_cue_hook_is_stable_connected_and_provenanced() {
+    let run = || {
+        let output = Command::new(binary())
+            .args([
+                "-batch",
+                "-step",
+                "CUE_BEAMS",
+                "-json",
+                "-constant",
+                SMALL_HEADS_CONSTANT,
+                "-constant",
+                CUE_RECOVERY_CONSTANT,
+            ])
+            .arg(chopin_cue())
+            .output()
+            .expect("run Chopin supplemental cue recovery");
+        assert!(
+            output.status.success(),
+            "supplemental CUE_BEAMS failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("CLI stdout is UTF-8")
+    };
+    let payload = run();
+    assert_eq!(payload, run(), "supplemental cue recovery is deterministic");
+    for exact in [
+        "\"supplemental_hook_recovery_enabled\":true",
+        "\"recovery_count\":1",
+        "\"beam_count\":2",
+        "\"group_count\":2",
+        "\"relation_count\":5",
+        "\"id\":\"s1:i1016\",\"sig_ordinal\":1016,\"provenance\":\"recovery\",\"shape\":\"BEAM_SMALL\"",
+        "\"source_spot_ordinal\":null,\"recovery\":{\"source\":\"stem_guided_hook\",\"base_beam_ordinal\":0,\"stem_seed_id\":995,\"paired_stem_seed_id\":null,\"side\":\"below\",\"direction\":\"left\"}",
+        "\"kind\":\"Containment\",\"source_id\":\"s1:i1017\",\"target_id\":\"s1:i1016\",\"provenance\":\"recovery\"",
+        "\"kind\":\"BeamStem\",\"source_id\":\"s1:i1016\",\"target_id\":\"s1:i995\",\"provenance\":\"recovery\"",
+    ] {
+        assert!(
+            payload.contains(exact),
+            "recovery sidecar is missing {exact}"
+        );
+    }
+    assert_eq!(payload.matches("\"provenance\":\"recovery\"").count(), 3);
 }
 
 #[test]

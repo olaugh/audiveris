@@ -10,6 +10,7 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use audiveris_image::{
+    beam_extension::ExtensionGlyph,
     beam_groups::{BeamGroupEvidence, BeamGroupParameters, GroupingBeam, group_beam_evidence},
     beam_structure::{BeamRaster, Segment},
     glyph_factory::{GlyphComponent, build_glyph_components},
@@ -39,6 +40,10 @@ use crate::native_stems_beam_vlink_reuse_check::{
 use crate::native_stems_beam_vlinkers::generic_intersection;
 use crate::native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef};
 use crate::recognize::GridLinesRecognition;
+use crate::stem_guided_hook_recovery::{
+    StemGuidedHookRecovery, StemGuidedHookRecoveryConfig, StemGuidedHookRecoveryInput,
+    recover_stem_guided_hooks,
+};
 use crate::stems_step::{NativeStemHeadSide, NativeStemPoint, NativeStemVerticalSide};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,6 +276,9 @@ pub struct NativeActiveCueBeamsRecognition {
     pub processing: NativeCueAggregateProcessRecognition,
     pub spots: NativeCueSpotRecognition,
     pub checks: NativeCueBeamCheckRecognition,
+    /// Optional non-Java fragments recovered from cue stems after ordinary
+    /// cue grading and before SIG mutation.
+    pub recoveries: NativeCueBeamRecoveryRecognition,
     pub mutations: NativeCueBeamMutationRecognition,
     pub grouping: NativeCueBeamGroupingRecognition,
     pub stem_lookup: NativeCueBeamStemLookupRecognition,
@@ -357,8 +365,28 @@ pub fn recognize_native_cue_beams_with_options(
             .map_err(|error| cue_recognition_error("spot extraction", error))?;
         let checks = check_native_cue_beam_spots(grid, &spots, reduction.stems.reduction_interline)
             .map_err(|error| cue_recognition_error("beam checks", error))?;
-        let mutations = materialize_native_cue_beam_mutations(grid, &reduction, &spots, &checks)
-            .map_err(|error| cue_recognition_error("beam materialization", error))?;
+        let recoveries = recover_native_cue_beam_fragments(
+            grid,
+            &reduction,
+            &aggregates,
+            &processing,
+            &checks,
+            StemGuidedHookRecoveryConfig {
+                enabled: options.supplemental_hook_recovery,
+                debug: std::env::var_os("AUDIVERIS_DEBUG_CUE_STEM_GUIDED_HOOK_RECOVERY")
+                    .is_some_and(|value| value == "1"),
+                ..StemGuidedHookRecoveryConfig::default()
+            },
+        )
+        .map_err(|error| cue_recognition_error("stem-guided recovery", error))?;
+        let mutations = materialize_native_cue_beam_mutations_with_recovery(
+            grid,
+            &reduction,
+            &spots,
+            &checks,
+            &recoveries,
+        )
+        .map_err(|error| cue_recognition_error("beam materialization", error))?;
         let grouping =
             group_native_cue_beams(&mutations, &checks, reduction.stems.reduction_interline)
                 .map_err(|error| cue_recognition_error("beam grouping", error))?;
@@ -387,6 +415,7 @@ pub fn recognize_native_cue_beams_with_options(
             processing,
             spots,
             checks,
+            recoveries,
             mutations,
             grouping,
             stem_lookup,
@@ -533,6 +562,21 @@ pub struct NativeCueBeamCheckRecognition {
     pub aggregates: Vec<NativeCueBeamAggregateCheck>,
 }
 
+/// One optional non-Java cue fragment proposed from a checked small beam and
+/// the aggregate's already accepted stems. Recovered geometry is normalized
+/// to `SmallBeamInter` before entering the cue mutation path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeCueBeamRecovery {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub recovery: StemGuidedHookRecovery,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeCueBeamRecoveryRecognition {
+    pub recoveries: Vec<NativeCueBeamRecovery>,
+}
+
 /// Java registers and retains each candidate cue spot before it knows whether
 /// beam grading will accept it.
 #[derive(Clone, Debug, PartialEq)]
@@ -548,10 +592,13 @@ pub struct NativeCueSpotRegistration {
 pub struct NativeCueBeamRegistration {
     pub system_id: usize,
     pub aggregate_ordinal: usize,
-    pub spot_ordinal: usize,
+    /// Absent for a stem-guided fragment that did not survive the cue-spot
+    /// component chain. Its source-raster/stem evidence lives in `recovery`.
+    pub spot_ordinal: Option<usize>,
     pub sig_ordinal: NativeSigVertexId,
     pub beam: RawBeam,
     pub fixed_glyph: RegisteredBeamGlyph,
+    pub recovery: Option<StemGuidedHookRecovery>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1036,6 +1083,139 @@ pub fn check_native_cue_beam_spots(
     Ok(NativeCueBeamCheckRecognition { aggregates })
 }
 
+/// Run the modular stem-guided fragment pass inside active CUE_BEAMS.
+///
+/// The generic recovery kernel reasons in ordinary `Beam`/`Hook` geometry.
+/// This adapter deliberately converts checked `SmallBeam` parents to that
+/// neutral geometry for the search, restricts stem evidence to the current
+/// cue aggregate, and converts every accepted result back to `SmallBeam`.
+/// Keeping the adapter here prevents cue policy from leaking into ordinary
+/// BEAMS and lets callers disable the extension with an exact no-op config.
+pub fn recover_native_cue_beam_fragments(
+    grid: &GridLinesRecognition,
+    reduction: &NativeReductionRecognition,
+    aggregates: &NativeCueAggregateRecognition,
+    processing: &NativeCueAggregateProcessRecognition,
+    checks: &NativeCueBeamCheckRecognition,
+    config: StemGuidedHookRecoveryConfig,
+) -> Result<NativeCueBeamRecoveryRecognition, NativeCueBeamMutationError> {
+    if !config.enabled {
+        return Ok(NativeCueBeamRecoveryRecognition::default());
+    }
+
+    let interline = reduction.stems.reduction_interline;
+    let sheet = SheetParameters::new(interline);
+    let raster = BeamRaster {
+        table: &grid.no_staff,
+        offset_x: 0,
+        offset_y: 0,
+    };
+    let mut recoveries = Vec::new();
+    for checked in &checks.aggregates {
+        let system_id = checked.system_id;
+        let aggregate_ordinal = checked.aggregate_ordinal;
+        let process = processing
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .and_then(|system| {
+                system
+                    .plans
+                    .iter()
+                    .find(|plan| plan.aggregate_ordinal == aggregate_ordinal)
+            })
+            .ok_or_else(|| cue_lookup_error(system_id, aggregate_ordinal, "missing cue plan"))?;
+        if process.cue_box.is_none() {
+            continue;
+        }
+        let aggregate = aggregates
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .and_then(|system| {
+                system
+                    .aggregates
+                    .iter()
+                    .find(|aggregate| aggregate.ordinal == aggregate_ordinal)
+            })
+            .ok_or_else(|| {
+                cue_lookup_error(system_id, aggregate_ordinal, "missing cue aggregate")
+            })?;
+        let sig = reduction
+            .stems
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .map(|system| &system.transaction.state_after.beam_state.sig)
+            .ok_or_else(|| cue_lookup_error(system_id, aggregate_ordinal, "missing cue SIG"))?;
+
+        let mut seen_stems = BTreeSet::new();
+        let mut stem_seeds = Vec::new();
+        for &(_, stem_id) in &aggregate.members {
+            if !seen_stems.insert(stem_id.0) {
+                continue;
+            }
+            let stem = sig.vertex(stem_id.0).ok_or_else(|| {
+                cue_lookup_error(system_id, aggregate_ordinal, "missing cue stem")
+            })?;
+            let width = usize::try_from(stem.bounds.width).map_err(|_| {
+                cue_lookup_error(system_id, aggregate_ordinal, "negative cue stem width")
+            })?;
+            let height = usize::try_from(stem.bounds.height).map_err(|_| {
+                cue_lookup_error(system_id, aggregate_ordinal, "negative cue stem height")
+            })?;
+            let x = f64::from(stem.bounds.x) + (f64::from(stem.bounds.width) / 2.0);
+            stem_seeds.push(ExtensionGlyph {
+                id: stem_id.0,
+                left: stem.bounds.x,
+                top: stem.bounds.y,
+                width,
+                height,
+                vertical_median: Some(Segment {
+                    x1: x,
+                    y1: f64::from(stem.bounds.y),
+                    x2: x,
+                    y2: f64::from(stem.bounds.y.saturating_add(stem.bounds.height)),
+                }),
+            });
+        }
+
+        let parents = checked
+            .glyphs
+            .iter()
+            .flat_map(|glyph| glyph.created_cues.iter())
+            .map(|beam| RawBeam {
+                kind: BeamKind::Beam,
+                ..*beam
+            })
+            .collect::<Vec<_>>();
+        if parents.is_empty() || stem_seeds.is_empty() {
+            continue;
+        }
+        let occupied = parents.clone();
+        let item = ItemParameters::new(interline, process.cue_beam_height, true);
+        for mut recovery in recover_stem_guided_hooks(
+            StemGuidedHookRecoveryInput {
+                beams: &parents,
+                occupied: &occupied,
+                stem_seeds: &stem_seeds,
+                raster,
+                item_parameters: &item,
+                sheet: &sheet,
+            },
+            config,
+        ) {
+            recovery.hook.kind = BeamKind::SmallBeam;
+            recoveries.push(NativeCueBeamRecovery {
+                system_id,
+                aggregate_ordinal,
+                recovery,
+            });
+        }
+    }
+    Ok(NativeCueBeamRecoveryRecognition { recoveries })
+}
+
 /// Apply Java's register-spot/append-spot/register-small-beam mutation prefix.
 ///
 /// Cue grouping and BeamStem linking are intentionally not performed here;
@@ -1046,6 +1226,25 @@ pub fn materialize_native_cue_beam_mutations(
     reduction: &NativeReductionRecognition,
     spots: &NativeCueSpotRecognition,
     checks: &NativeCueBeamCheckRecognition,
+) -> Result<NativeCueBeamMutationRecognition, NativeCueBeamMutationError> {
+    materialize_native_cue_beam_mutations_with_recovery(
+        grid,
+        reduction,
+        spots,
+        checks,
+        &NativeCueBeamRecoveryRecognition::default(),
+    )
+}
+
+/// Variant of the Java-exact mutation prefix that also appends optional
+/// stem-guided cue fragments. The wrapper above supplies an empty recovery set
+/// and therefore preserves ordinary cue recognition byte-for-byte.
+pub fn materialize_native_cue_beam_mutations_with_recovery(
+    grid: &GridLinesRecognition,
+    reduction: &NativeReductionRecognition,
+    spots: &NativeCueSpotRecognition,
+    checks: &NativeCueBeamCheckRecognition,
+    recoveries: &NativeCueBeamRecoveryRecognition,
 ) -> Result<NativeCueBeamMutationRecognition, NativeCueBeamMutationError> {
     let page = grid.no_staff.to_pixels();
     let mut registered_spots = Vec::new();
@@ -1107,13 +1306,45 @@ pub fn materialize_native_cue_beam_mutations(
                     beams.push(NativeCueBeamRegistration {
                         system_id,
                         aggregate_ordinal: check_aggregate.aggregate_ordinal,
-                        spot_ordinal,
+                        spot_ordinal: Some(spot_ordinal),
                         sig_ordinal,
                         beam: *beam,
                         fixed_glyph,
+                        recovery: None,
                     });
                 }
             }
+        }
+        for recovered in recoveries
+            .recoveries
+            .iter()
+            .filter(|recovery| recovery.system_id == system_id)
+        {
+            let beam = recovered.recovery.hook;
+            if beam.kind != BeamKind::SmallBeam {
+                return Err(NativeCueBeamMutationError {
+                    system_id,
+                    aggregate_ordinal: recovered.aggregate_ordinal,
+                    message: "cue recovery produced a non-small beam".to_owned(),
+                });
+            }
+            let fixed_glyph =
+                retrieve_beam_glyph(beam.item, grid.scale.width, grid.scale.height, &page)
+                    .map_err(|error| NativeCueBeamMutationError {
+                        system_id,
+                        aggregate_ordinal: recovered.aggregate_ordinal,
+                        message: error.to_string(),
+                    })?;
+            let sig_ordinal = append_native_cue_beam_vertex(&mut sig_after, &beam);
+            beams.push(NativeCueBeamRegistration {
+                system_id,
+                aggregate_ordinal: recovered.aggregate_ordinal,
+                spot_ordinal: None,
+                sig_ordinal,
+                beam,
+                fixed_glyph,
+                recovery: Some(recovered.recovery),
+            });
         }
         systems.push(NativeCueBeamMutationSystem {
             system_id,

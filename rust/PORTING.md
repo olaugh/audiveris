@@ -105,7 +105,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
 | Structured output and live comparison | Ordinary `-json` emits one schema-1 document per requested sheet through CUE_BEAMS. The opt-in `-stream-json` protocol wraps byte-identical immutable completed-stage snapshots in GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS -> STEMS -> REDUCTION -> CUE_BEAMS order; it does not expose intra-stage items. REDUCTION retains every upstream product and its exact phase/cleanup evidence. CUE_BEAMS preserves Java's default `smallHeads=false` no-op and, when the exact qualified switch is true, composes aggregate discovery through terminal BeamStem SIG mutation. Ordinary cue recognition and supplemental hook recovery have independent qualified controls. Text after GRID remains explicitly unsupported. The workspace carries no serialization dependency |
-| Rust workspace | STEMS is complete through its generic epilog. REDUCTION Boundary 296 atomically composes and publishes the complete stage. Boundary 308 validates active CUE_BEAMS on a non-empty Chopin crop and publishes a stable connected head/stem/beam/group/aggregate graph: one exact cue beam, one cue group, and four BeamStem relations. The original eight-page differential remains exact. CI repeats formatting, strict Clippy, and workspace tests on Ubuntu and macOS |
+| Rust workspace | STEMS is complete through its generic epilog. REDUCTION Boundary 296 atomically composes and publishes the complete stage. Boundaries 308-309 validate active CUE_BEAMS on a non-empty Chopin crop and publish a stable connected head/stem/beam/group/aggregate graph. Ordinary recognition yields one exact cue beam, one cue group, and four BeamStem relations; the independently enabled supplemental recovery adds one cue hook and group with explicit recovery provenance. StageAligner sidecar v5 consumes the complete graph. The original eight-page differential remains exact. CI repeats formatting, strict Clippy, and workspace tests on Ubuntu and macOS |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
@@ -6754,3 +6754,36 @@ catalog oracle/asset
 The two-test cue differential passes in 97.11s, the connected CLI gate in
 15.51s, all 760 library tests pass with two ignored, formatting and strict
 workspace Clippy pass, and the unrelated baseline Cucaracha count drift remains.
+
+## Boundary 309: execute supplemental cue recovery and export it losslessly
+
+The optional cue recovery control now invokes the independent
+`stem_guided_hook_recovery` raster kernel after ordinary cue checks and before
+SIG mutation. Recovered fragments are `BEAM_SMALL` objects which traverse the
+same grouping and BeamStem continuation as ordinary cue beams. They retain
+source/stem/direction evidence, use null spot provenance, and mark their beam,
+BeamStem, and Containment records as `recovery`; an empty recovery set keeps
+the default Java-equivalent path unchanged.
+
+On the pinned Chopin crop, the opt-in pass stably adds one left-projecting
+below-parent hook at `573,79,18,11`, one group, and one RIGHT BeamStem edge.
+The resulting graph has 2 beams, 2 groups, 5 BeamStem, 6 HeadStem, and 2
+Containment edges and is byte-identical across two CLI runs.
+
+StageAligner's sidecar is now backward-compatible v5. It preserves the full
+connected cue graph, and its Swift loader carries stable IDs, aggregate/group
+membership, relation endpoints/grades/portions/extensions, abnormal flags,
+and ordinary/cue/recovery provenance into proposals. A real end-to-end crop
+run loads 513 proposals and all 15 graph vertices. The full Rust library,
+focused cue/CLI tests, Python tests, Swift tests, formatting, and strict Clippy
+pass; only the unrelated pre-existing Cucaracha stem-count assertion remains.
+
+From the StageAligner repository root, generate the connected proposal layer
+with `python3 scripts/run_stage_aligner_rust_heads.py --project <project-id>`
+(add `--cli <audiveris-cli>` when the binary is not at the script's default).
+The exporter invokes `-step CUE_BEAMS -json` with the exact qualified constants
+`org.audiveris.omr.sheet.ProcessingSwitches.smallHeads=true` and
+`org.audiveris.omr.sheet.beam.CueBeamsStep.supplementalHookRecovery=true`.
+Omit the latter constant for the Java-equivalent ordinary cue result; set
+`org.audiveris.omr.sheet.beam.CueBeamsStep.enabled=false` to disable ordinary
+cue recognition independently.

@@ -12346,3 +12346,51 @@ Two fresh Java runs are byte-identical. The two-test cue differential passes in
 with two ignored, and formatting plus strict workspace Clippy are clean. The
 known baseline Cucaracha CLI fixture drift (115 emitted stems versus 114
 expected) remains unrelated and unchanged.
+
+## Boundary 309: supplemental cue recovery and StageAligner consumption
+
+The independently controlled `CueBeamsStep.supplementalHookRecovery` path now
+executes rather than merely recording its request. After ordinary cue grading,
+the side-effect-free `stem_guided_hook_recovery` kernel searches only the
+current cue aggregate's accepted stems and checked small-beam parents. Any
+accepted fragment is normalized back to `BEAM_SMALL`, enters the ordinary cue
+SIG/group/stem-link continuation, and retains explicit parent-beam, stem-seed,
+paired-seed, side, and direction evidence. The default-disabled path still
+uses an empty recovery set and leaves the Java-parity result byte-identical.
+
+The Chopin crop supplies a real positive gate: recovery deterministically adds
+one `573,79,18,11` small hook, one cue group, one RIGHT BeamStem relation, and
+one Containment relation. Schema 1 marks the beam and both incident edges with
+`provenance:"recovery"`; its source spot is null and its full recovery evidence
+is serialized. Two CLI runs are byte-identical. The connected graph now has
+two beams, two groups, five BeamStem edges, six HeadStem edges, and two
+Containment edges.
+
+The external StageAligner exporter advances compatibly to
+`stage-omr.rust-heads.v5`: it retains `cue_beams.systems` instead of flattening
+away topology, while preserving its prior HEADS/STEMS/BEAMS arrays. The Swift
+loader merges exact qualified objects, keeps cue-only terminal geometries,
+materializes cue beams/groups, and carries stable graph IDs, aggregate/member
+IDs, abnormal state, typed incident relations, and recovery provenance. The
+real crop exports 513 visual proposals and all 15 graph vertices without a
+missing endpoint.
+
+The reproducible fixture is the full-width crop `(x=0, y=1040, width=1530,
+height=320)` of
+`stage-omr-data/data/real-datasets/chopin-nocturnes-joseffy/pdf-page-23.png`.
+ImageMagick subimage comparison reports exact zero error at that offset. From
+the StageAligner repository root, generate connected proposals with
+`python3 scripts/run_stage_aligner_rust_heads.py --project <project-id>` and
+add `--cli <audiveris-cli>` when needed. The exporter passes
+`ProcessingSwitches.smallHeads=true` and
+`CueBeamsStep.supplementalHookRecovery=true`; omit the latter for ordinary cue
+recognition without recovery, or set `CueBeamsStep.enabled=false` to disable
+ordinary CUE_BEAMS independently.
+
+Verification: 765 library tests pass with two ignored; the two real cue tests
+pass; all four relevant CLI stream/active-cue tests pass, including the new
+two-run recovery gate; Python exporter tests are 6/6; StageAligner is 30/30
+with one optional real-sidecar gate skipped in the ordinary run and that gate
+passes when supplied the generated Chopin v5 sidecar. Formatting, strict
+workspace/all-target/all-feature Clippy, and diff checks pass. The sole full
+CLI failure remains the pre-existing Cucaracha 115-versus-114 stem fixture.

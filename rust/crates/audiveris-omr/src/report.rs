@@ -2219,6 +2219,13 @@ fn cue_beams_product(json: &mut Json, recognition: &NativeCueBeamsRecognition) {
     json.field_integer("aggregate_count", aggregate_count as i64);
     json.field_integer("spot_count", spot_count as i64);
     json.field_integer("beam_count", beam_count as i64);
+    json.field_integer(
+        "recovery_count",
+        recognition
+            .active
+            .as_deref()
+            .map_or(0, |active| active.recoveries.recoveries.len()) as i64,
+    );
     json.field_integer("group_count", group_count as i64);
     json.field_integer("relation_count", relation_count as i64);
     json.field_integer(
@@ -2278,11 +2285,6 @@ fn cue_graph(
             .iter()
             .map(|head| head.stem_sig_ordinal.0)
             .collect::<BTreeSet<_>>();
-        let beam_ids = mutation_system
-            .beams
-            .iter()
-            .map(|beam| beam.sig_ordinal.0)
-            .collect::<BTreeSet<_>>();
         let group_ids = grouping_system
             .aggregates
             .iter()
@@ -2332,13 +2334,29 @@ fn cue_graph(
             let vertex = sig
                 .vertex(beam.sig_ordinal.0)
                 .expect("created cue beam remains live in terminal SIG");
-            cue_vertex_prefix(json, system_id, vertex, "cue");
+            cue_vertex_prefix(
+                json,
+                system_id,
+                vertex,
+                if beam.recovery.is_some() {
+                    "recovery"
+                } else {
+                    "cue"
+                },
+            );
             json.field_integer("aggregate_ordinal", beam.aggregate_ordinal as i64);
             json.field_string(
                 "aggregate_id",
                 &format!("s{system_id}:a{}", beam.aggregate_ordinal),
             );
-            json.field_integer("source_spot_ordinal", beam.spot_ordinal as i64);
+            json.key("source_spot_ordinal");
+            match beam.spot_ordinal {
+                Some(ordinal) => json.integer(ordinal as i64),
+                None => json.null(),
+            }
+            if let Some(recovery) = beam.recovery.as_ref() {
+                cue_recovery(json, recovery);
+            }
             json.field_string(
                 "kind",
                 match vertex.kind {
@@ -2364,11 +2382,57 @@ fn cue_graph(
         cue_groups(json, system_id, grouping_system, mutation_system, sig);
         cue_aggregates(json, system_id, aggregates);
         cue_relations(
-            json, system_id, sig, &head_ids, &stem_ids, &beam_ids, &group_ids,
+            json,
+            system_id,
+            sig,
+            &head_ids,
+            &stem_ids,
+            mutation_system,
+            &group_ids,
         );
         json.close('}');
     }
     json.close(']');
+}
+
+fn cue_recovery(
+    json: &mut Json,
+    recovery: &crate::stem_guided_hook_recovery::StemGuidedHookRecovery,
+) {
+    use crate::stem_guided_hook_recovery::{StemGuidedHookDirection, StemGuidedHookSide};
+
+    json.key("recovery");
+    json.open('{');
+    json.field_string(
+        "source",
+        if recovery.paired_stem_seed_id.is_some() {
+            "stem_guided_secondary_beam"
+        } else {
+            "stem_guided_hook"
+        },
+    );
+    json.field_integer("base_beam_ordinal", recovery.base_beam_ordinal as i64);
+    json.field_integer("stem_seed_id", recovery.stem_seed_id as i64);
+    json.key("paired_stem_seed_id");
+    match recovery.paired_stem_seed_id {
+        Some(id) => json.integer(id as i64),
+        None => json.null(),
+    }
+    json.field_string(
+        "side",
+        match recovery.side {
+            StemGuidedHookSide::Above => "above",
+            StemGuidedHookSide::Below => "below",
+        },
+    );
+    json.field_string(
+        "direction",
+        match recovery.direction {
+            StemGuidedHookDirection::Left => "left",
+            StemGuidedHookDirection::Right => "right",
+        },
+    );
+    json.close('}');
 }
 
 fn cue_vertex_prefix(
@@ -2469,9 +2533,20 @@ fn cue_relations(
     sig: &NativeSigSystem,
     head_ids: &BTreeSet<usize>,
     stem_ids: &BTreeSet<usize>,
-    beam_ids: &BTreeSet<usize>,
+    mutations: &crate::cue_beams_step::NativeCueBeamMutationSystem,
     group_ids: &BTreeSet<usize>,
 ) {
+    let beam_ids = mutations
+        .beams
+        .iter()
+        .map(|beam| beam.sig_ordinal.0)
+        .collect::<BTreeSet<_>>();
+    let recovery_beam_ids = mutations
+        .beams
+        .iter()
+        .filter(|beam| beam.recovery.is_some())
+        .map(|beam| beam.sig_ordinal.0)
+        .collect::<BTreeSet<_>>();
     json.key("relations");
     json.open('[');
     for edge in sig.edges.iter().filter(|edge| {
@@ -2505,7 +2580,10 @@ fn cue_relations(
         json.field_string("target_id", &cue_vertex_id(system_id, edge.target));
         json.field_string(
             "provenance",
-            if matches!(
+            if recovery_beam_ids.contains(&edge.source) || recovery_beam_ids.contains(&edge.target)
+            {
+                "recovery"
+            } else if matches!(
                 edge.kind,
                 NativeSigRelationKind::BeamStem | NativeSigRelationKind::Containment
             ) {
