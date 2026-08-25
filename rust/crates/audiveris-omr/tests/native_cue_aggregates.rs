@@ -4,10 +4,10 @@ use std::path::PathBuf;
 
 use audiveris_omr::{
     cue_beams_step::{
-        NativeCueAggregateRecognition, check_native_cue_beam_spots, extract_native_cue_spots,
-        group_native_cue_beams, materialize_native_cue_aggregates,
-        materialize_native_cue_beam_mutations, plan_native_cue_aggregate_processing,
-        plan_native_cue_beam_stem_links,
+        NativeCueAggregateRecognition, check_native_cue_beam_spots,
+        check_native_cue_beam_stem_links, extract_native_cue_spots, group_native_cue_beams,
+        materialize_native_cue_aggregates, materialize_native_cue_beam_mutations,
+        plan_native_cue_aggregate_processing, plan_native_cue_beam_stem_links,
     },
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads_with_small_heads,
@@ -108,6 +108,10 @@ fn active_cue_aggregate_corpus_matches_java() {
                 .all(|system| system.plans.is_empty()),
             "{page}"
         );
+        let relation_checks =
+            check_native_cue_beam_stem_links(&reduction, &mutations, &grouping, &link_plans)
+                .expect("native cue BeamStem checks");
+        assert!(relation_checks.checks.is_empty(), "{page}");
     }
 }
 

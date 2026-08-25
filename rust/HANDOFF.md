@@ -12234,3 +12234,23 @@ Resume with `linkStemToCueBeams`: sort each selected group's members from the
 reference point, run `BeamStemRelation.checkLink` on its first beam, then copy
 the successful grade across remaining group members with exact extension
 points and beam portions.
+
+## Boundary 305: first cue BeamStem relation checks
+
+`check_native_cue_beam_stem_links` now resolves each lookup plan's stem SIG
+identity through the terminal STEMS binding map and carried `systemStems`
+catalogue. It then overlays REDUCTION's final head-end `median_after` and bounds,
+so cue checking cannot accidentally grade against the pre-reduction stem line.
+
+For every selected group, members are stably resorted from the exact head
+reference point and the nearest cue beam enters the already authenticated
+`BeamStemRelation.checkLink` geometry and weighted-grade kernel with native
+scale/profile constants. The result retains portion, normalized gaps, impacts,
+grade, extension point, and acceptance without mutating SIG. The eight-page
+active corpus remains exactly empty after singleton purge; the full 767-test
+library suite (two ignored), formatting, strict workspace Clippy, and diff
+checks pass.
+
+Resume by applying each accepted first relation to SIG, then extending the same
+grade through later beams in that group with their independently computed
+border intersections and beam portions.

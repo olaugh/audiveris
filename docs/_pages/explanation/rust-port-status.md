@@ -7159,3 +7159,10 @@ aggregate crop, direction filter, skew-aware beam ordering, minimum head gap,
 and insertion-ordered group deduplication. Focused tests cover the rejected and
 accepted lookup branches; the active corpus remains an exact empty plan. Cue
 `BeamStemRelation` checking and group-wide extension are next.
+
+## Boundary 305: first cue BeamStem checks
+
+The nearest member of each selected cue group now enters the shared native
+`BeamStemRelation` grade kernel using the final REDUCTION-refined stem median.
+Rust retains complete relation evidence without mutating SIG. The active corpus
+remains exactly empty; accepted relation insertion and group extension are next.

@@ -6674,3 +6674,13 @@ deduplication. A focused test covers all lookup branches and the eight-page
 active differential remains empty after singleton purge. The full library,
 format, strict workspace Clippy, and diff gates pass. First-beam relation
 checking and group-wide relation extension remain next.
+
+## Boundary 305: cue BeamStem check plans
+
+Selected cue groups now reach the shared native `BeamStemRelation.checkLink`
+kernel. Rust resolves the bound stem identity and carried geometry, applies any
+later REDUCTION head-end median refinement, resorts group members from the head,
+and records the first beam's portion, gaps, impacts, grade, extension point,
+and acceptance without graph mutation. The empty active corpus and all full
+verification gates pass. Applying accepted first relations and extending them
+across remaining group beams is next.

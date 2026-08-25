@@ -31,7 +31,12 @@ use crate::native_sig::{
     NativeSigBounds, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem, NativeSigVertexId,
     append_native_cue_beam_groups, append_native_cue_beam_vertex,
 };
+use crate::native_stems_beam_stumps::NativeStemsBeamSource;
+use crate::native_stems_beam_vlink_reuse_check::{
+    NativeStemsBeamRelationParameters, evaluate_relation_geometry,
+};
 use crate::native_stems_beam_vlinkers::generic_intersection;
+use crate::native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef};
 use crate::recognize::GridLinesRecognition;
 use crate::stems_step::{NativeStemHeadSide, NativeStemPoint, NativeStemVerticalSide};
 
@@ -500,6 +505,30 @@ pub struct NativeCueBeamStemLookupSystem {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeCueBeamStemLookupRecognition {
     pub systems: Vec<NativeCueBeamStemLookupSystem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamStemRelationCheck {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub head_sig_ordinal: NativeSigVertexId,
+    pub stem_sig_ordinal: NativeSigVertexId,
+    pub stem_identity: usize,
+    pub group_sig_ordinal: NativeSigVertexId,
+    pub first_beam_sig_ordinal: NativeSigVertexId,
+    pub beam_portion: crate::stems_step::NativeBeamPortion,
+    pub dx: f64,
+    pub dy: f64,
+    pub x_impact: f64,
+    pub y_impact: f64,
+    pub grade: f64,
+    pub extension_point: Option<NativeStemPoint>,
+    pub accepted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamStemCheckRecognition {
+    pub checks: Vec<NativeCueBeamStemRelationCheck>,
 }
 
 #[derive(Clone, Copy)]
@@ -1198,6 +1227,212 @@ pub fn plan_native_cue_beam_stem_links(
         systems.push(NativeCueBeamStemLookupSystem { system_id, plans });
     }
     Ok(NativeCueBeamStemLookupRecognition { systems })
+}
+
+/// Evaluate Java `connectCueBeamStem` for the first beam of every selected
+/// group, without applying the relation to SIG.
+pub fn check_native_cue_beam_stem_links(
+    reduction: &NativeReductionRecognition,
+    mutations: &NativeCueBeamMutationRecognition,
+    grouping: &NativeCueBeamGroupingRecognition,
+    lookup: &NativeCueBeamStemLookupRecognition,
+) -> Result<NativeCueBeamStemCheckRecognition, NativeCueBeamMutationError> {
+    let slope = reduction.stems.sheet_skew_slope;
+    let mut checks = Vec::new();
+    for lookup_system in &lookup.systems {
+        let system_id = lookup_system.system_id;
+        let mutation_system = mutations
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing cue mutation system"))?;
+        let grouping_system = grouping
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing cue grouping system"))?;
+        let final_system = reduction
+            .stems
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing final STEMS system"))?;
+        let plan_system = reduction
+            .stems
+            .components
+            .plans
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing STEMS plan system"))?;
+        let vlinker_system = reduction
+            .stems
+            .components
+            .beam_vlinkers
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing STEMS V-linker system"))?;
+        let corner_system = reduction
+            .stems
+            .components
+            .head_corners
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing STEMS corner system"))?;
+        let relation_parameters = NativeStemsBeamRelationParameters::from_native_products(
+            plan_system,
+            vlinker_system,
+            corner_system.profile,
+        )
+        .map_err(|error| cue_lookup_error(system_id, 0, &error.to_string()))?;
+        let stem_state = &final_system
+            .transaction
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems;
+        let bindings = &final_system.transaction.state_after.beam_state.bindings;
+        let refinements = reduction
+            .head_end_refinements
+            .iter()
+            .find(|transaction| transaction.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing REDUCTION stem refinements"))?;
+        for head_plan in &lookup_system.plans {
+            let stem_identity = bindings
+                .stem_vertices
+                .iter()
+                .find(|(_, vertex)| **vertex == head_plan.stem_sig_ordinal)
+                .map(|(identity, _)| *identity)
+                .ok_or_else(|| {
+                    cue_lookup_error(
+                        system_id,
+                        head_plan.aggregate_ordinal,
+                        "cue stem has no native identity",
+                    )
+                })?;
+            let mut stem = stem_state
+                .known_stems
+                .iter()
+                .find(|stem| stem.stem_identity == stem_identity)
+                .cloned()
+                .ok_or_else(|| {
+                    cue_lookup_error(
+                        system_id,
+                        head_plan.aggregate_ordinal,
+                        "cue stem geometry is unavailable",
+                    )
+                })?;
+            if let Some(refinement) = refinements
+                .refinements
+                .iter()
+                .find(|refinement| refinement.stem == head_plan.stem_sig_ordinal)
+            {
+                stem.geometry.median = refinement.median_after;
+                stem.geometry.ribbon_bounds = crate::head_scanner_slices::JavaRectangle::new(
+                    refinement.bounds_after.x,
+                    refinement.bounds_after.y,
+                    refinement.bounds_after.width,
+                    refinement.bounds_after.height,
+                );
+            }
+            let grouped = grouping_system
+                .aggregates
+                .iter()
+                .find(|aggregate| aggregate.aggregate_ordinal == head_plan.aggregate_ordinal)
+                .ok_or_else(|| {
+                    cue_lookup_error(
+                        system_id,
+                        head_plan.aggregate_ordinal,
+                        "missing cue grouping",
+                    )
+                })?;
+            let local_beams = mutation_system
+                .beams
+                .iter()
+                .filter(|beam| beam.aggregate_ordinal == head_plan.aggregate_ordinal)
+                .collect::<Vec<_>>();
+            for &group_sig_ordinal in &head_plan.beam_groups {
+                let group_index = grouped
+                    .group_sig_ordinals
+                    .iter()
+                    .position(|group| *group == group_sig_ordinal)
+                    .ok_or_else(|| {
+                        cue_lookup_error(
+                            system_id,
+                            head_plan.aggregate_ordinal,
+                            "selected cue group is unavailable",
+                        )
+                    })?;
+                let member_ids = &grouped.evidence.groups[group_index];
+                let mut members = member_ids
+                    .iter()
+                    .map(|&id| {
+                        local_beams.get(id).copied().ok_or_else(|| {
+                            cue_lookup_error(
+                                system_id,
+                                head_plan.aggregate_ordinal,
+                                "cue group member is unavailable",
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                members.sort_by(|left, right| {
+                    let distance = |beam: &NativeCueBeamRegistration| {
+                        let border = cue_beam_border(beam.beam, head_plan.vertical_side);
+                        let y_direction =
+                            if head_plan.vertical_side == NativeStemVerticalSide::Bottom {
+                                1.0
+                            } else {
+                                -1.0
+                            };
+                        y_direction
+                            * (cue_target_point(head_plan.reference_point, border, slope).y
+                                - head_plan.reference_point.y)
+                    };
+                    distance(left).total_cmp(&distance(right))
+                });
+                let first = members[0];
+                let source = NativeStemsBeamSource::RawBeam(first.sig_ordinal.0);
+                let relation = evaluate_relation_geometry(
+                    source,
+                    first.beam.item.median,
+                    first.beam.item.height,
+                    cue_beam_border(first.beam, head_plan.vertical_side),
+                    NativeStemsBeamVLinkerRef {
+                        b_linker: NativeStemsBeamBLinkerRef {
+                            beam: source,
+                            id: 0,
+                        },
+                        side: head_plan.vertical_side,
+                    },
+                    head_plan.vertical_side,
+                    &stem,
+                    relation_parameters,
+                );
+                checks.push(NativeCueBeamStemRelationCheck {
+                    system_id,
+                    aggregate_ordinal: head_plan.aggregate_ordinal,
+                    head_sig_ordinal: head_plan.head_sig_ordinal,
+                    stem_sig_ordinal: head_plan.stem_sig_ordinal,
+                    stem_identity,
+                    group_sig_ordinal,
+                    first_beam_sig_ordinal: first.sig_ordinal,
+                    beam_portion: relation.portion,
+                    dx: relation.dx,
+                    dy: relation.dy,
+                    x_impact: relation.x_impact,
+                    y_impact: relation.y_impact,
+                    grade: relation.grade,
+                    extension_point: relation.extension_point,
+                    accepted: relation.accepted,
+                });
+            }
+        }
+    }
+    Ok(NativeCueBeamStemCheckRecognition { checks })
 }
 
 fn lookup_cue_beam_groups(
