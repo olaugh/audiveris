@@ -239,7 +239,7 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
 }
 
 #[test]
-fn active_cue_beams_switch_fails_at_the_first_unported_visual_dependency() {
+fn active_cue_beams_switch_completes_the_native_lifecycle() {
     let output = Command::new(binary())
         .args([
             "-batch",
@@ -252,14 +252,15 @@ fn active_cue_beams_switch_fails_at_the_first_unported_visual_dependency() {
         .arg(batuque())
         .output()
         .expect("run active CUE_BEAMS");
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).expect("CLI stderr is UTF-8");
-    assert!(stderr.contains("CUE_BEAMS failed"));
-    assert!(stderr.contains("BeamsBuilder.buildCueBeams"));
     assert!(
-        output.stdout.is_empty(),
-        "failed sheet emits no partial JSON"
+        output.status.success(),
+        "active CUE_BEAMS failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    let payload = String::from_utf8(output.stdout).expect("CLI stdout is UTF-8");
+    assert!(payload.contains("\"stage\":\"CUE_BEAMS\""));
+    assert!(payload.contains("\"status\":\"completed\""));
+    assert!(payload.contains("\"ordinary_enabled\":true"));
 }
 
 #[test]

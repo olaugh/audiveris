@@ -239,8 +239,44 @@ pub trait VisualCueBeams {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CueBeamsSkipReason {
+    CueBeamsDisabled,
     SmallHeadsDisabled,
     SmallBeamScaleAlreadySet,
+}
+
+/// Independent production controls for the native CUE_BEAMS lifecycle.
+///
+/// `enabled` governs ordinary Java-equivalent cue recognition. Supplemental
+/// hook recovery is deliberately recorded separately so enabling or disabling
+/// it can never silently enable ordinary cue recognition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeCueBeamsOptions {
+    pub enabled: bool,
+    pub supplemental_hook_recovery: bool,
+}
+
+impl Default for NativeCueBeamsOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            supplemental_hook_recovery: false,
+        }
+    }
+}
+
+/// Complete Java-equivalent active CUE_BEAMS transaction in execution order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeActiveCueBeamsRecognition {
+    pub aggregates: NativeCueAggregateRecognition,
+    pub processing: NativeCueAggregateProcessRecognition,
+    pub spots: NativeCueSpotRecognition,
+    pub checks: NativeCueBeamCheckRecognition,
+    pub mutations: NativeCueBeamMutationRecognition,
+    pub grouping: NativeCueBeamGroupingRecognition,
+    pub stem_lookup: NativeCueBeamStemLookupRecognition,
+    pub stem_checks: NativeCueBeamStemCheckRecognition,
+    /// Terminal SIG snapshots used by CUE_BEAMS publication.
+    pub stem_relations: NativeCueBeamStemMutationRecognition,
 }
 
 /// Native page state after the exact CUE_BEAMS prolog gate.
@@ -250,23 +286,27 @@ pub enum CueBeamsSkipReason {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeCueBeamsRecognition {
     pub reduction: NativeReductionRecognition,
-    pub skip_reason: CueBeamsSkipReason,
+    pub skip_reason: Option<CueBeamsSkipReason>,
     pub small_heads_enabled: bool,
     pub detected_small_beam_height: Option<i32>,
+    pub ordinary_enabled: bool,
+    pub supplemental_hook_recovery_enabled: bool,
+    pub active: Option<Box<NativeActiveCueBeamsRecognition>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NativeCueBeamsRecognitionError {
-    ActiveRecognitionUnavailable,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeCueBeamsRecognitionError {
+    pub stage: &'static str,
+    pub message: String,
 }
 
 impl fmt::Display for NativeCueBeamsRecognitionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ActiveRecognitionUnavailable => formatter.write_str(
-                "active cue-beam recognition requires the unported BeamsBuilder.buildCueBeams",
-            ),
-        }
+        write!(
+            formatter,
+            "native CUE_BEAMS {} failed: {}",
+            self.stage, self.message
+        )
     }
 }
 
@@ -282,20 +322,99 @@ pub fn recognize_native_cue_beams(
     reduction: NativeReductionRecognition,
     small_heads_enabled: bool,
 ) -> Result<NativeCueBeamsRecognition, NativeCueBeamsRecognitionError> {
+    recognize_native_cue_beams_with_options(
+        grid,
+        reduction,
+        small_heads_enabled,
+        NativeCueBeamsOptions::default(),
+    )
+}
+
+/// Execute the complete native CUE_BEAMS lifecycle with independent controls.
+pub fn recognize_native_cue_beams_with_options(
+    grid: &GridLinesRecognition,
+    reduction: NativeReductionRecognition,
+    small_heads_enabled: bool,
+    options: NativeCueBeamsOptions,
+) -> Result<NativeCueBeamsRecognition, NativeCueBeamsRecognitionError> {
     let detected_small_beam_height = grid.scale.scale.small_beam.map(|scale| scale.main);
-    let skip_reason = if !small_heads_enabled {
-        CueBeamsSkipReason::SmallHeadsDisabled
+    let skip_reason = if !options.enabled {
+        Some(CueBeamsSkipReason::CueBeamsDisabled)
+    } else if !small_heads_enabled {
+        Some(CueBeamsSkipReason::SmallHeadsDisabled)
     } else if detected_small_beam_height.is_some() {
-        CueBeamsSkipReason::SmallBeamScaleAlreadySet
+        Some(CueBeamsSkipReason::SmallBeamScaleAlreadySet)
     } else {
-        return Err(NativeCueBeamsRecognitionError::ActiveRecognitionUnavailable);
+        None
+    };
+
+    let active = if skip_reason.is_none() {
+        let aggregates = materialize_native_cue_aggregates(&reduction)
+            .map_err(|error| cue_recognition_error("aggregate discovery", error))?;
+        let processing = plan_native_cue_aggregate_processing(grid, &reduction, &aggregates)
+            .map_err(|error| cue_recognition_error("aggregate planning", error))?;
+        let spots = extract_native_cue_spots(grid, &processing)
+            .map_err(|error| cue_recognition_error("spot extraction", error))?;
+        let checks = check_native_cue_beam_spots(grid, &spots, reduction.stems.reduction_interline)
+            .map_err(|error| cue_recognition_error("beam checks", error))?;
+        let mutations = materialize_native_cue_beam_mutations(grid, &reduction, &spots, &checks)
+            .map_err(|error| cue_recognition_error("beam materialization", error))?;
+        let grouping =
+            group_native_cue_beams(&mutations, &checks, reduction.stems.reduction_interline)
+                .map_err(|error| cue_recognition_error("beam grouping", error))?;
+        let stem_lookup = plan_native_cue_beam_stem_links(
+            &reduction,
+            &aggregates,
+            &processing,
+            &mutations,
+            &grouping,
+        )
+        .map_err(|error| cue_recognition_error("stem lookup", error))?;
+        let stem_checks =
+            check_native_cue_beam_stem_links(&reduction, &mutations, &grouping, &stem_lookup)
+                .map_err(|error| cue_recognition_error("stem checks", error))?;
+        let stem_relations = apply_native_cue_beam_stem_relations(
+            &mutations,
+            &grouping,
+            &stem_lookup,
+            &stem_checks,
+            reduction.stems.sheet_skew_slope,
+            reduction.stems.reduction_interline,
+        )
+        .map_err(|error| cue_recognition_error("stem relation application", error))?;
+        Some(Box::new(NativeActiveCueBeamsRecognition {
+            aggregates,
+            processing,
+            spots,
+            checks,
+            mutations,
+            grouping,
+            stem_lookup,
+            stem_checks,
+            stem_relations,
+        }))
+    } else {
+        None
     };
     Ok(NativeCueBeamsRecognition {
         reduction,
         skip_reason,
         small_heads_enabled,
         detected_small_beam_height,
+        ordinary_enabled: options.enabled,
+        supplemental_hook_recovery_enabled: options.supplemental_hook_recovery,
+        active,
     })
+}
+
+fn cue_recognition_error(
+    stage: &'static str,
+    error: impl fmt::Display,
+) -> NativeCueBeamsRecognitionError {
+    NativeCueBeamsRecognitionError {
+        stage,
+        message: error.to_string(),
+    }
 }
 
 /// One contextual-grade-qualified small black head considered by Java's

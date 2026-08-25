@@ -29,7 +29,7 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
-The CLI now performs native schema-1 JSON recognition through default-disabled
+The CLI now performs native schema-1 JSON recognition through active-capable
 CUE_BEAMS. GRID's human-readable report remains unchanged; HEADERS through CUE_BEAMS
 require `-json` and compose in Java stage order rather than accepting invented
 downstream inputs. It runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS ->
@@ -38,8 +38,9 @@ adds the atomic Java-order reduction trace, free-stem median, and modeled glyph
 cleanup census without fabricating Java SIG, Inter, or Glyph IDs. An explicit
 qualified `ProcessingSwitches.smallHeads=true` request now also drives HEADS
 through Java's exact eight-shape normal-plus-small template catalog and retains
-the resulting stemmed small heads into STEMS; CUE_BEAMS still refuses before
-the unported active aggregate/morphology builder and emits no partial JSON.
+the resulting stemmed small heads into STEMS. CUE_BEAMS now composes aggregate
+discovery, morphology, cue-beam creation/grouping, relation checks, and terminal
+BeamStem SIG mutation; the default `smallHeads=false` path remains an exact no-op.
 
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
@@ -12281,3 +12282,27 @@ top-level active-CUE_BEAMS result. Once that recovery integration lands, wire
 this recognition immediately after `stem_checks`, publish its terminal SIG,
 and freeze at least one non-empty cue aggregate before advancing beyond
 `CueAggregate.process()`.
+
+## Boundary 307: production active CUE_BEAMS composition
+
+The production entry point now executes every previously authenticated active
+kernel in Java order: aggregate discovery, direction/crop planning, NO_STAFF
+morphology, cue-specific checks, SmallBeam insertion, BeamGroup population,
+HeadLinker lookup, BeamStem checks, and terminal relation application. The
+result retains each intermediate plus the final per-system SIG snapshot; two
+fresh invocations are structurally equal, and the terminal snapshot equals the
+formerly hand-composed relation result across the eight-page differential.
+
+Ordinary cue recognition and supplemental hook recovery now have independent
+qualified CLI controls. `ProcessingSwitches.smallHeads=true` remains the Java
+prerequisite, `CueBeamsStep.enabled=false` disables ordinary recognition, and
+`CueBeamsStep.supplementalHookRecovery=true` records the independent recovery
+request without perturbing ordinary results. Schema 1 publishes completion and
+aggregate/spot/beam/group/relation counts. The focused eight-page differential,
+active CLI test, 760 library tests (two ignored), formatting, strict workspace
+Clippy, and diff checks pass. The untouched `origin/master` and this branch both
+retain one pre-existing CLI fixture failure: Cucaracha emits stem count 115
+where `stream_protocol` still expects 114.
+
+Next freeze a non-empty real Chopin cue aggregate, then expose stable connected
+head/stem/beam/group identities and relation metadata in the CUE_BEAMS sidecar.

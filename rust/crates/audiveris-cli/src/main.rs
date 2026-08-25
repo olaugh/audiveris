@@ -3,7 +3,9 @@
 use audiveris_cli::{Parameters, parse};
 use audiveris_core::step::OmrStep;
 use audiveris_image::ingest::Loader;
-use audiveris_omr::cue_beams_step::recognize_native_cue_beams;
+use audiveris_omr::cue_beams_step::{
+    NativeCueBeamsOptions, recognize_native_cue_beams_with_options,
+};
 use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::native_heads::recognize_native_heads_with_small_heads;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
@@ -30,8 +32,14 @@ fn usage() {
          Usage: audiveris-cli [options] [inputs]\n\n\
          Native text recognition currently stops at -step GRID, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID page.png\n\n\
-         Schema-1 JSON is published through default-disabled CUE_BEAMS, e.g.:\n\
-         \x20 audiveris-cli -batch -step CUE_BEAMS -json page.png\n\n\
+         Schema-1 JSON is published through CUE_BEAMS, e.g.:\n\
+         \x20 audiveris-cli -batch -step CUE_BEAMS -json page.png\n\
+         Active cue recognition requires Java's small-head switch:\n\
+         \x20 -constant org.audiveris.omr.sheet.ProcessingSwitches.smallHeads=true\n\
+         Ordinary cue recognition can be disabled independently with:\n\
+         \x20 -constant org.audiveris.omr.sheet.beam.CueBeamsStep.enabled=false\n\
+         Supplemental hook recovery is independently enabled with:\n\
+         \x20 -constant org.audiveris.omr.sheet.beam.CueBeamsStep.supplementalHookRecovery=true\n\n\
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
@@ -71,12 +79,28 @@ fn is_json_only_step(step: OmrStep) -> bool {
 }
 
 const SMALL_HEADS_CONSTANT: &str = "org.audiveris.omr.sheet.ProcessingSwitches.smallHeads";
+const CUE_BEAMS_ENABLED_CONSTANT: &str = "org.audiveris.omr.sheet.beam.CueBeamsStep.enabled";
+const CUE_BEAMS_RECOVERY_CONSTANT: &str =
+    "org.audiveris.omr.sheet.beam.CueBeamsStep.supplementalHookRecovery";
 
 fn small_heads_enabled(parameters: &Parameters) -> bool {
     parameters
         .constants
         .get(SMALL_HEADS_CONSTANT)
         .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+fn cue_beams_options(parameters: &Parameters) -> NativeCueBeamsOptions {
+    NativeCueBeamsOptions {
+        enabled: parameters
+            .constants
+            .get(CUE_BEAMS_ENABLED_CONSTANT)
+            .is_none_or(|value| !value.eq_ignore_ascii_case("false")),
+        supplemental_hook_recovery: parameters
+            .constants
+            .get(CUE_BEAMS_RECOVERY_CONSTANT)
+            .is_some_and(|value| value.eq_ignore_ascii_case("true")),
+    }
 }
 
 /// Native batch recognition for the stages the port supports so far.
@@ -286,10 +310,11 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                         );
                         continue;
                     }
-                    let cue_beams = recognize_native_cue_beams(
+                    let cue_beams = recognize_native_cue_beams_with_options(
                         &recognition,
                         reduction,
                         small_heads_enabled(parameters),
+                        cue_beams_options(parameters),
                     )
                     .map_err(|error| {
                         format!(
@@ -826,10 +851,11 @@ fn run_native_stream(parameters: &Parameters, json: bool) -> Result<bool, String
                 // CUE_BEAMS -------------------------------------------------
                 stream.stage_started(OmrStep::CueBeams, &input_name, sheet)?;
                 let started = Instant::now();
-                let cue_beams = match recognize_native_cue_beams(
+                let cue_beams = match recognize_native_cue_beams_with_options(
                     &recognition,
                     reduction,
                     small_heads_enabled(parameters),
+                    cue_beams_options(parameters),
                 ) {
                     Ok(cue_beams) => cue_beams,
                     Err(error) => {
@@ -940,7 +966,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        SMALL_HEADS_CONSTANT, is_native_step, json_string, omrscope_marker_line, run_native,
+        CUE_BEAMS_ENABLED_CONSTANT, CUE_BEAMS_RECOVERY_CONSTANT, SMALL_HEADS_CONSTANT,
+        cue_beams_options, is_native_step, json_string, omrscope_marker_line, run_native,
         run_native_stream, sheets_to_process, small_heads_enabled, stream_stages_through,
         take_stream_json_flag,
     };
@@ -995,6 +1022,22 @@ mod tests {
             .constants
             .insert(SMALL_HEADS_CONSTANT.to_owned(), "yes".to_owned());
         assert!(!small_heads_enabled(&parameters));
+    }
+
+    #[test]
+    fn cue_beams_controls_are_independent_and_have_production_defaults() {
+        let mut parameters = Parameters::default();
+        assert!(cue_beams_options(&parameters).enabled);
+        assert!(!cue_beams_options(&parameters).supplemental_hook_recovery);
+
+        parameters
+            .constants
+            .insert(CUE_BEAMS_ENABLED_CONSTANT.to_owned(), "false".to_owned());
+        parameters
+            .constants
+            .insert(CUE_BEAMS_RECOVERY_CONSTANT.to_owned(), "TRUE".to_owned());
+        assert!(!cue_beams_options(&parameters).enabled);
+        assert!(cue_beams_options(&parameters).supplemental_hook_recovery);
     }
 
     #[test]

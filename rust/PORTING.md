@@ -104,8 +104,8 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Live Java/Rust vectors | 73 canonical fixtures, including composed StaffProjector, recursive clusters, bar-column construction/start selection, production `LagManager.dispatchRuns`, `Book.updateScores` regrouping, live `SystemInfo.buildRef` ownership, a composed GRID output boundary, production SIG contextual grading, exact sheet-skew transforms, raw-raster `retrieveLines`, raster-fitted mutable endpoints, raw alignment/connection discovery, exact `StaffFilament.fillHoles` mutation, all 149 raw grades for a fixed classifier feature vector, an asymmetric point-list MixGlyphDescriptor feature vector, and Java-order RunTable coordinate/feature extraction with absolute offset |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Structured output and live comparison | Ordinary `-json` emits one schema-1 document per requested sheet through default-disabled CUE_BEAMS. The opt-in `-stream-json` protocol wraps byte-identical immutable completed-stage snapshots in GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS -> STEMS -> REDUCTION -> CUE_BEAMS order; it does not expose intra-stage items. REDUCTION retains every upstream product and its exact phase/cleanup evidence. CUE_BEAMS retains that document and publishes Java's default `smallHeads=false` no-op with zero mutations. When the exact qualified switch is true, HEADS now recognizes and retains Java's small-head classes into STEMS before CUE_BEAMS fails typed at the still-unported active builder; no partial JSON is emitted. Text after GRID remains explicitly unsupported. The workspace carries no serialization dependency |
-| Rust workspace | STEMS is complete through its generic epilog. REDUCTION Boundary 296 atomically composes and publishes the complete stage. Boundary 297 publishes Java's exact default-disabled CUE_BEAMS prolog gate. Boundary 298 makes the active path's prerequisite HEADS recognition exact for the eight normal/small template classes and proves the small stemmed heads survive into STEMS; active cue aggregation, morphology, and linking remain unavailable. The focused HEADS/CUE gates, strict workspace Clippy, formatting, and diff checks are green. CI repeats formatting, strict Clippy, and workspace tests on Ubuntu and macOS |
+| Structured output and live comparison | Ordinary `-json` emits one schema-1 document per requested sheet through CUE_BEAMS. The opt-in `-stream-json` protocol wraps byte-identical immutable completed-stage snapshots in GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS -> STEMS -> REDUCTION -> CUE_BEAMS order; it does not expose intra-stage items. REDUCTION retains every upstream product and its exact phase/cleanup evidence. CUE_BEAMS preserves Java's default `smallHeads=false` no-op and, when the exact qualified switch is true, composes aggregate discovery through terminal BeamStem SIG mutation. Ordinary cue recognition and supplemental hook recovery have independent qualified controls. Text after GRID remains explicitly unsupported. The workspace carries no serialization dependency |
+| Rust workspace | STEMS is complete through its generic epilog. REDUCTION Boundary 296 atomically composes and publishes the complete stage. Boundary 307 composes the already exact active CUE_BEAMS kernels through terminal relation insertion and publishes lifecycle counts. The eight-page differential is an exact zero-delta result because Java also purges every singleton aggregate. A non-empty real-score cue fixture and connected sidecar publication remain next. CI repeats formatting, strict Clippy, and workspace tests on Ubuntu and macOS |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
@@ -6700,3 +6700,19 @@ aggregates are singletons. The full library (770 passed, two ignored), format,
 strict workspace Clippy, and diff gates pass. Top-level active-CUE_BEAMS wiring
 is intentionally deferred until the overlapping optional recovery patch is
 committed, after which this result becomes the stage's terminal SIG snapshot.
+
+## Boundary 307: compose the active CUE_BEAMS transaction
+
+`recognize_native_cue_beams_with_options` now composes the complete active
+lifecycle through terminal BeamStem relation application and retains all
+intermediate evidence plus the final SIG. Repeat execution is deterministic,
+the terminal result equals the previously hand-composed eight-page path, and
+the ordinary and supplemental-recovery controls are independent. The exact
+qualified CLI constants are documented by `--help`, and schema 1 publishes
+completion plus aggregate, spot, beam, group, and relation counts.
+
+Focused corpus/CLI tests, 760 library tests with two ignored, formatting,
+strict workspace Clippy, and diff checks pass. The full workspace gate is
+currently stopped by an independently reproduced `origin/master` fixture drift:
+Cucaracha reports 115 stems while the CLI test expects 114. Non-empty Chopin
+evidence and connected sidecar metadata are the next bounded publication work.

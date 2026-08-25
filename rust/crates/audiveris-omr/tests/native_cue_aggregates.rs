@@ -4,11 +4,11 @@ use std::path::PathBuf;
 
 use audiveris_omr::{
     cue_beams_step::{
-        NativeCueAggregateRecognition, apply_native_cue_beam_stem_relations,
+        NativeCueAggregateRecognition, NativeCueBeamsOptions, apply_native_cue_beam_stem_relations,
         check_native_cue_beam_spots, check_native_cue_beam_stem_links, extract_native_cue_spots,
         group_native_cue_beams, materialize_native_cue_aggregates,
         materialize_native_cue_beam_mutations, plan_native_cue_aggregate_processing,
-        plan_native_cue_beam_stem_links,
+        plan_native_cue_beam_stem_links, recognize_native_cue_beams_with_options,
     },
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads_with_small_heads,
@@ -135,6 +135,63 @@ fn active_cue_aggregate_corpus_matches_java() {
                             .sig_after
             }),
             "{page}"
+        );
+
+        let completed = recognize_native_cue_beams_with_options(
+            &grid,
+            reduction.clone(),
+            true,
+            NativeCueBeamsOptions::default(),
+        )
+        .expect("composed native CUE_BEAMS");
+        assert_eq!(completed.skip_reason, None, "{page}");
+        assert_eq!(
+            completed
+                .active
+                .as_deref()
+                .expect("active CUE_BEAMS")
+                .stem_relations,
+            relation_mutations,
+            "terminal relation application must be the published SIG"
+        );
+        let repeated = recognize_native_cue_beams_with_options(
+            &grid,
+            reduction.clone(),
+            true,
+            NativeCueBeamsOptions::default(),
+        )
+        .expect("repeat composed native CUE_BEAMS");
+        assert_eq!(
+            completed, repeated,
+            "{page} active lifecycle is deterministic"
+        );
+
+        let disabled = recognize_native_cue_beams_with_options(
+            &grid,
+            reduction.clone(),
+            true,
+            NativeCueBeamsOptions {
+                enabled: false,
+                supplemental_hook_recovery: true,
+            },
+        )
+        .expect("disabled ordinary CUE_BEAMS");
+        assert!(disabled.active.is_none(), "{page}");
+        assert!(disabled.supplemental_hook_recovery_enabled, "{page}");
+
+        let recovery_enabled = recognize_native_cue_beams_with_options(
+            &grid,
+            reduction,
+            true,
+            NativeCueBeamsOptions {
+                enabled: true,
+                supplemental_hook_recovery: true,
+            },
+        )
+        .expect("independently enabled supplemental recovery");
+        assert_eq!(
+            completed.active, recovery_enabled.active,
+            "{page} recovery control must not perturb ordinary cue recognition"
         );
     }
 }

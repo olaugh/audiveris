@@ -2141,9 +2141,18 @@ fn cue_beams_product(json: &mut Json, recognition: &NativeCueBeamsRecognition) {
     json.field_string(
         "status",
         match recognition.skip_reason {
-            CueBeamsSkipReason::SmallHeadsDisabled => "skipped_small_heads_disabled",
-            CueBeamsSkipReason::SmallBeamScaleAlreadySet => "skipped_small_beam_scale_already_set",
+            Some(CueBeamsSkipReason::CueBeamsDisabled) => "skipped_disabled",
+            Some(CueBeamsSkipReason::SmallHeadsDisabled) => "skipped_small_heads_disabled",
+            Some(CueBeamsSkipReason::SmallBeamScaleAlreadySet) => {
+                "skipped_small_beam_scale_already_set"
+            }
+            None => "completed",
         },
+    );
+    json.field_boolean("ordinary_enabled", recognition.ordinary_enabled);
+    json.field_boolean(
+        "supplemental_hook_recovery_enabled",
+        recognition.supplemental_hook_recovery_enabled,
     );
     json.field_boolean("small_heads_enabled", recognition.small_heads_enabled);
     json.key("detected_small_beam_height");
@@ -2151,7 +2160,67 @@ fn cue_beams_product(json: &mut Json, recognition: &NativeCueBeamsRecognition) {
         Some(height) => json.integer(height as i64),
         None => json.null(),
     }
-    json.field_integer("mutation_count", 0);
+    let (aggregate_count, spot_count, beam_count, group_count, relation_count) = recognition
+        .active
+        .as_deref()
+        .map_or((0, 0, 0, 0, 0), |active| {
+            (
+                active
+                    .aggregates
+                    .systems
+                    .iter()
+                    .map(|system| system.aggregates.len())
+                    .sum(),
+                active
+                    .spots
+                    .aggregates
+                    .iter()
+                    .map(|item| item.glyphs.len())
+                    .sum(),
+                active
+                    .mutations
+                    .systems
+                    .iter()
+                    .map(|system| system.beams.len())
+                    .sum(),
+                active
+                    .grouping
+                    .systems
+                    .iter()
+                    .map(|system| {
+                        system
+                            .aggregates
+                            .iter()
+                            .map(|aggregate| aggregate.group_sig_ordinals.len())
+                            .sum::<usize>()
+                    })
+                    .sum(),
+                active
+                    .stem_relations
+                    .systems
+                    .iter()
+                    .map(|system| {
+                        system
+                            .mutations
+                            .iter()
+                            .map(|mutation| {
+                                usize::from(mutation.first_relation_created)
+                                    + mutation.extended_relation_edges.len()
+                            })
+                            .sum::<usize>()
+                    })
+                    .sum(),
+            )
+        });
+    json.field_integer("aggregate_count", aggregate_count as i64);
+    json.field_integer("spot_count", spot_count as i64);
+    json.field_integer("beam_count", beam_count as i64);
+    json.field_integer("group_count", group_count as i64);
+    json.field_integer("relation_count", relation_count as i64);
+    json.field_integer(
+        "mutation_count",
+        (beam_count + group_count + relation_count) as i64,
+    );
     json.close('}');
 }
 
