@@ -29,17 +29,17 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
-The CLI now performs native schema-1 JSON recognition through STEMS. GRID's
-human-readable report remains unchanged; HEADERS through STEMS require `-json`
-and compose in Java stage order rather than accepting invented downstream
-inputs. STEMS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS
--> STEMS, retains every upstream product, and adds identity-honest final Stem
-geometry/grades, HeadStem links, abnormal/no-stem evidence, and terminal counts
-without fabricating Java SIG, Inter, or Glyph IDs.
+The CLI now performs native schema-1 JSON recognition through REDUCTION.
+GRID's human-readable report remains unchanged; HEADERS through REDUCTION
+require `-json` and compose in Java stage order rather than accepting invented
+downstream inputs. REDUCTION runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS ->
+LEDGERS -> HEADS -> STEMS -> REDUCTION, retains every upstream product, and
+adds the atomic Java-order reduction trace, free-stem median, and modeled glyph
+cleanup census without fabricating Java SIG, Inter, or Glyph IDs.
 
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
-HEADERS, STEM_SEEDS, BEAMS, LEDGERS, HEADS, or STEMS, and the viewer can select any
+HEADERS, STEM_SEEDS, BEAMS, LEDGERS, HEADS, STEMS, or REDUCTION, and the viewer can select any
 retained snapshot. This is stage-boundary visibility only -- neither producer
 claims to stream individual recognition items while a stage is executing. The
 opt-in Rust `-stream-json` framing adds flushed `@omrscope` markers around the
@@ -12015,3 +12015,31 @@ Focused REDUCTION is 42/42, the atomic cleanup kernel passes, the complete
 sibling suite is 35/35, frozen SIG remains ten active gates plus five ignored
 diagnostics, and the full library is 748 passed plus two ignored. Strict
 workspace Clippy for every target/feature, formatting, and diff checks pass.
+
+## Boundary 296: atomic REDUCTION recognition and schema-1 publication
+
+`recognize_native_reduction` now owns the complete stage transaction. It runs
+foundations and enabled head-end refinement for every system, then every
+beam-group consistency check, sheet-wide free-stem measurement, and the final
+glyph cleanup in Java order. The caller receives no partial result if any
+phase fails. Batuque's atomic result is exactly equal to the independently
+composed phase transactions and final reduced STEMS carrier.
+
+`audiveris-cli -step REDUCTION -json` is now native. The schema-1 document
+retains all upstream products and the fully reduced `stems` graph, then adds
+one stage-owned `reduction` product containing per-system epoch/refinement/
+beam-group/free-length counts, the sheet median, and the exact cleanup census.
+The 59 live GRID-owned barline/brace glyph contents remain an explicit opaque
+count rather than being assigned invented Java IDs. `-stream-json` adds
+REDUCTION as the eighth immutable completed-stage snapshot; its payload is
+byte-identical to ordinary JSON and remains strictly between its markers.
+
+The ordinary/stream black-box contract, seven CLI routing tests, eleven report
+writer tests, all 35 sibling transactions, and the frozen SIG's ten active
+gates plus five ignored diagnostics pass. The clean milestone library passes
+748 tests with two ignored; strict workspace Clippy,
+formatting, and diff checks pass. Native REDUCTION is now executable and
+published. Next widen the Java `GlyphIndex` memory-domain model only where a
+downstream stage needs identities for the retained GRID-owned opaque glyphs,
+then begin the next Java stage rather than blocking REDUCTION publication on
+fabricated registry identities.

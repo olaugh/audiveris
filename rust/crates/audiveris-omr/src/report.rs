@@ -57,6 +57,7 @@ use crate::native_heads_staff_epilog::{
     NativeHeadsStaffEpilogSystem,
 };
 use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
+use crate::native_reduction::NativeReductionRecognition;
 use crate::native_sig::{
     NativeSigInterKind, NativeSigRelationKind, NativeSigVertex, NativeSigVertexId,
 };
@@ -292,6 +293,7 @@ pub fn ledgers_json(
             ledgers: Some(ledgers),
             heads: None,
             stems: None,
+            reduction: None,
         },
         input,
         sheet,
@@ -327,6 +329,7 @@ pub fn heads_json(
             ledgers: Some(ledgers),
             heads: Some(heads),
             stems: None,
+            reduction: None,
         },
         input,
         sheet,
@@ -362,6 +365,42 @@ pub fn stems_json(
             ledgers: Some(ledgers),
             heads: Some(heads),
             stems: Some(stems),
+            reduction: None,
+        },
+        input,
+        sheet,
+    )
+}
+
+/// Emits the complete native schema-1 page after Java-ordered REDUCTION.
+///
+/// The reduced STEMS product remains the graph authority. The stage-owned
+/// `reduction` product publishes the deterministic phase and cleanup evidence
+/// that produced it, including the deliberately opaque upstream glyph count.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn reduction_json(
+    recognition: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    beams: &NativeBeamRecognition,
+    ledgers: &NativeLedgerRecognition,
+    heads: &NativeHeadsEpilogRecognition,
+    reduction: &NativeReductionRecognition,
+    input: &str,
+    sheet: usize,
+) -> String {
+    recognition_json(
+        "REDUCTION",
+        recognition,
+        RecognitionProducts {
+            headers: Some(headers),
+            stem_seeds: Some(stem_seeds),
+            beams: Some(beams),
+            ledgers: Some(ledgers),
+            heads: Some(heads),
+            stems: Some(&reduction.stems),
+            reduction: Some(reduction),
         },
         input,
         sheet,
@@ -376,6 +415,7 @@ struct RecognitionProducts<'a> {
     ledgers: Option<&'a NativeLedgerRecognition>,
     heads: Option<&'a NativeHeadsEpilogRecognition>,
     stems: Option<&'a NativeStemsRecognition>,
+    reduction: Option<&'a NativeReductionRecognition>,
 }
 
 fn recognition_json(
@@ -392,6 +432,7 @@ fn recognition_json(
         ledgers,
         heads,
         stems,
+        reduction,
     } = products;
     let mut json = Json::default();
     json.open('{');
@@ -440,6 +481,9 @@ fn recognition_json(
     }
     if let Some(stems) = stems {
         stems_product(&mut json, stems);
+    }
+    if let Some(reduction) = reduction {
+        reduction_product(&mut json, reduction);
     }
 
     json.close('}');
@@ -1905,6 +1949,144 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
             json.close('}');
         }
         json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+    json.close('}');
+}
+
+fn reduction_product(json: &mut Json, reduction: &NativeReductionRecognition) {
+    let foundation_epoch_count = reduction
+        .foundations
+        .iter()
+        .map(|transaction| 1 + transaction.continuation_epochs.len())
+        .sum::<usize>();
+    let foundation_outer_repeat_count = reduction
+        .foundations
+        .iter()
+        .map(|transaction| {
+            usize::from(transaction.first_epoch.requires_outer_repeat)
+                + transaction
+                    .continuation_epochs
+                    .iter()
+                    .filter(|epoch| epoch.requires_outer_repeat)
+                    .count()
+        })
+        .sum::<usize>();
+    let refinement_count = reduction
+        .head_end_refinements
+        .iter()
+        .map(|transaction| transaction.refinements.len())
+        .sum::<usize>();
+    let no_head_stem_count = reduction
+        .head_end_refinements
+        .iter()
+        .map(|transaction| transaction.no_head_stems.len())
+        .sum::<usize>();
+    let beam_group_check_count = reduction
+        .beam_groups
+        .iter()
+        .map(|transaction| transaction.checks.len())
+        .sum::<usize>();
+    let beam_group_split_count = reduction
+        .beam_groups
+        .iter()
+        .map(|transaction| transaction.splits.len())
+        .sum::<usize>();
+    let free_stem_skip_count = reduction
+        .free_stem_lengths
+        .systems
+        .iter()
+        .map(|system| system.skips.len())
+        .sum::<usize>();
+
+    json.key("reduction");
+    json.open('{');
+    json.key("summary");
+    json.open('{');
+    json.field_integer("system_count", reduction.foundations.len() as i64);
+    json.field_integer("foundation_epoch_count", foundation_epoch_count as i64);
+    json.field_integer(
+        "foundation_outer_repeat_count",
+        foundation_outer_repeat_count as i64,
+    );
+    json.field_integer("head_end_refinement_count", refinement_count as i64);
+    json.field_integer("no_head_stem_count", no_head_stem_count as i64);
+    json.field_integer("beam_group_check_count", beam_group_check_count as i64);
+    json.field_integer("beam_group_split_count", beam_group_split_count as i64);
+    json.field_integer(
+        "free_stem_length_count",
+        reduction.free_stem_lengths.sorted_lengths.len() as i64,
+    );
+    json.field_integer("free_stem_skip_count", free_stem_skip_count as i64);
+    json.key("free_stem_median");
+    match reduction.free_stem_lengths.median {
+        Some(median) => {
+            json.open('{');
+            json.field_integer("pixels", median.pixels as i64);
+            json.field_number("interlines", median.interlines);
+            json.close('}');
+        }
+        None => json.null(),
+    }
+    let cleanup = &reduction.glyph_cleanup;
+    json.field_integer(
+        "glyph_registry_entry_count",
+        cleanup.registry_entries as i64,
+    );
+    json.field_integer("active_glyph_count_before", cleanup.active_before as i64);
+    json.field_integer("glyph_keep_count", cleanup.keep_order.len() as i64);
+    json.field_integer(
+        "opaque_live_inter_glyph_count",
+        cleanup.opaque_live_inter_glyphs as i64,
+    );
+    json.field_integer(
+        "retained_active_glyph_count",
+        cleanup.retained_active.len() as i64,
+    );
+    json.field_integer("removed_active_glyph_count", cleanup.removed.len() as i64);
+    json.field_integer("active_glyph_count_after", cleanup.active_after as i64);
+    json.close('}');
+
+    json.key("systems");
+    json.open('[');
+    for foundations in &reduction.foundations {
+        let system_id = foundations.system_id;
+        let refinement = reduction
+            .head_end_refinements
+            .iter()
+            .find(|transaction| transaction.system_id == system_id)
+            .expect("REDUCTION result retains each system refinement");
+        let beam_groups = reduction
+            .beam_groups
+            .iter()
+            .find(|transaction| transaction.system_id == system_id)
+            .expect("REDUCTION result retains each system beam-group check");
+        let free_lengths = reduction
+            .free_stem_lengths
+            .systems
+            .iter()
+            .find(|transaction| transaction.system_id == system_id)
+            .expect("REDUCTION result retains each system free-length scan");
+        json.open('{');
+        json.field_integer("system", system_id as i64);
+        json.field_integer(
+            "foundation_epoch_count",
+            (1 + foundations.continuation_epochs.len()) as i64,
+        );
+        json.field_integer(
+            "foundation_removed_vertex_count",
+            foundations.all_removed_vertices.len() as i64,
+        );
+        json.field_integer(
+            "head_end_refinement_count",
+            refinement.refinements.len() as i64,
+        );
+        json.field_integer("no_head_stem_count", refinement.no_head_stems.len() as i64);
+        json.field_integer("beam_group_check_count", beam_groups.checks.len() as i64);
+        json.field_integer("beam_group_split_count", beam_groups.splits.len() as i64);
+        json.field_integer("free_stem_length_count", free_lengths.lengths.len() as i64);
+        json.field_integer("free_stem_skip_count", free_lengths.skips.len() as i64);
         json.close('}');
     }
     json.close(']');

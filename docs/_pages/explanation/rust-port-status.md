@@ -19,10 +19,11 @@ Java implementation are kept separately in the
 including the evidence and the Rust parity policy for each finding.
 
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
-through `HEADS`, including accepted STEM_SEEDS and identity-free final heads.
+through `REDUCTION`, including the final reduced STEMS graph and atomic phase
+and glyph-cleanup evidence.
 `omrscope` now runs Java and Rust concurrently and retains selectable immutable
 snapshots as each completes GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS
--> HEADS. The live view is completed-stage streaming only: it does not claim
+-> HEADS -> STEMS -> REDUCTION. The live view is completed-stage streaming only: it does not claim
 intra-stage or per-item recognition events, and its opt-in framing leaves the
 ordinary schema-1 JSONL interface unchanged. Its graphical Page/Inters audit
 surface highlights an inspected pair, can opt into highlighting filtered rows,
@@ -7044,3 +7045,23 @@ transactions pass, frozen SIG remains ten active plus five ignored, and the
 full library is 748 passed plus two ignored. Strict all-feature Clippy,
 formatting, and diff checks pass. Next make those upstream glyph identities
 persistent, then publish and corpus-grade REDUCTION.
+
+## Boundary 296: REDUCTION is atomic and published
+
+The production REDUCTION entry point now composes the whole Java-ordered stage
+as one fail-closed result: per-system foundations and enabled stem-head
+refinement, per-system beam-group checks, the sheet free-stem median, and final
+glyph cleanup. Its Batuque result exactly matches the separately graded phase
+transactions and final reduced STEMS state.
+
+Ordinary `-step REDUCTION -json` and streamed REDUCTION snapshots are now
+byte-identical schema-1 publications. They retain every upstream product and
+the reduced `stems` graph, then add one `reduction` trace with per-system phase
+counts, median, and the exact 1,820 -> 406 modeled-glyph cleanup. The 59 live
+GRID-owned barline/brace glyph contents stay explicitly opaque; Rust does not
+fabricate Java IDs for them.
+
+The publication contract, CLI/report units, all 35 sibling tests, frozen SIG
+10/10 active gates, full library, strict Clippy, formatting, and diff checks
+are green. REDUCTION is now executable and public; opaque upstream registry
+ownership can be widened later only if a downstream stage needs those IDs.

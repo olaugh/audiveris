@@ -36,7 +36,11 @@ fn invoke(stage: &str, stream: bool) -> String {
     if stream {
         command.arg("-stream-json");
     }
-    let input = if stage == "STEMS" { batuque() } else { chula() };
+    let input = if matches!(stage, "STEMS" | "REDUCTION") {
+        batuque()
+    } else {
+        chula()
+    };
     let output = command.arg(input).output().expect("run audiveris-cli");
     assert!(
         output.status.success(),
@@ -75,7 +79,7 @@ fn payload_for_stage(stream: &str, stage: &str) -> String {
 
 #[test]
 fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
-    for stage in ["GRID", "LEDGERS", "HEADS", "STEMS"] {
+    for stage in ["GRID", "LEDGERS", "HEADS", "STEMS", "REDUCTION"] {
         let ordinary = invoke(stage, false);
         let stream = invoke(stage, true);
         let payload = payload_for_stage(&stream, stage);
@@ -90,6 +94,15 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
             "GRID" => &["GRID"],
             "LEDGERS" => &["GRID", "HEADERS", "STEM_SEEDS", "BEAMS", "LEDGERS"],
             "HEADS" => &["GRID", "HEADERS", "STEM_SEEDS", "BEAMS", "LEDGERS", "HEADS"],
+            "STEMS" => &[
+                "GRID",
+                "HEADERS",
+                "STEM_SEEDS",
+                "BEAMS",
+                "LEDGERS",
+                "HEADS",
+                "STEMS",
+            ],
             _ => &[
                 "GRID",
                 "HEADERS",
@@ -98,6 +111,7 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
                 "LEDGERS",
                 "HEADS",
                 "STEMS",
+                "REDUCTION",
             ],
         };
         let marker_lines: Vec<&str> = stream
@@ -170,6 +184,24 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
                 payload.matches("\"stems\":").count(),
                 1,
                 "STEMS stage-owned product is emitted exactly once"
+            );
+        }
+        if stage == "REDUCTION" {
+            assert!(
+                payload.contains("\"stage\":\"REDUCTION\"")
+                    && payload.contains("\"heads\":")
+                    && payload.contains("\"stems\":")
+                    && payload.contains("\"reduction\":"),
+                "REDUCTION publication retains every upstream product and its stage-owned trace"
+            );
+            assert!(payload.contains("\"system_count\":3"));
+            assert!(payload.contains("\"glyph_registry_entry_count\":1820"));
+            assert!(payload.contains("\"opaque_live_inter_glyph_count\":59"));
+            assert!(payload.contains("\"active_glyph_count_after\":406"));
+            assert_eq!(
+                payload.matches("\"reduction\":").count(),
+                1,
+                "REDUCTION stage-owned product is emitted exactly once"
             );
         }
     }

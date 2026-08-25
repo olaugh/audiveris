@@ -104,8 +104,8 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Live Java/Rust vectors | 73 canonical fixtures, including composed StaffProjector, recursive clusters, bar-column construction/start selection, production `LagManager.dispatchRuns`, `Book.updateScores` regrouping, live `SystemInfo.buildRef` ownership, a composed GRID output boundary, production SIG contextual grading, exact sheet-skew transforms, raw-raster `retrieveLines`, raster-fitted mutable endpoints, raw alignment/connection discovery, exact `StaffFilament.fillHoles` mutation, all 149 raw grades for a fixed classifier feature vector, an asymmetric point-list MixGlyphDescriptor feature vector, and Java-order RunTable coordinate/feature extraction with absolute offset |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Structured output and live comparison | Ordinary `-json` emits the unchanged schema-1 document per requested sheet through STEMS. The opt-in `-stream-json` viewer protocol adds flushed `@omrscope` schema-1 boundary markers around those unchanged documents, yielding immutable **completed-stage** snapshots from GRID through STEMS; it does not expose item-by-item or intra-stage recognition. `omrscope` runs Rust and Java independently and concurrently, retains/selects each completed snapshot, and keeps the ordinary JSONL and Java oracle outputs compatible. Its Page/Inters inspection surface now highlights the inspected pair without native table selection, can opt into highlighting all filtered rows, and can draw engine-local relation edges only when both endpoint IDs resolve uniquely in that selected engine snapshot; it never infers cross-engine graph edges. GRID's byte path remains unchanged; later documents add selected clef/key/time inters with lifecycle/classifier evidence, accepted stem seeds, system-owned header erases, beam/ledger geometry, identity-free final heads, and terminal native Stem/HeadStem products. STEMS retains every upstream product and publishes 148 Batuque final Stem geometries/grades, 323 HeadStem payloads, checked/abnormal/no-stem summaries, and undefined sides using explicitly native, system-local identities rather than fabricated Java IDs. Text after GRID remains explicitly unsupported. `omrscope` parses bounds-only headers, both median forms, and accepted top-level stem seeds; it rejects incomplete geometry and treats the new stage-owned fields additively. A separate manual Score tab still runs one selected Java sheet through PAGE, validates its single local MusicXML/MXL artifact, and renders it to local Verovio SVG; that preview is inspection only and does not imply native PAGE/MusicXML parity. The workspace carries no serialization dependency |
-| Rust workspace | The workspace now contains two hundred and seventy-five exact STEMS boundaries. Boundaries 1-267 retain the detailed construction, scheduler, mutation, head-linking, phase-two, finalization, and Bach completion evidence below. Boundaries 268-270 establish generic schema-1 STEMS completion on the eight frozen parity pages plus D039 and both extracted Dichterliebe pages. Boundary 271 removes production page/queue-specific head dispatch; Boundary 272 makes `finalizeStems` generic-only; Boundary 273 carries Java's mutable C-link theoretical lines; Boundary 274 removes the dense-sort and rejected-STUMPS valid-input guards. Boundary 275 implements the actual `StemsStep.doEpilog`: orphan-beam and empty-group purge, BeamHead boosts, complete SIG contextualization, and BeamGroup ensemble contextual grades. A final reachability audit finds no production identity dispatch or remaining valid-input STEMS limitation. The eleven-page CLI suite, 35-case transaction suite, strict workspace Clippy, formatting, and diff checks are green. `425d58e82` remains the exact fully green remote CI baseline pending this commit's terminal workflows. CI repeats formatting, strict Clippy, and workspace tests on Ubuntu and macOS |
+| Structured output and live comparison | Ordinary `-json` emits one schema-1 document per requested sheet through REDUCTION. The opt-in `-stream-json` protocol wraps byte-identical immutable completed-stage snapshots in GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS -> STEMS -> REDUCTION order; it does not expose intra-stage items. REDUCTION retains every upstream product and the fully reduced `stems` graph, then publishes its atomic phase counts, free-stem median, modeled glyph cleanup census, and explicit opaque-live-glyph count without inventing Java IDs. Text after GRID remains explicitly unsupported. The workspace carries no serialization dependency |
+| Rust workspace | STEMS is complete through its generic epilog. REDUCTION Boundary 296 now atomically composes the complete foundations fixed point, enabled stem refinement, beam-group checks, free-stem median, and final modeled-glyph cleanup, then publishes the result through ordinary and streamed schema-1 JSON. The 35-case sibling suite, frozen SIG gate, CLI/report contracts, strict workspace Clippy, formatting, and diff checks are green. CI repeats formatting, strict Clippy, and workspace tests on Ubuntu and macOS |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
@@ -6523,3 +6523,25 @@ five ignored, and the full library is 748 passed plus two ignored. Strict
 all-target/all-feature Clippy, formatting, and diff checks pass. Next expand
 the persistent registry to those opaque upstream glyphs, then wire schema-1
 REDUCTION publication and corpus parity.
+
+## Boundary 296: atomic recognition and REDUCTION publication
+
+The production entry point now executes all REDUCTION phases atomically in
+Java order: every system's foundations plus enabled head-end refinement, every
+system's beam-group checks, the sheet-wide free-stem median, and the final
+glyph cleanup. Batuque's returned phase ledgers and final STEMS state exactly
+equal the prior independently composed evidence.
+
+The CLI now accepts `-step REDUCTION -json` and publishes one additive
+schema-1 document containing all upstream products, the reduced `stems`
+product, and one `reduction` trace. Ordinary and `-stream-json` payload bytes
+are identical; REDUCTION is the eighth completed-stage stream snapshot. The
+trace exposes per-system phase counts, median, 1,820 -> 406 modeled active
+glyph cleanup, 1,414 removals, and the 59 retained GRID-owned opaque glyph
+contents without fabricating Java identities.
+
+The black-box publication contract, CLI/report units, all 35 sibling tests,
+and frozen SIG 10/10 active gates pass; the clean milestone library is 748
+passed plus two ignored. Strict workspace Clippy, formatting, and diff
+checks pass. REDUCTION is executable and published; downstream work may widen
+opaque upstream registry ownership if and when a later stage needs those IDs.

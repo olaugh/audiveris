@@ -460,6 +460,35 @@ impl fmt::Display for NativeReductionGlyphCleanupError {
 
 impl Error for NativeReductionGlyphCleanupError {}
 
+/// Complete native REDUCTION result after every Java system and sheet phase.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionRecognition {
+    pub stems: NativeStemsRecognition,
+    pub foundations: Vec<NativeReductionFoundationsTransaction>,
+    pub head_end_refinements: Vec<NativeReductionStemHeadEndTransaction>,
+    pub beam_groups: Vec<NativeReductionBeamGroupTransaction>,
+    pub free_stem_lengths: NativeReductionStemFreeLengthTransaction,
+    pub glyph_cleanup: NativeReductionGlyphCleanupTransaction,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionRecognitionError {
+    pub phase: &'static str,
+    pub message: String,
+}
+
+impl fmt::Display for NativeReductionRecognitionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "native REDUCTION {} failed: {}",
+            self.phase, self.message
+        )
+    }
+}
+
+impl Error for NativeReductionRecognitionError {}
+
 /// Exact head anchor lookup keyed by SIG head, horizontal side, vertical side.
 pub type NativeReductionHeadAnchorMap = BTreeMap<
     (
@@ -1921,6 +1950,75 @@ pub fn cleanup_native_reduction_glyph_index(
         active_after: retained_active.len(),
         retained_active,
         removed,
+    })
+}
+
+/// Run Java `ReductionStep` atomically over one completed native STEMS page.
+///
+/// System work completes for the entire page before sheet epilog work begins:
+/// foundations and enabled head-end refinement per system, then beam-group
+/// checks per system, the sheet-wide free-length median, and glyph cleanup.
+pub fn recognize_native_reduction(
+    grid: &GridLinesRecognition,
+    mut stems: NativeStemsRecognition,
+) -> Result<NativeReductionRecognition, NativeReductionRecognitionError> {
+    let system_ids = stems
+        .systems
+        .iter()
+        .map(|system| system.system_id)
+        .collect::<Vec<_>>();
+    let mut foundations = Vec::with_capacity(system_ids.len());
+    let mut head_end_refinements = Vec::with_capacity(system_ids.len());
+    for &system_id in &system_ids {
+        foundations.push(
+            reduce_native_stems_foundations(&mut stems, system_id).map_err(|error| {
+                NativeReductionRecognitionError {
+                    phase: "foundations",
+                    message: format!("system {system_id}: {error}"),
+                }
+            })?,
+        );
+        head_end_refinements.push(
+            refine_native_stems_head_ends(&mut stems, system_id).map_err(|error| {
+                NativeReductionRecognitionError {
+                    phase: "stem head-end refinement",
+                    message: format!("system {system_id}: {error}"),
+                }
+            })?,
+        );
+    }
+    let mut beam_groups = Vec::with_capacity(system_ids.len());
+    for &system_id in &system_ids {
+        beam_groups.push(
+            check_native_reduction_beam_groups(&mut stems, system_id).map_err(|error| {
+                NativeReductionRecognitionError {
+                    phase: "beam-group consistency",
+                    message: format!("system {system_id}: {error}"),
+                }
+            })?,
+        );
+    }
+    let free_stem_lengths =
+        measure_native_reduction_stem_free_lengths(&stems).map_err(|error| {
+            NativeReductionRecognitionError {
+                phase: "free-stem measurement",
+                message: error.to_string(),
+            }
+        })?;
+    let glyph_cleanup =
+        cleanup_native_reduction_glyph_index(grid, &mut stems).map_err(|error| {
+            NativeReductionRecognitionError {
+                phase: "glyph cleanup",
+                message: error.to_string(),
+            }
+        })?;
+    Ok(NativeReductionRecognition {
+        stems,
+        foundations,
+        head_end_refinements,
+        beam_groups,
+        free_stem_lengths,
+        glyph_cleanup,
     })
 }
 

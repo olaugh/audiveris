@@ -23,7 +23,7 @@ use audiveris_omr::{
     native_reduction::{
         check_native_reduction_beam_groups, cleanup_native_reduction_glyph_index,
         measure_native_reduction_stem_free_lengths, native_stems_lossless_overlap_resolver,
-        reduce_native_stems_foundations, refine_native_stems_head_ends,
+        recognize_native_reduction, reduce_native_stems_foundations, refine_native_stems_head_ends,
     },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
@@ -8718,6 +8718,7 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     let mut recognized =
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Batuque transactional native STEMS recognition");
+    let orchestration_input = recognized.clone();
     assert_eq!(recognized.components, prepared.components);
     assert_generic_finalize_prefix_eq(&recognized.systems, &page_finalized.systems);
     for system in &recognized.systems {
@@ -8893,6 +8894,14 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     );
     assert!(repeated_cleanup.removed.is_empty());
     assert_eq!(repeated_cleanup.active_after, 406);
+    let orchestrated = recognize_native_reduction(&grid, orchestration_input)
+        .expect("Batuque atomic native REDUCTION recognition");
+    assert_eq!(orchestrated.foundations.len(), 3);
+    assert_eq!(orchestrated.head_end_refinements.len(), 3);
+    assert_eq!(orchestrated.beam_groups.len(), 3);
+    assert_eq!(orchestrated.free_stem_lengths, free_lengths);
+    assert_eq!(orchestrated.glyph_cleanup, glyph_cleanup);
+    assert_eq!(orchestrated.stems, recognized);
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(
