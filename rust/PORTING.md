@@ -104,8 +104,8 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Live Java/Rust vectors | 73 canonical fixtures, including composed StaffProjector, recursive clusters, bar-column construction/start selection, production `LagManager.dispatchRuns`, `Book.updateScores` regrouping, live `SystemInfo.buildRef` ownership, a composed GRID output boundary, production SIG contextual grading, exact sheet-skew transforms, raw-raster `retrieveLines`, raster-fitted mutable endpoints, raw alignment/connection discovery, exact `StaffFilament.fillHoles` mutation, all 149 raw grades for a fixed classifier feature vector, an asymmetric point-list MixGlyphDescriptor feature vector, and Java-order RunTable coordinate/feature extraction with absolute offset |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Structured output and live comparison | Ordinary `-json` emits one schema-1 document per requested sheet through REDUCTION. The opt-in `-stream-json` protocol wraps byte-identical immutable completed-stage snapshots in GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS -> STEMS -> REDUCTION order; it does not expose intra-stage items. REDUCTION retains every upstream product and the fully reduced `stems` graph, then publishes its atomic phase counts, free-stem median, modeled glyph cleanup census, and explicit opaque-live-glyph count without inventing Java IDs. Text after GRID remains explicitly unsupported. The workspace carries no serialization dependency |
-| Rust workspace | STEMS is complete through its generic epilog. REDUCTION Boundary 296 now atomically composes the complete foundations fixed point, enabled stem refinement, beam-group checks, free-stem median, and final modeled-glyph cleanup, then publishes the result through ordinary and streamed schema-1 JSON. The 35-case sibling suite, frozen SIG gate, CLI/report contracts, strict workspace Clippy, formatting, and diff checks are green. CI repeats formatting, strict Clippy, and workspace tests on Ubuntu and macOS |
+| Structured output and live comparison | Ordinary `-json` emits one schema-1 document per requested sheet through default-disabled CUE_BEAMS. The opt-in `-stream-json` protocol wraps byte-identical immutable completed-stage snapshots in GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS -> STEMS -> REDUCTION -> CUE_BEAMS order; it does not expose intra-stage items. REDUCTION retains every upstream product and its exact phase/cleanup evidence. CUE_BEAMS retains that document and publishes Java's default `smallHeads=false` no-op with zero mutations; active cue-beam visual recognition remains typed unavailable. Text after GRID remains explicitly unsupported. The workspace carries no serialization dependency |
+| Rust workspace | STEMS is complete through its generic epilog. REDUCTION Boundary 296 atomically composes and publishes the complete stage. Boundary 297 executes and publishes Java's exact default-disabled CUE_BEAMS prolog gate while failing typed before the still-unported active visual builder. The sibling/SIG/CLI/report/lifecycle gates, strict workspace Clippy, formatting, and diff checks are green. CI repeats formatting, strict Clippy, and workspace tests on Ubuntu and macOS |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
@@ -6545,3 +6545,18 @@ and frozen SIG 10/10 active gates pass; the clean milestone library is 748
 passed plus two ignored. Strict workspace Clippy, formatting, and diff
 checks pass. REDUCTION is executable and published; downstream work may widen
 opaque upstream registry ownership if and when a later stage needs those IDs.
+
+## Boundary 297: publish Java's default CUE_BEAMS skip
+
+Production now evaluates the two source-order CUE_BEAMS gates over owned
+REDUCTION state. Disabled `smallHeads` wins over an existing small-beam scale;
+an enabled switch with an existing scale is the second no-op. The only active
+combination fails typed at `BeamsBuilder.buildCueBeams` before any downstream
+mutation. Since Java defaults `smallHeads` to false, normal image recognition
+completes this stage exactly with zero mutations.
+
+Ordinary and streamed `CUE_BEAMS` schema-1 payloads are byte-identical. The
+ninth stage snapshot retains REDUCTION and adds one exact skip record. The
+black-box output contract, seven CLI units, and all six dependency-light
+CUE_BEAMS lifecycle tests pass. Active cue recognition begins next at
+`getCueAggregates()` / `CueAggregate.process()`; it is not claimed here.

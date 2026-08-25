@@ -3,6 +3,7 @@
 use audiveris_cli::{Parameters, parse};
 use audiveris_core::step::OmrStep;
 use audiveris_image::ingest::Loader;
+use audiveris_omr::cue_beams_step::recognize_native_cue_beams;
 use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::native_heads::recognize_native_heads;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
@@ -14,8 +15,8 @@ use audiveris_omr::recognize::{
     recognize_scale_raster, scale_report,
 };
 use audiveris_omr::report::{
-    beams_json, grid_json, headers_json, heads_json, ledgers_json, reduction_json, stem_seeds_json,
-    stems_json,
+    beams_json, cue_beams_json, grid_json, headers_json, heads_json, ledgers_json, reduction_json,
+    stem_seeds_json, stems_json,
 };
 use std::{
     fmt::Write as _,
@@ -29,12 +30,12 @@ fn usage() {
          Usage: audiveris-cli [options] [inputs]\n\n\
          Native text recognition currently stops at -step GRID, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID page.png\n\n\
-         Schema-1 JSON is published through REDUCTION, e.g.:\n\
-         \x20 audiveris-cli -batch -step REDUCTION -json page.png\n\n\
+         Schema-1 JSON is published through default-disabled CUE_BEAMS, e.g.:\n\
+         \x20 audiveris-cli -batch -step CUE_BEAMS -json page.png\n\n\
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
-         HEADERS through REDUCTION currently require -json.\n\
+         HEADERS through CUE_BEAMS currently require -json.\n\
          Small-beam pages are refused explicitly; later stages use the\n\
          compatibility handoff."
     );
@@ -51,6 +52,7 @@ fn is_native_step(step: OmrStep) -> bool {
                 | OmrStep::Heads
                 | OmrStep::Stems
                 | OmrStep::Reduction
+                | OmrStep::CueBeams
         )
 }
 
@@ -64,6 +66,7 @@ fn is_json_only_step(step: OmrStep) -> bool {
             | OmrStep::Heads
             | OmrStep::Stems
             | OmrStep::Reduction
+            | OmrStep::CueBeams
     )
 }
 
@@ -256,16 +259,40 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                                 input.display()
                             )
                         })?;
+                    if step == OmrStep::Reduction {
+                        print!(
+                            "{}",
+                            reduction_json(
+                                &recognition,
+                                &headers,
+                                &stem_seeds,
+                                &beams,
+                                &ledgers,
+                                &heads.epilog,
+                                &reduction,
+                                &input_name,
+                                sheet,
+                            )
+                        );
+                        continue;
+                    }
+                    let cue_beams = recognize_native_cue_beams(&recognition, reduction, false)
+                        .map_err(|error| {
+                            format!(
+                                "{} sheet {sheet}: CUE_BEAMS failed: {error}",
+                                input.display()
+                            )
+                        })?;
                     print!(
                         "{}",
-                        reduction_json(
+                        cue_beams_json(
                             &recognition,
                             &headers,
                             &stem_seeds,
                             &beams,
                             &ledgers,
                             &heads.epilog,
-                            &reduction,
+                            &cue_beams,
                             &input_name,
                             sheet,
                         )
@@ -427,7 +454,7 @@ fn json_string(value: &str) -> String {
 }
 
 fn stream_stages_through(target: OmrStep) -> Result<&'static [OmrStep], String> {
-    const STAGES: [OmrStep; 8] = [
+    const STAGES: [OmrStep; 9] = [
         OmrStep::Grid,
         OmrStep::Headers,
         OmrStep::StemSeeds,
@@ -436,10 +463,11 @@ fn stream_stages_through(target: OmrStep) -> Result<&'static [OmrStep], String> 
         OmrStep::Heads,
         OmrStep::Stems,
         OmrStep::Reduction,
+        OmrStep::CueBeams,
     ];
     let Some(index) = STAGES.iter().position(|stage| *stage == target) else {
         return Err(format!(
-            "native omrscope stream begins at -step GRID and currently ends at -step REDUCTION, not -step {target}"
+            "native omrscope stream begins at -step GRID and currently ends at -step CUE_BEAMS, not -step {target}"
         ));
     };
     Ok(&STAGES[..=index])
@@ -776,6 +804,48 @@ fn run_native_stream(parameters: &Parameters, json: bool) -> Result<bool, String
                     sheet,
                     recognition_elapsed,
                 )?;
+                if target == OmrStep::Reduction {
+                    continue;
+                }
+
+                // CUE_BEAMS -------------------------------------------------
+                stream.stage_started(OmrStep::CueBeams, &input_name, sheet)?;
+                let started = Instant::now();
+                let cue_beams = match recognize_native_cue_beams(&recognition, reduction, false) {
+                    Ok(cue_beams) => cue_beams,
+                    Err(error) => {
+                        let message = format!(
+                            "{} sheet {sheet}: CUE_BEAMS failed: {error}",
+                            input.display()
+                        );
+                        stream.stage_failed(
+                            OmrStep::CueBeams,
+                            &input_name,
+                            sheet,
+                            started.elapsed(),
+                            &message,
+                        )?;
+                        return Err(message);
+                    }
+                };
+                let recognition_elapsed = started.elapsed();
+                stream.snapshot(&cue_beams_json(
+                    &recognition,
+                    &headers,
+                    &stem_seeds,
+                    &beams,
+                    &ledgers,
+                    &heads.epilog,
+                    &cue_beams,
+                    &input_name,
+                    sheet,
+                ))?;
+                stream.stage_completed(
+                    OmrStep::CueBeams,
+                    &input_name,
+                    sheet,
+                    recognition_elapsed,
+                )?;
             }
         }
         if processed_sheets == 0 {
@@ -886,10 +956,11 @@ mod tests {
             OmrStep::Heads,
             OmrStep::Stems,
             OmrStep::Reduction,
+            OmrStep::CueBeams,
         ] {
             assert!(is_native_step(step), "{step} should be native");
         }
-        assert!(!is_native_step(OmrStep::CueBeams));
+        assert!(!is_native_step(OmrStep::Symbols));
     }
 
     #[test]
@@ -902,6 +973,7 @@ mod tests {
             OmrStep::Heads,
             OmrStep::Stems,
             OmrStep::Reduction,
+            OmrStep::CueBeams,
         ] {
             let parameters = Parameters {
                 step: Some(step),
@@ -949,7 +1021,7 @@ mod tests {
     #[test]
     fn stream_stage_plan_is_java_pipeline_order_and_refuses_unpublished_stages() {
         assert_eq!(
-            stream_stages_through(OmrStep::Reduction).expect("REDUCTION stream plan"),
+            stream_stages_through(OmrStep::CueBeams).expect("CUE_BEAMS stream plan"),
             [
                 OmrStep::Grid,
                 OmrStep::Headers,
@@ -959,6 +1031,7 @@ mod tests {
                 OmrStep::Heads,
                 OmrStep::Stems,
                 OmrStep::Reduction,
+                OmrStep::CueBeams,
             ]
         );
         assert!(

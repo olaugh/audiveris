@@ -29,17 +29,17 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
-The CLI now performs native schema-1 JSON recognition through REDUCTION.
-GRID's human-readable report remains unchanged; HEADERS through REDUCTION
+The CLI now performs native schema-1 JSON recognition through default-disabled
+CUE_BEAMS. GRID's human-readable report remains unchanged; HEADERS through CUE_BEAMS
 require `-json` and compose in Java stage order rather than accepting invented
-downstream inputs. REDUCTION runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS ->
-LEDGERS -> HEADS -> STEMS -> REDUCTION, retains every upstream product, and
+downstream inputs. It runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS ->
+HEADS -> STEMS -> REDUCTION -> CUE_BEAMS, retains every upstream product, and
 adds the atomic Java-order reduction trace, free-stem median, and modeled glyph
 cleanup census without fabricating Java SIG, Inter, or Glyph IDs.
 
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
-HEADERS, STEM_SEEDS, BEAMS, LEDGERS, HEADS, STEMS, or REDUCTION, and the viewer can select any
+HEADERS, STEM_SEEDS, BEAMS, LEDGERS, HEADS, STEMS, REDUCTION, or CUE_BEAMS, and the viewer can select any
 retained snapshot. This is stage-boundary visibility only -- neither producer
 claims to stream individual recognition items while a stage is executing. The
 opt-in Rust `-stream-json` framing adds flushed `@omrscope` markers around the
@@ -12043,3 +12043,23 @@ published. Next widen the Java `GlyphIndex` memory-domain model only where a
 downstream stage needs identities for the retained GRID-owned opaque glyphs,
 then begin the next Java stage rather than blocking REDUCTION publication on
 fabricated registry identities.
+
+## Boundary 297: exact default CUE_BEAMS no-op publication
+
+The first production CUE_BEAMS boundary now executes Java's real prolog gate.
+Its priority is exact: `smallHeads=false` skips first even if SCALE already has
+a small-beam height; with small heads enabled, an existing small-beam scale is
+the second skip. Only the remaining active path reaches a typed
+`BeamsBuilder.buildCueBeams` unavailable error, before any downstream mutation.
+Java's processing-switch default is false, so ordinary headless image
+recognition completes this stage with no system traversal or mutation.
+
+`audiveris-cli -step CUE_BEAMS -json` retains the full REDUCTION document and
+adds one `cue_beams` result with the exact skip reason, switch/scale state, and
+zero mutation count. It is the ninth immutable `-stream-json` snapshot and is
+byte-identical to ordinary output. The black-box publication test, seven CLI
+routing tests, and all six dependency-light CUE_BEAMS lifecycle tests pass.
+
+This does not claim active cue-beam visual recognition. The next exact frontier
+is Java `BeamsBuilder.getCueAggregates()` and `CueAggregate.process()` for pages
+that explicitly enable small heads and lack a detected/manual small-beam scale.

@@ -7,9 +7,10 @@
 //! shared vertical SPOT_LAG and spot list, system traversal, SIG/index/member
 //! mutations, checked continuation, fatal prefixes, and Java's empty epilog.
 
-use std::collections::BTreeSet;
-use std::error::Error;
-use std::fmt;
+use std::{collections::BTreeSet, error::Error, fmt};
+
+use crate::native_reduction::NativeReductionRecognition;
+use crate::recognize::GridLinesRecognition;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CueSpotOrientation {
@@ -211,6 +212,61 @@ pub trait VisualCueBeams {
 pub enum CueBeamsSkipReason {
     SmallHeadsDisabled,
     SmallBeamScaleAlreadySet,
+}
+
+/// Native page state after the exact CUE_BEAMS prolog gate.
+///
+/// Java defaults `smallHeads` to false, so ordinary image recognition reaches
+/// this completed no-op result without constructing a `BeamsBuilder`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamsRecognition {
+    pub reduction: NativeReductionRecognition,
+    pub skip_reason: CueBeamsSkipReason,
+    pub small_heads_enabled: bool,
+    pub detected_small_beam_height: Option<i32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeCueBeamsRecognitionError {
+    ActiveRecognitionUnavailable,
+}
+
+impl fmt::Display for NativeCueBeamsRecognitionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ActiveRecognitionUnavailable => formatter.write_str(
+                "active cue-beam recognition requires the unported BeamsBuilder.buildCueBeams",
+            ),
+        }
+    }
+}
+
+impl Error for NativeCueBeamsRecognitionError {}
+
+/// Execute Java's CUE_BEAMS prolog gate over a completed REDUCTION page.
+///
+/// Gate priority is source-exact: a disabled small-head switch wins even when
+/// SCALE already found a small-beam height. Active recognition fails typed at
+/// the first unavailable visual dependency before any downstream mutation.
+pub fn recognize_native_cue_beams(
+    grid: &GridLinesRecognition,
+    reduction: NativeReductionRecognition,
+    small_heads_enabled: bool,
+) -> Result<NativeCueBeamsRecognition, NativeCueBeamsRecognitionError> {
+    let detected_small_beam_height = grid.scale.scale.small_beam.map(|scale| scale.main);
+    let skip_reason = if !small_heads_enabled {
+        CueBeamsSkipReason::SmallHeadsDisabled
+    } else if detected_small_beam_height.is_some() {
+        CueBeamsSkipReason::SmallBeamScaleAlreadySet
+    } else {
+        return Err(NativeCueBeamsRecognitionError::ActiveRecognitionUnavailable);
+    };
+    Ok(NativeCueBeamsRecognition {
+        reduction,
+        skip_reason,
+        small_heads_enabled,
+        detected_small_beam_height,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -36,7 +36,7 @@ fn invoke(stage: &str, stream: bool) -> String {
     if stream {
         command.arg("-stream-json");
     }
-    let input = if matches!(stage, "STEMS" | "REDUCTION") {
+    let input = if matches!(stage, "STEMS" | "REDUCTION" | "CUE_BEAMS") {
         batuque()
     } else {
         chula()
@@ -79,7 +79,14 @@ fn payload_for_stage(stream: &str, stage: &str) -> String {
 
 #[test]
 fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
-    for stage in ["GRID", "LEDGERS", "HEADS", "STEMS", "REDUCTION"] {
+    for stage in [
+        "GRID",
+        "LEDGERS",
+        "HEADS",
+        "STEMS",
+        "REDUCTION",
+        "CUE_BEAMS",
+    ] {
         let ordinary = invoke(stage, false);
         let stream = invoke(stage, true);
         let payload = payload_for_stage(&stream, stage);
@@ -103,6 +110,16 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
                 "HEADS",
                 "STEMS",
             ],
+            "REDUCTION" => &[
+                "GRID",
+                "HEADERS",
+                "STEM_SEEDS",
+                "BEAMS",
+                "LEDGERS",
+                "HEADS",
+                "STEMS",
+                "REDUCTION",
+            ],
             _ => &[
                 "GRID",
                 "HEADERS",
@@ -112,6 +129,7 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
                 "HEADS",
                 "STEMS",
                 "REDUCTION",
+                "CUE_BEAMS",
             ],
         };
         let marker_lines: Vec<&str> = stream
@@ -203,6 +221,18 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
                 1,
                 "REDUCTION stage-owned product is emitted exactly once"
             );
+        }
+        if stage == "CUE_BEAMS" {
+            assert!(
+                payload.contains("\"stage\":\"CUE_BEAMS\"")
+                    && payload.contains("\"reduction\":")
+                    && payload.contains("\"cue_beams\":"),
+                "CUE_BEAMS default skip retains REDUCTION and adds its stage result"
+            );
+            assert!(payload.contains("\"status\":\"skipped_small_heads_disabled\""));
+            assert!(payload.contains("\"small_heads_enabled\":false"));
+            assert!(payload.contains("\"mutation_count\":0"));
+            assert_eq!(payload.matches("\"cue_beams\":").count(), 1);
         }
     }
 }

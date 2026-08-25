@@ -39,6 +39,7 @@ use audiveris_image::system_population::BoundarySegment;
 
 use crate::beam_inters::{RawBeam, beam_bounds};
 use crate::clef_column::{NeutralClefCandidate, NeutralClefKind};
+use crate::cue_beams_step::{CueBeamsSkipReason, NativeCueBeamsRecognition};
 use crate::grid_executor::HeadlessStaffLine;
 use crate::head_seed_tally_analysis::{HeadSeedScaleEntry, HeadSeedTallySide};
 use crate::head_small_beam_purge::{SmallBeamPurgeDecision, SmallBeamPurgeTarget};
@@ -294,6 +295,7 @@ pub fn ledgers_json(
             heads: None,
             stems: None,
             reduction: None,
+            cue_beams: None,
         },
         input,
         sheet,
@@ -330,6 +332,7 @@ pub fn heads_json(
             heads: Some(heads),
             stems: None,
             reduction: None,
+            cue_beams: None,
         },
         input,
         sheet,
@@ -366,6 +369,7 @@ pub fn stems_json(
             heads: Some(heads),
             stems: Some(stems),
             reduction: None,
+            cue_beams: None,
         },
         input,
         sheet,
@@ -401,6 +405,39 @@ pub fn reduction_json(
             heads: Some(heads),
             stems: Some(&reduction.stems),
             reduction: Some(reduction),
+            cue_beams: None,
+        },
+        input,
+        sheet,
+    )
+}
+
+/// Emits the completed default CUE_BEAMS no-op after native REDUCTION.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn cue_beams_json(
+    recognition: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    beams: &NativeBeamRecognition,
+    ledgers: &NativeLedgerRecognition,
+    heads: &NativeHeadsEpilogRecognition,
+    cue_beams: &NativeCueBeamsRecognition,
+    input: &str,
+    sheet: usize,
+) -> String {
+    recognition_json(
+        "CUE_BEAMS",
+        recognition,
+        RecognitionProducts {
+            headers: Some(headers),
+            stem_seeds: Some(stem_seeds),
+            beams: Some(beams),
+            ledgers: Some(ledgers),
+            heads: Some(heads),
+            stems: Some(&cue_beams.reduction.stems),
+            reduction: Some(&cue_beams.reduction),
+            cue_beams: Some(cue_beams),
         },
         input,
         sheet,
@@ -416,6 +453,7 @@ struct RecognitionProducts<'a> {
     heads: Option<&'a NativeHeadsEpilogRecognition>,
     stems: Option<&'a NativeStemsRecognition>,
     reduction: Option<&'a NativeReductionRecognition>,
+    cue_beams: Option<&'a NativeCueBeamsRecognition>,
 }
 
 fn recognition_json(
@@ -433,6 +471,7 @@ fn recognition_json(
         heads,
         stems,
         reduction,
+        cue_beams,
     } = products;
     let mut json = Json::default();
     json.open('{');
@@ -484,6 +523,9 @@ fn recognition_json(
     }
     if let Some(reduction) = reduction {
         reduction_product(&mut json, reduction);
+    }
+    if let Some(cue_beams) = cue_beams {
+        cue_beams_product(&mut json, cue_beams);
     }
 
     json.close('}');
@@ -2090,6 +2132,26 @@ fn reduction_product(json: &mut Json, reduction: &NativeReductionRecognition) {
         json.close('}');
     }
     json.close(']');
+    json.close('}');
+}
+
+fn cue_beams_product(json: &mut Json, recognition: &NativeCueBeamsRecognition) {
+    json.key("cue_beams");
+    json.open('{');
+    json.field_string(
+        "status",
+        match recognition.skip_reason {
+            CueBeamsSkipReason::SmallHeadsDisabled => "skipped_small_heads_disabled",
+            CueBeamsSkipReason::SmallBeamScaleAlreadySet => "skipped_small_beam_scale_already_set",
+        },
+    );
+    json.field_boolean("small_heads_enabled", recognition.small_heads_enabled);
+    json.key("detected_small_beam_height");
+    match recognition.detected_small_beam_height {
+        Some(height) => json.integer(height as i64),
+        None => json.null(),
+    }
+    json.field_integer("mutation_count", 0);
     json.close('}');
 }
 
