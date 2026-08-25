@@ -7135,3 +7135,10 @@ checks and produce ordered `SmallBeamInter` creation plans. Cue mode skips only
 the ordinary slope/vertical-fit gate; all later geometry and grade checks remain
 shared with BEAMS. The current corpus still has zero plans after singleton
 purge. Registration, SIG mutation, grouping, and stem linking remain next.
+
+## Boundary 302: cue spot and SmallBeam registration
+
+Rust now retains every cue candidate spot before grading and registers accepted
+items as fixed-glyph-backed abnormal `BEAM_SMALL` SIG vertices in exact insertion
+order. The current corpus remains a zero-delta result after singleton purge.
+Cue grouping and BeamStem linking are next.

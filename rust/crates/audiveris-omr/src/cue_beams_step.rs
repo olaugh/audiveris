@@ -17,7 +17,9 @@ use audiveris_image::{
     spots::BEAM_BINARIZATION_THRESHOLD,
 };
 
-use crate::beam_inters::{RawBeam, create_beam_inters};
+use crate::beam_inters::{
+    BeamKind, RawBeam, RegisteredBeamGlyph, create_beam_inters, retrieve_beam_glyph,
+};
 use crate::beam_parameters::{ItemParameters, SheetParameters};
 use crate::beam_recognizer::{BeamCheck, BeamRejection, check_cue_beam_glyph};
 use crate::beams_step::component_vertical_raster;
@@ -25,7 +27,8 @@ use crate::head_scanner_slices::JavaRectangle;
 use crate::native_heads_range_lookup::java_rectangle_grow;
 use crate::native_reduction::NativeReductionRecognition;
 use crate::native_sig::{
-    NativeSigBounds, NativeSigInterKind, NativeSigRelationKind, NativeSigVertexId,
+    NativeSigBounds, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem, NativeSigVertexId,
+    append_native_cue_beam_vertex,
 };
 use crate::recognize::GridLinesRecognition;
 
@@ -402,6 +405,41 @@ pub struct NativeCueBeamCheckRecognition {
     pub aggregates: Vec<NativeCueBeamAggregateCheck>,
 }
 
+/// Java registers and retains each candidate cue spot before it knows whether
+/// beam grading will accept it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueSpotRegistration {
+    pub ordinal: usize,
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub glyph_ordinal: usize,
+    pub glyph: GlyphComponent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamRegistration {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub spot_ordinal: usize,
+    pub sig_ordinal: NativeSigVertexId,
+    pub beam: RawBeam,
+    pub fixed_glyph: RegisteredBeamGlyph,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamMutationSystem {
+    pub system_id: usize,
+    pub sig_before_vertex_count: usize,
+    pub sig_after: NativeSigSystem,
+    pub beams: Vec<NativeCueBeamRegistration>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamMutationRecognition {
+    pub registered_spots: Vec<NativeCueSpotRegistration>,
+    pub systems: Vec<NativeCueBeamMutationSystem>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeCueBeamCheckError {
     pub system_id: usize,
@@ -424,6 +462,27 @@ impl fmt::Display for NativeCueBeamCheckError {
 }
 
 impl Error for NativeCueBeamCheckError {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeCueBeamMutationError {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub message: String,
+}
+
+impl fmt::Display for NativeCueBeamMutationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "native cue beam mutation S{}A{}: {}",
+            self.system_id,
+            self.aggregate_ordinal + 1,
+            self.message
+        )
+    }
+}
+
+impl Error for NativeCueBeamMutationError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NativeCueAggregateError {
@@ -732,6 +791,98 @@ pub fn check_native_cue_beam_spots(
         });
     }
     Ok(NativeCueBeamCheckRecognition { aggregates })
+}
+
+/// Apply Java's register-spot/append-spot/register-small-beam mutation prefix.
+///
+/// Cue grouping and BeamStem linking are intentionally not performed here;
+/// their input is the exact SIG snapshot and fixed-glyph evidence returned by
+/// this function.
+pub fn materialize_native_cue_beam_mutations(
+    grid: &GridLinesRecognition,
+    reduction: &NativeReductionRecognition,
+    spots: &NativeCueSpotRecognition,
+    checks: &NativeCueBeamCheckRecognition,
+) -> Result<NativeCueBeamMutationRecognition, NativeCueBeamMutationError> {
+    let page = grid.no_staff.to_pixels();
+    let mut registered_spots = Vec::new();
+    let mut systems = Vec::with_capacity(reduction.stems.systems.len());
+    for finalized in &reduction.stems.systems {
+        let system_id = finalized.system_id;
+        let mut sig_after = finalized.transaction.state_after.beam_state.sig.clone();
+        let sig_before_vertex_count = sig_after.vertices.len();
+        let mut beams = Vec::new();
+        for check_aggregate in checks
+            .aggregates
+            .iter()
+            .filter(|aggregate| aggregate.system_id == system_id)
+        {
+            let spot_aggregate = spots
+                .aggregates
+                .iter()
+                .find(|aggregate| {
+                    aggregate.system_id == system_id
+                        && aggregate.aggregate_ordinal == check_aggregate.aggregate_ordinal
+                })
+                .ok_or_else(|| NativeCueBeamMutationError {
+                    system_id,
+                    aggregate_ordinal: check_aggregate.aggregate_ordinal,
+                    message: "missing extracted aggregate".to_owned(),
+                })?;
+            if spot_aggregate.glyphs.len() != check_aggregate.glyphs.len() {
+                return Err(NativeCueBeamMutationError {
+                    system_id,
+                    aggregate_ordinal: check_aggregate.aggregate_ordinal,
+                    message: "spot/check glyph count mismatch".to_owned(),
+                });
+            }
+            for (glyph, checked) in spot_aggregate.glyphs.iter().zip(&check_aggregate.glyphs) {
+                let spot_ordinal = registered_spots.len();
+                registered_spots.push(NativeCueSpotRegistration {
+                    ordinal: spot_ordinal,
+                    system_id,
+                    aggregate_ordinal: check_aggregate.aggregate_ordinal,
+                    glyph_ordinal: checked.glyph_ordinal,
+                    glyph: glyph.clone(),
+                });
+                for beam in &checked.created_cues {
+                    if beam.kind != BeamKind::SmallBeam {
+                        return Err(NativeCueBeamMutationError {
+                            system_id,
+                            aggregate_ordinal: check_aggregate.aggregate_ordinal,
+                            message: "cue check produced a non-small beam".to_owned(),
+                        });
+                    }
+                    let fixed_glyph =
+                        retrieve_beam_glyph(beam.item, grid.scale.width, grid.scale.height, &page)
+                            .map_err(|error| NativeCueBeamMutationError {
+                                system_id,
+                                aggregate_ordinal: check_aggregate.aggregate_ordinal,
+                                message: error.to_string(),
+                            })?;
+                    let sig_ordinal = append_native_cue_beam_vertex(&mut sig_after, beam);
+                    beams.push(NativeCueBeamRegistration {
+                        system_id,
+                        aggregate_ordinal: check_aggregate.aggregate_ordinal,
+                        spot_ordinal,
+                        sig_ordinal,
+                        beam: *beam,
+                        fixed_glyph,
+                    });
+                }
+            }
+        }
+        systems.push(NativeCueBeamMutationSystem {
+            system_id,
+            sig_before_vertex_count,
+            sig_after,
+            beams,
+        });
+    }
+    Ok(NativeCueBeamMutationRecognition {
+        registered_spots,
+        systems,
+    })
 }
 
 fn extract_cue_spot_components(

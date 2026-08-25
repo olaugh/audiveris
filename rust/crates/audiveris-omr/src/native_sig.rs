@@ -2286,6 +2286,18 @@ fn push_beam_vertex(graph: &mut NativeSigSystem, beam: &RawBeam) -> usize {
     )
 }
 
+/// Append one already graded active-CUE_BEAMS product in Java SIG insertion
+/// order. Fixed-glyph registration is intentionally owned by the caller, just
+/// as ordinary native BEAMS keeps glyph evidence beside rather than inside the
+/// graph vertex.
+pub fn append_native_cue_beam_vertex(
+    graph: &mut NativeSigSystem,
+    beam: &RawBeam,
+) -> NativeSigVertexId {
+    debug_assert_eq!(beam.kind, BeamKind::SmallBeam);
+    NativeSigVertexId(push_beam_vertex(graph, beam))
+}
+
 fn append_ledgers(
     ledgers: &NativeLedgerRecognition,
     system_id: usize,
@@ -2541,8 +2553,58 @@ mod overlap_geometry_tests {
     use audiveris_image::{
         bar_column::StaffId,
         bars_logic::{VerticalInterPlan, VerticalMedian},
+        beam_structure::{BeamImpacts, BeamItem, BeamRasterEvidence, Segment},
         staff_peak::StaffPeak,
     };
+
+    #[test]
+    fn cue_beam_append_allocates_the_next_small_beam_vertex() {
+        let mut graph = NativeSigSystem {
+            system_id: 3,
+            vertices: Vec::new(),
+            edges: Vec::new(),
+        };
+        let beam = RawBeam {
+            kind: BeamKind::SmallBeam,
+            item: BeamItem {
+                median: Segment {
+                    x1: 10.0,
+                    y1: 20.0,
+                    x2: 40.0,
+                    y2: 22.0,
+                },
+                height: 4.0,
+            },
+            impacts: BeamImpacts {
+                width: 1.0,
+                min_height: 1.0,
+                max_height: 1.0,
+                core: 1.0,
+                belt: 1.0,
+                distance: 1.0,
+                raster: BeamRasterEvidence {
+                    core_foreground: 120,
+                    core_count: 120,
+                    belt_foreground: 0,
+                    belt_count: 60,
+                    core_ratio: 1.0,
+                    belt_ratio: 0.0,
+                    rounded_width: 31,
+                },
+            },
+            grade: 0.8,
+        };
+
+        let id = append_native_cue_beam_vertex(&mut graph, &beam);
+
+        assert_eq!(id, NativeSigVertexId(0));
+        let vertex = graph.vertex(id.0).unwrap();
+        assert_eq!(vertex.kind, NativeSigInterKind::SmallBeam);
+        assert_eq!(vertex.shape.as_deref(), Some("BEAM_SMALL"));
+        assert_eq!(vertex.grade, 0.8);
+        assert!(vertex.abnormal);
+        assert_eq!(vertex.beam_geometry.unwrap().height, 4.0);
+    }
 
     #[test]
     fn bracket_area_and_bounds_include_both_bravura_serifs() {

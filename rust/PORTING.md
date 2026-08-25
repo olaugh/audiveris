@@ -6637,3 +6637,15 @@ Focused tests pin the cue-versus-standard slope distinction, and the active
 eight-page differential remains empty through the grading plan because all
 qualified heads are singletons. Glyph registration, shared spot retention,
 SIG insertion, grouping, and linking are the next mutation slice.
+
+## Boundary 302: registered cue spots and SmallBeam vertices
+
+The active path now performs Java's first cue mutation prefix. Candidate glyphs
+are retained in one stage-global spot order regardless of rejection. Accepted
+items rebuild fixed beam glyphs from NO_STAFF and allocate abnormal
+`BEAM_SMALL` vertices in system SIG insertion order, preserving source spot,
+aggregate, raw-beam, geometry, grade, and fixed-run evidence.
+
+Focused tests pin the allocated vertex identity and payload; the real corpus
+pins an empty mutation delta because no aggregate survives. Cue beam grouping
+and BeamStem links remain the next unported statements.

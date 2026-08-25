@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use audiveris_omr::{
     cue_beams_step::{
         NativeCueAggregateRecognition, check_native_cue_beam_spots, extract_native_cue_spots,
-        materialize_native_cue_aggregates, plan_native_cue_aggregate_processing,
+        materialize_native_cue_aggregates, materialize_native_cue_beam_mutations,
+        plan_native_cue_aggregate_processing,
     },
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads_with_small_heads,
@@ -59,11 +60,18 @@ fn active_cue_aggregate_corpus_matches_java() {
         let spots =
             extract_native_cue_spots(&grid, &processing).expect("native cue spot extraction");
         assert!(spots.aggregates.is_empty(), "{page}");
-        assert!(
+        let checks =
             check_native_cue_beam_spots(&grid, &spots, reduction.stems.reduction_interline)
-                .expect("native cue beam checks")
-                .aggregates
-                .is_empty(),
+                .expect("native cue beam checks");
+        assert!(checks.aggregates.is_empty(), "{page}");
+        let mutations = materialize_native_cue_beam_mutations(&grid, &reduction, &spots, &checks)
+            .expect("native cue beam mutations");
+        assert!(mutations.registered_spots.is_empty(), "{page}");
+        assert!(
+            mutations.systems.iter().all(|system| {
+                system.beams.is_empty()
+                    && system.sig_after.vertices.len() == system.sig_before_vertex_count
+            }),
             "{page}"
         );
     }

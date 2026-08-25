@@ -12173,3 +12173,20 @@ still produces zero checks because no aggregate survives singleton purge.
 Next is the mutation envelope: register every checked glyph as BEAM_SPOT,
 append it to the shared cue spot list even on rejection, then register accepted
 SmallBeam vertices and their glyph ownership before cue grouping and stem links.
+
+## Boundary 302: cue spot and SmallBeam mutation prefix
+
+`materialize_native_cue_beam_mutations` now applies the first mutating statements
+of `CueAggregate.process()` in source order. Every extracted glyph receives a
+stage-global registered-spot ordinal before its check outcome is considered, so
+rejected spots remain in the shared list exactly as Java requires. Every
+accepted cue item then rebuilds its fixed glyph from the beam parallelogram over
+NO_STAFF and appends an abnormal `BEAM_SMALL` vertex at the next system SIG
+ordinal with exact grade, bounds, median, and height.
+
+The result retains the post-mutation SIG snapshot, fixed glyph evidence, source
+spot ownership, and before/after vertex counts per system. A focused test pins
+next-ordinal allocation and every SmallBeam vertex field. The eight-page corpus
+still proves a strict zero-registration/zero-vertex delta after singleton purge.
+Next is `BeamGroupInter.populateCueAggregate(beams)`, followed by HeadLinker beam
+group lookup and BeamStem relation creation/extension.
