@@ -11959,3 +11959,30 @@ need zero splits. Focused REDUCTION is 41/41; the complete sibling suite is
 library is 746 passed plus two ignored. Strict workspace Clippy with every
 target/feature, formatting, and diff checks pass. Next implement the sheet-wide
 `StemInter.getFreeLength()` collection and median report, then glyph cleanup.
+
+## Boundary 294: sheet-wide free-stem median
+
+Native REDUCTION now owns the second sheet-epilog action rather than accepting
+precomputed neutral values. `measure_native_reduction_stem_free_lengths`
+scans systems and active Stem vertices in Java order. It returns null first for
+any BeamStem attachment and then for an empty head set. Other heads preserve
+relation insertion order before a stable integer-center-y sort; the existing
+direction implementation selects first-versus-last exactly as
+`StemInter.getFreeLength()` does.
+
+This pass must not reuse the refinement corner directly. Java asks for the
+opposite vertical side: direction-negative stems measure median P1 from the
+head's BOTTOM reference, while direction-positive or unknown stems measure
+median P2 from TOP. The absolute ordinate gap is rounded ties-to-even. Pixel
+lengths are then sorted across the whole sheet, element `len / 2` supplies the
+upper-middle median, and normalization divides by the main interline.
+
+The focused case covers both directions and both null branches. Batuque pins
+five measured stems, 142 skips, and an 83-pixel median (`83 / 21`
+interlines) after foundations, refinement, and group checks. Focused
+REDUCTION passes 42/42; the sibling suite is 35/35; frozen SIG remains ten
+active passes plus five ignored diagnostics; the full library is 747 passed
+plus two ignored. Strict workspace Clippy for all targets/features,
+formatting, and diff checks pass. Resume at the final Java epilog operation:
+build the persistent staff-line + live-Inter glyph keep set and remove every
+other GlyphIndex entity, then publish/grade the complete REDUCTION stage.

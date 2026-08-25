@@ -21,8 +21,9 @@ use audiveris_omr::{
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
     native_reduction::{
-        check_native_reduction_beam_groups, native_stems_lossless_overlap_resolver,
-        reduce_native_stems_foundations, refine_native_stems_head_ends,
+        check_native_reduction_beam_groups, measure_native_reduction_stem_free_lengths,
+        native_stems_lossless_overlap_resolver, reduce_native_stems_foundations,
+        refine_native_stems_head_ends,
     },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
@@ -8826,6 +8827,31 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     assert_eq!(
         beam_group_splits, 0,
         "Batuque's retained beam groups need no REDUCTION split"
+    );
+    let free_lengths = measure_native_reduction_stem_free_lengths(&recognized)
+        .expect("Batuque exact REDUCTION free-stem length measurement");
+    assert_eq!(free_lengths.systems.len(), recognized.systems.len());
+    assert!(
+        free_lengths
+            .systems
+            .iter()
+            .all(|system| { system.lengths.len() + system.skips.len() == system.stem_order.len() })
+    );
+    assert_eq!(free_lengths.sorted_lengths.len(), 5);
+    assert_eq!(
+        free_lengths
+            .systems
+            .iter()
+            .map(|system| system.skips.len())
+            .sum::<usize>(),
+        142
+    );
+    assert_eq!(
+        free_lengths.median,
+        Some(audiveris_omr::reduction_step::StemFreeLengthMedian {
+            pixels: 83,
+            interlines: 83.0 / 21.0,
+        })
     );
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;

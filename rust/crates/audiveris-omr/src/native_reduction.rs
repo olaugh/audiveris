@@ -8,7 +8,7 @@
 //! algorithm, lossless overlap discovery, chord prolog, and the complete
 //! foundations outer fixed point.  It also owns the enabled
 //! `StemInter.refineHeadEnd()` pass that immediately follows foundations and
-//! the sheet-epilog beam-group consistency split pass.
+//! the sheet-epilog beam-group consistency and free-stem measurement passes.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -378,6 +378,45 @@ pub struct NativeReductionBeamGroupTransaction {
     pub splits: Vec<NativeReductionBeamGroupSplit>,
 }
 
+/// Why Java `StemInter.getFreeLength()` returned `null` for one live stem.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeReductionStemFreeLengthSkip {
+    BeamAttached,
+    NoHeads,
+}
+
+/// One non-null Java `StemInter.getFreeLength()` result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeReductionStemFreeLength {
+    pub system_id: usize,
+    pub stem: NativeSigVertexId,
+    pub direction: i8,
+    pub last_head: NativeSigVertexId,
+    pub head_stem_relation: NativeSigEdgeId,
+    pub head_side: NativeStemHeadSide,
+    pub reference_vertical_side: NativeStemVerticalSide,
+    pub reference_point: NativeStemPoint,
+    pub stem_end: NativeStemPoint,
+    pub pixels: i32,
+}
+
+/// Per-system stem scan in Java SIG insertion order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionSystemStemFreeLengths {
+    pub system_id: usize,
+    pub stem_order: Vec<NativeSigVertexId>,
+    pub skips: Vec<(NativeSigVertexId, NativeReductionStemFreeLengthSkip)>,
+    pub lengths: Vec<NativeReductionStemFreeLength>,
+}
+
+/// Sheet-wide collection and Java upper-middle median.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionStemFreeLengthTransaction {
+    pub systems: Vec<NativeReductionSystemStemFreeLengths>,
+    pub sorted_lengths: Vec<i32>,
+    pub median: Option<crate::reduction_step::StemFreeLengthMedian>,
+}
+
 /// Exact head anchor lookup keyed by SIG head, horizontal side, vertical side.
 pub type NativeReductionHeadAnchorMap = BTreeMap<
     (
@@ -438,6 +477,10 @@ pub enum NativeReductionFoundationPrefixError {
     InvalidBeamGroupGeometry {
         system_id: usize,
         beam: NativeSigVertexId,
+    },
+    InvalidStemFreeLength {
+        system_id: usize,
+        stem: NativeSigVertexId,
     },
 }
 
@@ -513,6 +556,11 @@ impl fmt::Display for NativeReductionFoundationPrefixError {
                 "REDUCTION system {system_id} produced invalid beam-group geometry around beam {}",
                 beam.0
             ),
+            Self::InvalidStemFreeLength { system_id, stem } => write!(
+                formatter,
+                "REDUCTION system {system_id} produced invalid free length for stem {}",
+                stem.0
+            ),
         }
     }
 }
@@ -533,7 +581,8 @@ impl Error for NativeReductionFoundationPrefixError {
             | Self::MissingStemHeadAnchor { .. }
             | Self::InvalidRefinedStemGeometry { .. }
             | Self::MissingBeamGeometry { .. }
-            | Self::InvalidBeamGroupGeometry { .. } => None,
+            | Self::InvalidBeamGroupGeometry { .. }
+            | Self::InvalidStemFreeLength { .. } => None,
         }
     }
 }
@@ -1554,6 +1603,192 @@ fn apply_native_reduction_stem_head_ends(
         stem_order,
         no_head_stems,
         refinements,
+    })
+}
+
+/// Execute Java's sheet-wide `StemInter.getFreeLength()` collection and
+/// upper-middle median after beam-group checking.
+pub fn measure_native_reduction_stem_free_lengths(
+    stems: &NativeStemsRecognition,
+) -> Result<NativeReductionStemFreeLengthTransaction, NativeReductionFoundationPrefixError> {
+    if stems.reduction_interline <= 0 {
+        return Err(
+            NativeReductionFoundationPrefixError::InvalidStemRefinementContext { system_id: 0 },
+        );
+    }
+    let mut systems = Vec::new();
+    for system in &stems.systems {
+        let system_id = system.system_id;
+        let beam_state = &system.transaction.state_after.beam_state;
+        let known_stems = &beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems;
+        let mut medians = BTreeMap::new();
+        for (&identity, &vertex) in &beam_state.bindings.stem_vertices {
+            let stem = known_stems
+                .iter()
+                .find(|stem| stem.stem_identity == identity && stem.sig_attached)
+                .ok_or(NativeReductionFoundationPrefixError::MissingStemMedian {
+                    system_id,
+                    stem: vertex,
+                })?;
+            medians.insert(vertex, stem.geometry.median);
+        }
+        let head_system = stems
+            .components
+            .head_corners
+            .systems
+            .iter()
+            .find(|heads| heads.system_id == system_id)
+            .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
+                system_id,
+            ))?;
+        let mut anchors = NativeReductionHeadAnchorMap::new();
+        for head in &head_system.heads_in_sig_order {
+            let Some(&vertex) = beam_state.bindings.head_vertices.get(&head.reference) else {
+                continue;
+            };
+            for corner in &head.corners_in_constructor_order {
+                anchors.insert(
+                    (vertex, corner.horizontal, corner.vertical),
+                    corner.reference,
+                );
+            }
+        }
+        systems.push(measure_native_reduction_system_stem_free_lengths(
+            &beam_state.sig,
+            &medians,
+            &anchors,
+        )?);
+    }
+    let mut sorted_lengths = systems
+        .iter()
+        .flat_map(|system| system.lengths.iter().map(|length| length.pixels))
+        .collect::<Vec<_>>();
+    sorted_lengths.sort_unstable();
+    let median = (!sorted_lengths.is_empty()).then(|| {
+        let pixels = sorted_lengths[sorted_lengths.len() / 2];
+        crate::reduction_step::StemFreeLengthMedian {
+            pixels,
+            interlines: f64::from(pixels) / f64::from(stems.reduction_interline),
+        }
+    });
+    Ok(NativeReductionStemFreeLengthTransaction {
+        systems,
+        sorted_lengths,
+        median,
+    })
+}
+
+/// Dependency-light system kernel for Java `StemInter.getFreeLength()`.
+pub fn measure_native_reduction_system_stem_free_lengths(
+    sig: &NativeSigSystem,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    head_anchors: &NativeReductionHeadAnchorMap,
+) -> Result<NativeReductionSystemStemFreeLengths, NativeReductionFoundationPrefixError> {
+    sig.validate_integrity()?;
+    let stem_order = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Stem)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    let mut skips = Vec::new();
+    let mut lengths = Vec::new();
+    for &stem in &stem_order {
+        if sig.edges.iter().any(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::BeamStem
+                && (edge.source == stem.0 || edge.target == stem.0)
+        }) {
+            skips.push((stem, NativeReductionStemFreeLengthSkip::BeamAttached));
+            continue;
+        }
+        let mut heads = active_head_stem_relations_to(sig, stem)
+            .into_iter()
+            .map(|relation| NativeSigVertexId(sig.edges[relation.0].source))
+            .fold(Vec::new(), |mut heads, head| {
+                if !heads.contains(&head) {
+                    heads.push(head);
+                }
+                heads
+            });
+        if heads.is_empty() {
+            skips.push((stem, NativeReductionStemFreeLengthSkip::NoHeads));
+            continue;
+        }
+        heads.sort_by_key(|head| {
+            let bounds = sig.vertices[head.0].bounds;
+            bounds.y.saturating_add(bounds.height / 2)
+        });
+        let direction = native_stem_direction(sig, stem, stem_medians)?;
+        let last_head = if direction < 0 {
+            heads[0]
+        } else {
+            *heads.last().expect("nonempty heads")
+        };
+        let head_stem_relation = active_head_stem_relations_to(sig, stem)
+            .into_iter()
+            .find(|relation| sig.edges[relation.0].source == last_head.0)
+            .expect("head came from a live HeadStem relation");
+        let payload = sig.edges[head_stem_relation.0]
+            .head_stem
+            .expect("validated HeadStem payload");
+        let reference_vertical_side = if direction < 0 {
+            NativeStemVerticalSide::Bottom
+        } else {
+            NativeStemVerticalSide::Top
+        };
+        let reference_point = *head_anchors
+            .get(&(last_head, payload.head_side, reference_vertical_side))
+            .ok_or(
+                NativeReductionFoundationPrefixError::MissingStemHeadAnchor {
+                    system_id: sig.system_id,
+                    head: last_head,
+                    horizontal: payload.head_side,
+                    vertical: reference_vertical_side,
+                },
+            )?;
+        let median = *stem_medians.get(&stem).ok_or(
+            NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id: sig.system_id,
+                stem,
+            },
+        )?;
+        let stem_end = if direction < 0 {
+            median.start
+        } else {
+            median.stop
+        };
+        let raw_length = (stem_end.y - reference_point.y).abs();
+        if !raw_length.is_finite() || raw_length > f64::from(i32::MAX) {
+            return Err(
+                NativeReductionFoundationPrefixError::InvalidStemFreeLength {
+                    system_id: sig.system_id,
+                    stem,
+                },
+            );
+        }
+        lengths.push(NativeReductionStemFreeLength {
+            system_id: sig.system_id,
+            stem,
+            direction,
+            last_head,
+            head_stem_relation,
+            head_side: payload.head_side,
+            reference_vertical_side,
+            reference_point,
+            stem_end,
+            pixels: raw_length.round_ties_even() as i32,
+        });
+    }
+    Ok(NativeReductionSystemStemFreeLengths {
+        system_id: sig.system_id,
+        stem_order,
+        skips,
+        lengths,
     })
 }
 
@@ -5728,6 +5963,103 @@ mod tests {
             NativeReductionFoundationPrefixError::MissingBeamGeometry { .. }
         ));
         assert_eq!(invalid, invalid_before);
+    }
+
+    #[test]
+    fn free_stem_lengths_skip_beams_and_no_heads_then_use_opposite_anchor_side() {
+        let mut down_head = shaped_head(3, "NOTEHEAD_BLACK", 8);
+        down_head.bounds.height = 6;
+        let mut up_head = shaped_head(5, "NOTEHEAD_BLACK", 44);
+        up_head.bounds.height = 6;
+        let mut down_relation = head_stem_edge(1, 3, 2);
+        let down_payload = down_relation.head_stem.as_mut().unwrap();
+        down_payload.head_side = NativeStemHeadSide::Left;
+        down_payload.extension_point = NativeStemPoint { x: 20.0, y: 10.0 };
+        let mut up_relation = head_stem_edge(2, 5, 4);
+        let up_payload = up_relation.head_stem.as_mut().unwrap();
+        up_payload.head_side = NativeStemHeadSide::Right;
+        up_payload.extension_point = NativeStemPoint { x: 40.0, y: 50.0 };
+        let sig = NativeSigSystem {
+            system_id: 50,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Stem, 0.8),
+                vertex(1, NativeSigInterKind::Stem, 0.8),
+                vertex(2, NativeSigInterKind::Stem, 0.8),
+                down_head,
+                vertex(4, NativeSigInterKind::Stem, 0.8),
+                up_head,
+                horizontal_beam(6, 20.0),
+            ],
+            edges: vec![
+                beam_stem_edge(0, 6, 0, NativeBeamPortion::Center),
+                down_relation,
+                up_relation,
+            ],
+        };
+        let medians = BTreeMap::from([
+            (
+                NativeSigVertexId(2),
+                NativeStemLine {
+                    start: NativeStemPoint { x: 20.0, y: 10.0 },
+                    stop: NativeStemPoint { x: 20.0, y: 50.0 },
+                },
+            ),
+            (
+                NativeSigVertexId(4),
+                NativeStemLine {
+                    start: NativeStemPoint { x: 40.0, y: 10.0 },
+                    stop: NativeStemPoint { x: 40.0, y: 50.0 },
+                },
+            ),
+        ]);
+        let anchors = BTreeMap::from([
+            (
+                (
+                    NativeSigVertexId(3),
+                    NativeStemHeadSide::Left,
+                    NativeStemVerticalSide::Top,
+                ),
+                NativeStemPoint { x: 20.0, y: 14.0 },
+            ),
+            (
+                (
+                    NativeSigVertexId(5),
+                    NativeStemHeadSide::Right,
+                    NativeStemVerticalSide::Bottom,
+                ),
+                NativeStemPoint { x: 40.0, y: 42.0 },
+            ),
+        ]);
+
+        let transaction =
+            measure_native_reduction_system_stem_free_lengths(&sig, &medians, &anchors).unwrap();
+
+        assert_eq!(
+            transaction.skips,
+            vec![
+                (
+                    NativeSigVertexId(0),
+                    NativeReductionStemFreeLengthSkip::BeamAttached
+                ),
+                (
+                    NativeSigVertexId(1),
+                    NativeReductionStemFreeLengthSkip::NoHeads
+                ),
+            ]
+        );
+        assert_eq!(transaction.lengths.len(), 2);
+        assert_eq!(transaction.lengths[0].direction, 1);
+        assert_eq!(
+            transaction.lengths[0].reference_vertical_side,
+            NativeStemVerticalSide::Top
+        );
+        assert_eq!(transaction.lengths[0].pixels, 36);
+        assert_eq!(transaction.lengths[1].direction, -1);
+        assert_eq!(
+            transaction.lengths[1].reference_vertical_side,
+            NativeStemVerticalSide::Bottom
+        );
+        assert_eq!(transaction.lengths[1].pixels, 32);
     }
 
     #[test]
