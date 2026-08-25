@@ -6649,3 +6649,17 @@ aggregate, raw-beam, geometry, grade, and fixed-run evidence.
 Focused tests pin the allocated vertex identity and payload; the real corpus
 pins an empty mutation delta because no aggregate survives. Cue beam grouping
 and BeamStem links remain the next unported statements.
+
+## Boundary 303: cue BeamGroup population
+
+Accepted cue beams now pass through the same stable grouping/merge engine as
+ordinary beams with Java's cue-only limits: rounded 0.7-interline x overlap,
+rounded 1.0-interline y distance, and 0.2 slope difference. Surviving groups
+allocate shape-less grade-1 `BeamGroupInter` vertices and exact containment and
+pairwise `BeamBeamRelation` edges in grouping-event order.
+
+Focused tests cover Java half-even scaling and SIG mutation order. The
+eight-page active corpus remains an exact empty grouping/no-mutation result;
+766 library tests pass with two ignored, and format, strict workspace Clippy,
+and diff checks pass. HeadLinker lookup, stem creation/extension, and
+`BeamStemRelation` insertion remain next.

@@ -12190,3 +12190,25 @@ next-ordinal allocation and every SmallBeam vertex field. The eight-page corpus
 still proves a strict zero-registration/zero-vertex delta after singleton purge.
 Next is `BeamGroupInter.populateCueAggregate(beams)`, followed by HeadLinker beam
 group lookup and BeamStem relation creation/extension.
+
+## Boundary 303: cue BeamGroup mutation
+
+`group_native_cue_beams` now applies Java
+`BeamGroupInter.populateCueAggregate(beams)` independently to every processed
+cue aggregate. It reuses the exact ordinate-stable grouping/merge kernel with
+the cue constants: ties-to-even pixel values for 0.7-interline minimum x
+overlap and 1.0-interline maximum y distance, plus the bare 0.2 maximum slope
+difference.
+
+The native SIG continuation creates one shape-less grade-1 `BeamGroupInter`
+per surviving group, then emits containment and pairwise `BeamBeamRelation`
+edges in provisional group-event order, including merge migration. Focused
+tests pin the 15-pixel half-tie (`10.5 -> 10`), group bounds, identities, and
+relation order. The eight-page active differential remains a strict zero-group,
+zero-SIG-delta result after Java and Rust both purge all cue singletons. The
+full library suite passes 766 tests with two ignored; formatting, strict
+workspace/all-target/all-feature Clippy, and diff checks are clean.
+
+Resume at the next Java statements inside `CueAggregate.process()`: resolve
+the aggregate heads' `HeadLinker`s and created cue-beam group, create or extend
+the appropriate stems, and add the ordered `BeamStemRelation`s.

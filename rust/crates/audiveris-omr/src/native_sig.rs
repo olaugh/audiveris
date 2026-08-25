@@ -2298,6 +2298,158 @@ pub fn append_native_cue_beam_vertex(
     NativeSigVertexId(push_beam_vertex(graph, beam))
 }
 
+/// Materialize Java `BeamGroupInter.populateCueAggregate` evidence into SIG.
+///
+/// `beam_vertices[beam_id]` is the already inserted `SmallBeamInter`. Group
+/// identities, containment relations, and pairwise `BeamBeamRelation`s follow
+/// the grouping kernel's provisional event order, including group merges.
+pub fn append_native_cue_beam_groups(
+    graph: &mut NativeSigSystem,
+    beam_vertices: &[NativeSigVertexId],
+    evidence: &audiveris_image::beam_groups::BeamGroupEvidence,
+) -> Result<Vec<NativeSigVertexId>, NativeSigError> {
+    let system_id = graph.system_id;
+    for (index, &vertex) in beam_vertices.iter().enumerate() {
+        if graph
+            .vertices
+            .get(vertex.0)
+            .is_none_or(|inter| inter.kind != NativeSigInterKind::SmallBeam)
+        {
+            return Err(NativeSigError::InvalidBeamMember { system_id, index });
+        }
+    }
+
+    let mut active = Vec::<bool>::new();
+    for event in &evidence.events {
+        match *event {
+            audiveris_image::beam_groups::BeamGroupEvent::Created { group_index, .. } => {
+                if active.len() <= group_index {
+                    active.resize(group_index + 1, false);
+                }
+                active[group_index] = true;
+            }
+            audiveris_image::beam_groups::BeamGroupEvent::Merged { removed_index, .. } => {
+                active[removed_index] = false;
+            }
+            audiveris_image::beam_groups::BeamGroupEvent::Added { .. } => {}
+        }
+    }
+
+    let mut group_ordinals = vec![None; active.len()];
+    let mut final_groups = evidence.groups.iter();
+    let mut created_groups = Vec::with_capacity(evidence.groups.len());
+    for (provisional, is_active) in active.iter().copied().enumerate() {
+        if !is_active {
+            continue;
+        }
+        let group = final_groups
+            .next()
+            .expect("one final cue group per active identity");
+        let mut bounds = None;
+        for &beam_id in group {
+            let vertex = beam_vertices
+                .get(beam_id)
+                .ok_or(NativeSigError::InvalidBeamMember {
+                    system_id,
+                    index: beam_id,
+                })?;
+            let item = graph.vertices[vertex.0].bounds;
+            bounds = Some(bounds.map_or(item, |current: NativeSigBounds| current.union(item)));
+        }
+        let bounds = bounds.ok_or(NativeSigError::InvalidBeamMember {
+            system_id,
+            index: provisional,
+        })?;
+        let vertex = NativeSigVertexId(push_vertex(
+            graph,
+            NativeSigVertex {
+                ordinal: 0,
+                active: true,
+                removed: false,
+                frozen: false,
+                kind: NativeSigInterKind::BeamGroup,
+                shape: None,
+                grade: 1.0,
+                contextual_grade: None,
+                bounds,
+                abnormal: false,
+                beam_geometry: None,
+            },
+        ));
+        group_ordinals[provisional] = Some(vertex);
+        created_groups.push(vertex);
+    }
+
+    #[derive(Clone, Copy)]
+    enum Pending {
+        Containment(usize, usize),
+        BeamBeam(usize, usize),
+    }
+    let mut members = vec![Vec::<usize>::new(); active.len()];
+    let mut pending = Vec::<Pending>::new();
+    let add_member = |group: usize,
+                      beam_id: usize,
+                      members: &mut Vec<Vec<usize>>,
+                      pending: &mut Vec<Pending>| {
+        if members[group].contains(&beam_id) {
+            return;
+        }
+        pending.push(Pending::Containment(group, beam_id));
+        for &old in &members[group] {
+            let pair = (old.min(beam_id), old.max(beam_id));
+            if !pending.iter().any(|edge| {
+                matches!(*edge, Pending::BeamBeam(one, two) if (one.min(two), one.max(two)) == pair)
+            }) {
+                pending.push(Pending::BeamBeam(old, beam_id));
+            }
+        }
+        members[group].push(beam_id);
+    };
+    for event in &evidence.events {
+        match *event {
+            audiveris_image::beam_groups::BeamGroupEvent::Created {
+                group_index,
+                beam_id,
+            }
+            | audiveris_image::beam_groups::BeamGroupEvent::Added {
+                group_index,
+                beam_id,
+                ..
+            } => add_member(group_index, beam_id, &mut members, &mut pending),
+            audiveris_image::beam_groups::BeamGroupEvent::Merged {
+                survivor_index,
+                removed_index,
+                ..
+            } => {
+                let moved = members[removed_index].clone();
+                for beam_id in moved {
+                    add_member(survivor_index, beam_id, &mut members, &mut pending);
+                }
+                pending.retain(|edge| {
+                    !matches!(*edge, Pending::Containment(group, _) if group == removed_index)
+                });
+            }
+        }
+    }
+    for edge in pending {
+        match edge {
+            Pending::Containment(group, beam_id) => {
+                if let Some(group) = group_ordinals[group] {
+                    let beam = beam_vertices[beam_id];
+                    push_edge(graph, group.0, beam.0, NativeSigRelationKind::Containment);
+                }
+            }
+            Pending::BeamBeam(one, two) => push_edge(
+                graph,
+                beam_vertices[one].0,
+                beam_vertices[two].0,
+                NativeSigRelationKind::BeamBeam,
+            ),
+        }
+    }
+    Ok(created_groups)
+}
+
 fn append_ledgers(
     ledgers: &NativeLedgerRecognition,
     system_id: usize,
@@ -2604,6 +2756,102 @@ mod overlap_geometry_tests {
         assert_eq!(vertex.grade, 0.8);
         assert!(vertex.abnormal);
         assert_eq!(vertex.beam_geometry.unwrap().height, 4.0);
+    }
+
+    #[test]
+    fn cue_beam_group_append_preserves_event_relation_order() {
+        use audiveris_image::beam_groups::{
+            BeamGroupParameters, GroupingBeam, group_beam_evidence,
+        };
+
+        fn cue_beam(y: f64) -> RawBeam {
+            RawBeam {
+                kind: BeamKind::SmallBeam,
+                item: BeamItem {
+                    median: Segment {
+                        x1: 10.0,
+                        y1: y,
+                        x2: 40.0,
+                        y2: y,
+                    },
+                    height: 4.0,
+                },
+                impacts: BeamImpacts {
+                    width: 1.0,
+                    min_height: 1.0,
+                    max_height: 1.0,
+                    core: 1.0,
+                    belt: 1.0,
+                    distance: 1.0,
+                    raster: BeamRasterEvidence {
+                        core_foreground: 120,
+                        core_count: 120,
+                        belt_foreground: 0,
+                        belt_count: 60,
+                        core_ratio: 1.0,
+                        belt_ratio: 0.0,
+                        rounded_width: 31,
+                    },
+                },
+                grade: 0.8,
+            }
+        }
+
+        let beams = [cue_beam(20.0), cue_beam(27.0)];
+        let members = beams
+            .iter()
+            .enumerate()
+            .map(|(id, beam)| GroupingBeam {
+                id,
+                median: beam.item.median,
+                height: beam.item.height,
+                bounds: crate::beam_inters::beam_bounds(beam.item),
+            })
+            .collect::<Vec<_>>();
+        let evidence = group_beam_evidence(
+            &members,
+            BeamGroupParameters {
+                min_x_overlap: 7.0,
+                max_y_distance: 10.0,
+                max_slope_diff: 0.2,
+            },
+        );
+        assert_eq!(evidence.groups, [vec![0, 1]]);
+
+        let mut graph = NativeSigSystem {
+            system_id: 3,
+            vertices: Vec::new(),
+            edges: Vec::new(),
+        };
+        let beam_vertices = beams
+            .iter()
+            .map(|beam| append_native_cue_beam_vertex(&mut graph, beam))
+            .collect::<Vec<_>>();
+        let groups = append_native_cue_beam_groups(&mut graph, &beam_vertices, &evidence).unwrap();
+
+        assert_eq!(groups, [NativeSigVertexId(2)]);
+        assert_eq!(graph.vertices[2].kind, NativeSigInterKind::BeamGroup);
+        assert_eq!(
+            graph.vertices[2].bounds,
+            NativeSigBounds {
+                x: 10,
+                y: 18,
+                width: 30,
+                height: 11
+            }
+        );
+        assert_eq!(
+            graph
+                .edges
+                .iter()
+                .map(|edge| (edge.source, edge.target, edge.kind))
+                .collect::<Vec<_>>(),
+            [
+                (2, 0, NativeSigRelationKind::Containment),
+                (2, 1, NativeSigRelationKind::Containment),
+                (0, 1, NativeSigRelationKind::BeamBeam),
+            ]
+        );
     }
 
     #[test]

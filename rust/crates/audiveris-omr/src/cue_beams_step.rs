@@ -10,6 +10,7 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use audiveris_image::{
+    beam_groups::{BeamGroupEvidence, BeamGroupParameters, GroupingBeam, group_beam_evidence},
     beam_structure::BeamRaster,
     glyph_factory::{GlyphComponent, build_glyph_components},
     morphology::{BEAM_CIRCLE_DIAMETER_RATIO, close_with_disk, digest},
@@ -28,7 +29,7 @@ use crate::native_heads_range_lookup::java_rectangle_grow;
 use crate::native_reduction::NativeReductionRecognition;
 use crate::native_sig::{
     NativeSigBounds, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem, NativeSigVertexId,
-    append_native_cue_beam_vertex,
+    append_native_cue_beam_groups, append_native_cue_beam_vertex,
 };
 use crate::recognize::GridLinesRecognition;
 
@@ -438,6 +439,27 @@ pub struct NativeCueBeamMutationSystem {
 pub struct NativeCueBeamMutationRecognition {
     pub registered_spots: Vec<NativeCueSpotRegistration>,
     pub systems: Vec<NativeCueBeamMutationSystem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamAggregateGrouping {
+    pub system_id: usize,
+    pub aggregate_ordinal: usize,
+    pub evidence: BeamGroupEvidence,
+    pub group_sig_ordinals: Vec<NativeSigVertexId>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamGroupingSystem {
+    pub system_id: usize,
+    pub sig_before_grouping_vertex_count: usize,
+    pub sig_after: NativeSigSystem,
+    pub aggregates: Vec<NativeCueBeamAggregateGrouping>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeCueBeamGroupingRecognition {
+    pub systems: Vec<NativeCueBeamGroupingSystem>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -883,6 +905,81 @@ pub fn materialize_native_cue_beam_mutations(
         registered_spots,
         systems,
     })
+}
+
+/// Apply Java `BeamGroupInter.populateCueAggregate` independently to each cue
+/// aggregate, with its cue-specific pixel thresholds and merge ordering.
+pub fn group_native_cue_beams(
+    mutations: &NativeCueBeamMutationRecognition,
+    checks: &NativeCueBeamCheckRecognition,
+    interline: i32,
+) -> Result<NativeCueBeamGroupingRecognition, NativeCueBeamMutationError> {
+    let parameters = cue_group_parameters(interline);
+    let mut systems = Vec::with_capacity(mutations.systems.len());
+    for mutation_system in &mutations.systems {
+        let system_id = mutation_system.system_id;
+        let mut sig_after = mutation_system.sig_after.clone();
+        let sig_before_grouping_vertex_count = sig_after.vertices.len();
+        let mut aggregates = Vec::new();
+        for checked in checks
+            .aggregates
+            .iter()
+            .filter(|aggregate| aggregate.system_id == system_id)
+        {
+            let beams = mutation_system
+                .beams
+                .iter()
+                .filter(|beam| beam.aggregate_ordinal == checked.aggregate_ordinal)
+                .collect::<Vec<_>>();
+            let members = beams
+                .iter()
+                .enumerate()
+                .map(|(id, beam)| {
+                    let bounds = crate::beam_inters::beam_bounds(beam.beam.item);
+                    GroupingBeam {
+                        id,
+                        median: beam.beam.item.median,
+                        height: beam.beam.item.height,
+                        bounds,
+                    }
+                })
+                .collect::<Vec<_>>();
+            let evidence = group_beam_evidence(&members, parameters);
+            let beam_vertices = beams
+                .iter()
+                .map(|beam| beam.sig_ordinal)
+                .collect::<Vec<_>>();
+            let group_sig_ordinals =
+                append_native_cue_beam_groups(&mut sig_after, &beam_vertices, &evidence).map_err(
+                    |error| NativeCueBeamMutationError {
+                        system_id,
+                        aggregate_ordinal: checked.aggregate_ordinal,
+                        message: error.to_string(),
+                    },
+                )?;
+            aggregates.push(NativeCueBeamAggregateGrouping {
+                system_id,
+                aggregate_ordinal: checked.aggregate_ordinal,
+                evidence,
+                group_sig_ordinals,
+            });
+        }
+        systems.push(NativeCueBeamGroupingSystem {
+            system_id,
+            sig_before_grouping_vertex_count,
+            sig_after,
+            aggregates,
+        });
+    }
+    Ok(NativeCueBeamGroupingRecognition { systems })
+}
+
+fn cue_group_parameters(interline: i32) -> BeamGroupParameters {
+    BeamGroupParameters {
+        min_x_overlap: (f64::from(interline) * 0.7).round_ties_even(),
+        max_y_distance: (f64::from(interline) * 1.0).round_ties_even(),
+        max_slope_diff: 0.2,
+    }
 }
 
 fn extract_cue_spot_components(
@@ -1620,6 +1717,14 @@ fn validate_sheet(sheet: &NeutralCueBeamsSheet) -> Result<(), CueBeamsContractEr
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn cue_group_parameters_use_java_pixel_rounding_and_cue_limits() {
+        let parameters = cue_group_parameters(15);
+        assert_eq!(parameters.min_x_overlap, 10.0);
+        assert_eq!(parameters.max_y_distance, 15.0);
+        assert_eq!(parameters.max_slope_diff, 0.2);
+    }
 
     #[derive(Default)]
     struct FakeCueBeams {

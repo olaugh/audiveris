@@ -7142,3 +7142,12 @@ Rust now retains every cue candidate spot before grading and registers accepted
 items as fixed-glyph-backed abnormal `BEAM_SMALL` SIG vertices in exact insertion
 order. The current corpus remains a zero-delta result after singleton purge.
 Cue grouping and BeamStem linking are next.
+
+## Boundary 303: native cue BeamGroups
+
+Cue beams now use Java's cue-specific grouping limits and exact stable
+group/merge event order. Rust inserts the resulting `BeamGroupInter`,
+containment, and pairwise `BeamBeamRelation` graph objects with focused bounds,
+identity, rounding, and relation-order coverage. The eight-page active corpus
+remains an exact empty grouping/no-mutation result. Cue HeadLinker resolution,
+stem mutation, and BeamStem linking are next.
