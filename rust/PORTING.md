@@ -6799,3 +6799,22 @@ threshold and prove both directions, while regenerated Java beam/head corpora
 show zero comparator cycles and zero equivalence inconsistencies. Exact Rust
 differentials pass against those corrected fixtures. The former Java exception
 is removed at its source, so Rust does not need a non-default recovery sort.
+
+## Boundary 311: close generic real-score STEMS state gaps
+
+The generic production drive now handles the failures isolated on GGR,
+California Porcupine Rag, and Chopin Op. 9 No. 2. Complete modeled-registry
+authority replaces first-B12 component-only lookup; SIG beam-group bindings
+preserve original ordinals; rejected compounds and known-false deferred line
+states carry forward; absent higher profiles fail their predicate normally;
+and a rejected first frontier resumes into a real B14 baseline. Duplicate-edge
+suppression now carries explicit `NotRead` certificates and B17 recognizes an
+existing live BeamStem edge. The linked-first public initializer remains
+source compatible while complete drives use a linked-or-rejected start.
+
+Rebuilt release-mode STEMS JSON succeeds on the three former failures (GGR
+page 3, California page 1, and the 177% lossless Chopin page-11 diagnostic).
+The Batuque integration, 770 library tests (two ignored), and 10 native SIG
+baseline tests (five diagnostic ignores) pass, as do formatting, strict
+workspace/all-target/all-feature Clippy, and diff checks. Broader HEADS
+candidate pruning remains separate follow-up work.

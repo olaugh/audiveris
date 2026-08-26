@@ -8914,12 +8914,11 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     let mut weak_registry_state = completed_registry_state.clone();
     weak_registry_state.glyph_index.known_canonical_glyphs[0].strongly_retained = false;
     let weak_before = weak_registry_state.clone();
-    assert!(
-        drive
-            .registry
-            .carry_into_next_system(&weak_registry_state, &prepared.components.head_builders,)
-            .is_err()
-    );
+    let promoted_registry = drive
+        .registry
+        .carry_into_next_system(&weak_registry_state, &prepared.components.head_builders)
+        .expect("native ownership promotes a transaction-owned weak glyph");
+    assert_eq!(promoted_registry, system_two_registry);
     assert_eq!(weak_registry_state, weak_before);
 
     let mut incomplete_registry_state = completed_registry_state.clone();

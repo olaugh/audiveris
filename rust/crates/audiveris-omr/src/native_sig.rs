@@ -2120,12 +2120,11 @@ fn append_beams(
     }
     let mut group_ordinals = vec![None; active.len()];
     let mut final_groups = groups.groups.iter().enumerate();
-    let mut live_group_ordinal = 0;
     for (provisional, is_active) in active.iter().copied().enumerate() {
         if !is_active {
             continue;
         }
-        let (_pre_rest_group_ordinal, group) = final_groups
+        let (pre_rest_group_ordinal, group) = final_groups
             .next()
             .expect("one final group per active identity");
         let mut bounds = None;
@@ -2168,8 +2167,10 @@ fn append_beams(
             },
         ));
         group_ordinals[provisional] = Some(vertex.0);
-        bindings.bind_beam_group(live_group_ordinal, vertex)?;
-        live_group_ordinal += 1;
+        // STEMS records the ordinal from Java's pre-rest BeamGroup list.
+        // Extensively removing an empty group must leave a hole rather than
+        // renumbering every surviving group and redirecting later B-linkers.
+        bind_surviving_pre_rest_beam_group(bindings, pre_rest_group_ordinal, vertex)?;
     }
 
     #[derive(Clone, Copy)]
@@ -2249,6 +2250,14 @@ fn append_beams(
         }
     }
     Ok(())
+}
+
+fn bind_surviving_pre_rest_beam_group(
+    bindings: &mut NativeSigSystemBindings,
+    pre_rest_group_ordinal: usize,
+    vertex: NativeSigVertexId,
+) -> Result<(), NativeSigError> {
+    bindings.bind_beam_group(pre_rest_group_ordinal, vertex)
 }
 
 fn push_beam_vertex(graph: &mut NativeSigSystem, beam: &RawBeam) -> usize {
@@ -2799,6 +2808,33 @@ mod overlap_geometry_tests {
         beam_structure::{BeamImpacts, BeamItem, BeamRasterEvidence, Segment},
         staff_peak::StaffPeak,
     };
+
+    #[test]
+    fn surviving_beam_group_bindings_keep_pre_rest_ordinal_holes() {
+        let mut bindings = NativeSigSystemBindings {
+            system_id: 1,
+            beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: BTreeMap::new(),
+        };
+
+        bind_surviving_pre_rest_beam_group(&mut bindings, 0, NativeSigVertexId(20)).unwrap();
+        // Group 1 was extensively removed with its last member. Java's later
+        // STEMS products still refer to the following survivor as group 2.
+        bind_surviving_pre_rest_beam_group(&mut bindings, 2, NativeSigVertexId(21)).unwrap();
+
+        assert_eq!(
+            bindings.beam_group_vertices,
+            BTreeMap::from([(0, NativeSigVertexId(20)), (2, NativeSigVertexId(21)),])
+        );
+        assert!(!bindings.beam_group_vertices.contains_key(&1));
+    }
 
     #[test]
     fn cue_beam_append_allocates_the_next_small_beam_vertex() {

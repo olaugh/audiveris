@@ -7257,3 +7257,19 @@ TimSort contract failure is therefore impossible on this path. Independent
 beam/head Java corpora contain zero cycles and zero equivalence inconsistencies.
 Rust matches every corrected permutation and downstream gap decision exactly;
 no optional fallback ordering is needed.
+
+## Boundary 311: generic real-score STEMS continuity
+
+Rust STEMS now carries Java's generic mutable authority through the failures
+found on GGR, California Porcupine Rag, and Chopin Op. 9 No. 2: complete
+first-B12 compound lookup, stable original beam-group ordinals, rejected-glyph
+ownership, deferred line-state carry, normal rejection of unavailable higher
+profiles, rejected-first-frontier continuation, and correct duplicate-edge
+certificates/continuity. The old linked-first initializer remains compatible;
+the full production drive accepts either linked or rejected first advances.
+
+The rebuilt release CLI completes STEMS JSON on all three former failures.
+The Batuque integration, 770 library tests (two ignored), 10 native SIG
+baseline tests (five diagnostic ignores), formatting, strict workspace Clippy,
+and diff checks pass. Weak HEADS candidate pruning is still a separate
+quality/performance follow-up rather than one of these STEMS blockers.

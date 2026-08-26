@@ -12413,3 +12413,33 @@ differential gates pass: beam builders in 40.97 seconds and head builders in
 91.39 seconds. The audit census is now zero cycles / zero equivalence
 inconsistencies in both corpora. This is the normal Java-exact behavior, so no
 optional recovery ordering is required or exposed.
+
+## Boundary 311: generic STEMS state survives real-score frontiers
+
+The production SIDES/STUMPS drive now preserves the state that Java carries
+across the generic cases exposed by Graceful Ghost Rag, California Porcupine
+Rag, and Chopin Op. 9 No. 2. First-B12 compound candidates are authorized by
+the complete modeled glyph registry; surviving beam groups retain their
+original pre-rest ordinals; transaction-owned rejected compounds and deferred
+known-false V-linker line states cross transaction and system boundaries; and
+an unavailable higher length profile is treated as a negative predicate rather
+than a page-fatal missing-state error.
+
+The first frontier can now be rejected without fabricating a committed stem.
+Its exact transaction state resumes the scheduler and supplies the first real
+B14 baseline. Suppressed duplicate BeamStem callbacks keep Java's explicit
+`NotRead` incident certificates, and B17 accepts the already-live edge when B15
+correctly suppresses a duplicate append. The legacy linked-first initializer
+still returns its concrete `first_transaction`; complete production drives use
+the new linked-or-rejected advance internally.
+
+Release-mode `-step STEMS -json` smoke tests complete on the previously failing
+GGR page 3 and California page 1 inputs and on the losslessly resized 177%
+Chopin page 11 diagnostic. These external diagnostic images are not promoted
+to repository fixtures. Focused registry, line-state, group-ordinal, and
+40-item transaction tests pass; the Batuque public-start integration passes;
+all 770 library tests pass with two ignored; the native SIG baseline is 10/10
+with five explicit diagnostics ignored; formatting, strict all-target and
+all-feature workspace Clippy, and diff checks are clean. Weak HEADS candidate
+pruning remains a separate quality/performance task, not a STEMS completion
+blocker for these three pages.

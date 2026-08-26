@@ -100,7 +100,7 @@ pub fn project_native_stems_beam_vlink_base_apply_certificate(
         None => NativeStemsBeamStemIncidentScan {
             state: NativeStemsBeamStemIncidentScanState::MissingVertex,
             query_relation_count: 0,
-            query_provenance_sha256: query_rows_sha256(std::iter::empty()),
+            query_provenance_sha256: stem_incident_query_sha256(&[]),
             relations: Vec::new(),
         },
         Some(stem) => project_native_stem_incident(sig, stem, None, beam_vertex, fresh)?,
@@ -171,7 +171,12 @@ pub fn project_native_stems_beam_vlink_base_apply_certificate(
     let stem_after = if let Some(edge) = new_edge {
         project_native_stem_incident(sig, effective_stem, Some(edge), beam_vertex, fresh)?
     } else {
-        stem_before.clone()
+        NativeStemsBeamStemIncidentScan {
+            state: NativeStemsBeamStemIncidentScanState::NotRead,
+            query_relation_count: 0,
+            query_provenance_sha256: stem_incident_query_sha256(&[]),
+            relations: Vec::new(),
+        }
     };
     let beam_after = if let Some(edge) = new_edge {
         project_native_beam_incident(
@@ -184,7 +189,12 @@ pub fn project_native_stems_beam_vlink_base_apply_certificate(
             plan.plan_ordinal,
         )?
     } else {
-        beam_before.clone()
+        NativeStemsBeamBeamIncidentScan {
+            rule: NativeStemsBeamBeamIncidentRule::NotRead,
+            query_relation_count: 0,
+            query_provenance_sha256: beam_incident_query_sha256(&[], hook),
+            relations: Vec::new(),
+        }
     };
     let chord_stem_matches = stem_after
         .relations
@@ -809,6 +819,155 @@ pub fn initialize_native_stems_beam_vlink_base_apply_state_from_native_sig(
         },
         sheet_edit,
         certificate: Some(certificate),
+        committed: None,
+    })
+}
+
+/// Construct the carried pre-B14 baseline when a system's first V-link is
+/// rejected by `createStem` or its relation check.
+///
+/// Java has not touched the SIG or InterIndex in this branch, but later
+/// frontiers still need the page transaction state (notably line chronology
+/// and registered rejected compounds).  The next accepted frontier replaces
+/// this marker with the ordinary first-B14 projection.
+pub fn initialize_native_stems_beam_rejected_first_base_state_from_native_sig(
+    transaction_state: &NativeStemsBeamVLinkTransactionState,
+    beam_source: NativeStemsBeamSource,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    stump_system: &NativeStemsBeamStumpSystem,
+    sheet_edit: NativeStemsBeamSheetEditState,
+) -> Result<NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyError> {
+    sig.validate_integrity()
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rejected-first SIG integrity",
+        })?;
+    bindings.validate_against(sig).map_err(|_| {
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rejected-first bindings",
+        }
+    })?;
+    if transaction_state.system_stems.system_id != sig.system_id
+        || stump_system.system_id != sig.system_id
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rejected-first system",
+        });
+    }
+    let beam_vertex = bindings.beam_vertices.get(&beam_source).copied().ok_or(
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rejected-first beam binding",
+        },
+    )?;
+    let beam =
+        sig.vertex(beam_vertex.0)
+            .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rejected-first beam",
+            })?;
+    let stump_beam = stump_system
+        .beams_by_abscissa
+        .iter()
+        .find(|candidate| candidate.source == beam_source)
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rejected-first stump beam",
+        })?;
+    let group_vertex = bindings
+        .beam_group_vertices
+        .get(&stump_beam.group_ordinal)
+        .copied()
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rejected-first beam group",
+        })?;
+    let group_state = sig
+        .outgoing_edges(group_vertex.0)
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rejected-first beam group query",
+        })?
+        .iter()
+        .map(|edge| {
+            let member = sig.vertex(edge.target).expect("validated active endpoint");
+            format!(
+                "{}:{}:{}:{}",
+                edge.ordinal, edge.target, member.active, member.abnormal
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let vertex_lineage = sig
+        .vertices
+        .iter()
+        .map(|vertex| format!("{vertex:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let edge_lineage = sig
+        .edges
+        .iter()
+        .map(|edge| format!("{edge:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let inter_lineage = format!("native-inter-index-rejected-first-v1:{vertex_lineage}");
+    let beam_inter_id = native_inter_id(beam_vertex)?;
+    Ok(NativeStemsBeamVLinkBaseApplyState {
+        transaction_state: transaction_state.clone(),
+        inter_index: NativeStemsBeamInterIndexApplyState {
+            baseline_entry_count: sig.vertices.len(),
+            baseline_provenance_sha256: sha256_hex(inter_lineage.as_bytes()),
+            beam_lookup: NativeStemsBeamInterIndexLookup::PresentSameObject {
+                index_ordinal: beam_vertex.0,
+                inter_id: beam_inter_id,
+                vip: false,
+                object_matches: 1,
+                inter_id_matches: 1,
+                glyph_active_matches: 0,
+                glyph_original_matches: 0,
+            },
+            stem_lookup: NativeStemsBeamInterIndexLookup::Absent,
+            next_id_lookup: NativeStemsBeamNextPersistentIdLookup::NotRead,
+            appended_entries: Vec::new(),
+        },
+        sig: NativeStemsBeamSigApplyState {
+            system_id: sig.system_id,
+            baseline_vertex_count: sig.vertices.len(),
+            baseline_vertex_provenance_sha256: sha256_hex(vertex_lineage.as_bytes()),
+            baseline_relation_count: sig.edges.len(),
+            baseline_relation_provenance_sha256: sha256_hex(edge_lineage.as_bytes()),
+            beam_vertex: NativeStemsBeamSigVertexLookup::PresentSameObject {
+                vertex_ordinal: beam_vertex.0,
+                sig_vertex_identity: beam_vertex.0,
+                inter_id: beam_inter_id,
+                object_matches: 1,
+            },
+            stem_vertex: NativeStemsBeamSigVertexLookup::Absent,
+            appended_vertices: Vec::new(),
+            appended_relations: Vec::new(),
+            listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+            beam: NativeStemsBeamVLinkBeamRuntimeState {
+                source: beam_source,
+                sig_vertex_identity: Some(beam_vertex.0),
+                inter_id: beam_inter_id,
+                inter_indexed: true,
+                sig_system_id: sig.system_id,
+                removed: beam.removed,
+                vip: false,
+                abnormal: beam.abnormal,
+                stump_group_ordinal: stump_beam.group_ordinal,
+                beam_group: Some(NativeStemsBeamGroupRuntimeState {
+                    sig_vertex_ordinal: group_vertex.0,
+                    state_sha256: sha256_hex(group_state.as_bytes()),
+                }),
+            },
+            stem: NativeStemsBeamVLinkStemRuntimeState {
+                stem_identity: transaction_state.system_stems.next_stem_identity,
+                sig_vertex_identity: None,
+                inter_indexed: false,
+                sig_system_id: None,
+                removed: false,
+                vip: false,
+                abnormal: false,
+            },
+        },
+        sheet_edit,
+        certificate: None,
         committed: None,
     })
 }

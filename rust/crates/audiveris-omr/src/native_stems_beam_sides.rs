@@ -15,8 +15,8 @@ use crate::{
     },
     native_stem_seeds::{NativeStemSeedGlyph, NativeStemSeedSystemRecognition},
     native_stems_beam_builders::{
-        NativeStemsBeamBuilderPreBuilderGlyphSource, NativeStemsBeamBuilderSystem,
-        java_double_compare,
+        NativeStemsBeamBuilderGlyphRef, NativeStemsBeamBuilderPreBuilderGlyphSource,
+        NativeStemsBeamBuilderSystem, java_double_compare,
     },
     native_stems_beam_link_plans::{
         NativeStemsBeamHeadRelationCheck, NativeStemsBeamLinkPlanSystem,
@@ -44,6 +44,7 @@ use crate::{
         NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyTransaction,
         NativeStemsBeamVLinkBaseRolloverAuthority,
         apply_native_stems_beam_vlink_base_transaction_to_native_sig,
+        initialize_native_stems_beam_rejected_first_base_state_from_native_sig,
         initialize_native_stems_beam_vlink_base_apply_state_from_native_sig,
         roll_native_stems_beam_vlink_base_apply_state,
     },
@@ -604,6 +605,32 @@ pub fn initialize_native_stems_beam_sides_carrier_from_modeled_registry(
     registry: &NativeStemsModeledGlyphRegistry,
 ) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesTransaction), NativeStemsBeamSidesError>
 {
+    let (carrier, advance) = initialize_native_stems_beam_sides_carrier_with_entry(
+        scheduler,
+        sig,
+        bindings,
+        context,
+        registry,
+        NativeStemsBeamSidesCarrierEntry::FirstSystem,
+    )?;
+    let NativeStemsBeamSidesAdvance::Linked(transaction) = advance else {
+        return Err(stage(
+            "first-carrier-rejected",
+            "first SIDES frontier returned false before B14",
+        ));
+    };
+    Ok((carrier, *transaction))
+}
+
+/// Production initializer retaining Java's false return on the first SIDES
+/// frontier instead of requiring the first transaction to reach B14.
+pub fn initialize_native_stems_beam_sides_advance_from_modeled_registry(
+    scheduler: &NativeStemsBeamSchedulerSystem,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesAdvance), NativeStemsBeamSidesError> {
     initialize_native_stems_beam_sides_carrier_with_entry(
         scheduler,
         sig,
@@ -626,6 +653,33 @@ pub fn initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry(
     sheet_edit: NativeStemsBeamSheetEditState,
 ) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesTransaction), NativeStemsBeamSidesError>
 {
+    let (carrier, advance) = initialize_native_stems_beam_sides_carrier_with_entry(
+        scheduler,
+        sig,
+        bindings,
+        context,
+        registry,
+        NativeStemsBeamSidesCarrierEntry::SharedSheetSerial { sheet_edit },
+    )?;
+    let NativeStemsBeamSidesAdvance::Linked(transaction) = advance else {
+        return Err(stage(
+            "first-carrier-rejected",
+            "serial first SIDES frontier returned false before B14",
+        ));
+    };
+    Ok((carrier, *transaction))
+}
+
+/// Serial-system counterpart of
+/// [`initialize_native_stems_beam_sides_advance_from_modeled_registry`].
+pub fn initialize_native_stems_beam_serial_sides_advance_from_modeled_registry(
+    scheduler: &NativeStemsBeamSchedulerSystem,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+    sheet_edit: NativeStemsBeamSheetEditState,
+) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesAdvance), NativeStemsBeamSidesError> {
     initialize_native_stems_beam_sides_carrier_with_entry(
         scheduler,
         sig,
@@ -643,8 +697,7 @@ fn initialize_native_stems_beam_sides_carrier_with_entry(
     context: NativeStemsBeamSidesContext<'_>,
     registry: &NativeStemsModeledGlyphRegistry,
     entry: NativeStemsBeamSidesCarrierEntry,
-) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesTransaction), NativeStemsBeamSidesError>
-{
+) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesAdvance), NativeStemsBeamSidesError> {
     let frontier = match &scheduler.status {
         NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
         _ => {
@@ -695,20 +748,12 @@ fn initialize_native_stems_beam_sides_carrier_with_entry(
         &transaction_state,
     )
     .map_err(|error| stage("first-B12-candidate", error))?;
-    if !transaction_state
-        .selected_glyph_bindings
-        .iter()
-        .any(|selected| {
-            preparation.selected_glyphs.contains(&selected.reference)
-                && selected.content == candidate
-        })
-    {
-        return Err(stage(
-            "first-B12-glyph-authority",
-            "candidate is not a current selected modeled canonical",
-        ));
-    }
-    transaction_state.glyph_index.exhaustive_lookup = None;
+    authorize_modeled_frontier_candidate(
+        &preparation.selected_glyphs,
+        &mut transaction_state,
+        &candidate,
+        registry,
+    )?;
 
     let create = apply_native_stems_beam_vlink_create_stem_transaction(
         scheduler,
@@ -720,15 +765,26 @@ fn initialize_native_stems_beam_sides_carrier_with_entry(
     .map_err(|error| stage("first-B12", error))?;
     let mut s_cells = initialize_native_stems_beam_s_linker_cells(context.head_corners)
         .map_err(|error| stage("first-S-cells", error))?;
-    let reuse_live_state = project_native_stems_beam_vlink_reuse_live_state(
-        sig,
-        bindings,
-        scheduler,
-        context.plans,
-        &s_cells,
-        &transaction_state.system_stems,
-    )
-    .map_err(|error| stage("first-B13-live-state", error))?;
+    let reuse_live_state = if matches!(
+        create.disposition,
+        NativeStemsBeamCreateStemDisposition::Rejected
+    ) {
+        NativeStemsBeamVLinkReuseLiveState {
+            system_id: scheduler.system_id,
+            live_sig_stems: Vec::new(),
+            evaluation: NativeStemsBeamVLinkReuseLiveEvaluation::NotReadCreateStemRejected,
+        }
+    } else {
+        project_native_stems_beam_vlink_reuse_live_state(
+            sig,
+            bindings,
+            scheduler,
+            context.plans,
+            &s_cells,
+            &transaction_state.system_stems,
+        )
+        .map_err(|error| stage("first-B13-live-state", error))?
+    };
     let reuse = evaluate_native_stems_beam_vlink_reuse_check(
         scheduler,
         context.plans,
@@ -746,6 +802,64 @@ fn initialize_native_stems_beam_sides_carrier_with_entry(
         }
         NativeStemsBeamSidesCarrierEntry::SharedSheetSerial { sheet_edit } => sheet_edit,
     };
+    if !matches!(
+        reuse.outcome,
+        NativeStemsBeamVLinkReuseCheckOutcome::ReadyBeforeSigMutation { .. }
+    ) {
+        let latest_base_apply =
+            initialize_native_stems_beam_rejected_first_base_state_from_native_sig(
+                &transaction_state,
+                frontier.beam,
+                sig,
+                bindings,
+                context.stumps,
+                sheet_edit,
+            )
+            .map_err(|error| stage("first-rejected-state", error))?;
+        let mut b_cells = initialize_native_stems_beam_b_linker_cells(context.reachability)
+            .map_err(|error| stage("first-B-cells", error))?;
+        let completed = NativeStemsBeamCompletedVLinkEvidence {
+            plan: frontier.plan,
+            b_linker: frontier.b_linker,
+            v_linker: frontier.v_linker,
+            outer_b_linked_after: false,
+            sibling_linked_b_linkers: Vec::new(),
+        };
+        let resume = resume_native_stems_beam_scheduler_after_transaction(
+            scheduler,
+            context.vlinkers,
+            context.builders,
+            context.plans,
+            &completed,
+        )
+        .map_err(|error| stage("first-B19-rejected", error))?;
+        if b_cells.iter().any(|cell| cell.linked) {
+            return Err(stage(
+                "first-B19-rejected",
+                "rejected first frontier changed a B-linker cell",
+            ));
+        }
+        let carrier = NativeStemsBeamSidesCarrier {
+            scheduler: (*resume.advanced_system).clone(),
+            latest_base_apply,
+            sig: sig.clone(),
+            bindings: bindings.clone(),
+            b_cells: std::mem::take(&mut b_cells),
+            s_cells,
+        };
+        return Ok((
+            carrier,
+            NativeStemsBeamSidesAdvance::Rejected(Box::new(
+                NativeStemsBeamRejectedSidesTransaction {
+                    preparation,
+                    create,
+                    reuse_live_state,
+                    reuse,
+                    resume,
+                },
+            )),
+        ));
+    }
     let mut base_state = initialize_native_stems_beam_vlink_base_apply_state_from_native_sig(
         &transaction_state,
         &reuse,
@@ -874,7 +988,34 @@ fn initialize_native_stems_beam_sides_carrier_with_entry(
         heads,
         outer_resume,
     };
-    Ok((carrier, transaction))
+    Ok((
+        carrier,
+        NativeStemsBeamSidesAdvance::Linked(Box::new(transaction)),
+    ))
+}
+
+fn authorize_modeled_frontier_candidate(
+    selected_glyphs: &[NativeStemsBeamBuilderGlyphRef],
+    transaction_state: &mut NativeStemsBeamVLinkTransactionState,
+    candidate: &NativeStemsBeamFixedGlyphContent,
+    registry: &NativeStemsModeledGlyphRegistry,
+) -> Result<(), NativeStemsBeamSidesError> {
+    let selected_canonical = transaction_state
+        .selected_glyph_bindings
+        .iter()
+        .any(|selected| {
+            selected_glyphs.contains(&selected.reference) && selected.content == *candidate
+        });
+    if selected_canonical {
+        transaction_state.glyph_index.exhaustive_lookup = None;
+    } else {
+        transaction_state.glyph_index.exhaustive_lookup = Some(
+            registry
+                .exhaustive_scan(candidate, transaction_state)
+                .map_err(|error| stage("first-B12-glyph-authority", error))?,
+        );
+    }
+    Ok(())
 }
 
 /// Execute one typed STUMPS frontier through B12-B17 and resume its stump
@@ -1597,11 +1738,15 @@ fn bounded_head_can_link_inner(
         .iter()
         .find(|builder| builder.start == corner)
         .ok_or_else(|| stage("HEADS-phase1-canLink", "corner has no C-origin builder"))?;
-    let length = builder
-        .lengths
-        .get(&stem_profile)
-        .copied()
-        .ok_or_else(|| stage("HEADS-phase1-canLink", "builder lacks STRICT length"))?;
+    // Java's predicate is named `headHasLength(profile)`.  A builder can stop
+    // populating its length map at the construction profile after an early
+    // show-stopping gap, while a rather-good head can still recurse through
+    // the higher retry profiles.  Treat an unconstructed profile as having no
+    // usable length instead of turning that negative predicate into a
+    // page-fatal missing-state error.
+    let Some(length) = builder.lengths.get(&stem_profile).copied() else {
+        return Ok(false);
+    };
     if length < min_linker_length {
         return Ok(false);
     }
@@ -17367,10 +17512,110 @@ mod tests {
     use crate::{
         native_heads_staff_epilog::NativeHeadStaffEpilogRef,
         native_sig::NativeSigBounds,
+        native_stems_beam_builders::NativeStemsModeledCanonicalGlyph,
         native_stems_beam_stumps::NativeStemsBeamSource,
+        native_stems_beam_vlink_transaction::{
+            NativeStemsBeamExhaustiveGlyphLookup, NativeStemsBeamGlyphIndexTransactionState,
+            NativeStemsBeamPersistentIdState, NativeStemsBeamRegistryAuthority,
+            NativeStemsBeamSelectedGlyphBinding, NativeStemsBeamSystemStemTransactionState,
+            NativeStemsBeamVLinkTransactionScope,
+        },
         native_stems_beam_vlinkers::NativeStemsBeamBLinkerRef,
         stems_step::{NativeStemPoint, NativeStemVerticalSide},
     };
+    use audiveris_image::section::Bounds;
+
+    #[test]
+    fn first_b12_compound_uses_the_complete_modeled_registry() {
+        let content = |x, height| {
+            let pixels = vec![FOREGROUND; height];
+            let run_table =
+                RunTable::from_pixels(Orientation::Vertical, 1, height, &pixels).unwrap();
+            NativeStemsBeamFixedGlyphContent {
+                bounds: Bounds {
+                    x,
+                    y: 10,
+                    width: 1,
+                    height,
+                },
+                weight: run_table.weight(),
+                run_table,
+            }
+        };
+        let first = content(10, 2);
+        let second = content(12, 2);
+        let compound = content(10, 4);
+        let modeled = [first.clone(), second.clone()]
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, content)| NativeStemsModeledCanonicalGlyph {
+                modeled_canonical_ordinal: ordinal,
+                bounds: content.bounds,
+                weight: content.weight,
+                run_table: content.run_table,
+            })
+            .collect::<Vec<_>>();
+        let registry =
+            NativeStemsModeledGlyphRegistry::from_modeled_prefix(1, &modeled, modeled.len())
+                .unwrap();
+        let first_ref = NativeStemsBeamBuilderGlyphRef::StemSeed {
+            free_glyph_ordinal: 0,
+        };
+        let second_ref = NativeStemsBeamBuilderGlyphRef::StemSeed {
+            free_glyph_ordinal: 1,
+        };
+        let mut state = NativeStemsBeamVLinkTransactionState {
+            scope: NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id: 1 },
+            glyph_index: NativeStemsBeamGlyphIndexTransactionState {
+                persistent_ids: NativeStemsBeamPersistentIdState {
+                    sheet_last_id: 2,
+                    glyph_index_last_id: 2,
+                    inter_index_last_id: 2,
+                },
+                alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
+                union_size: 2,
+                known_canonical_glyphs: Vec::new(),
+                exhaustive_lookup: None,
+            },
+            selected_glyph_bindings: vec![
+                NativeStemsBeamSelectedGlyphBinding {
+                    reference: first_ref,
+                    canonical_alias: 1,
+                    glyph_id: 1,
+                    content: first.clone(),
+                },
+                NativeStemsBeamSelectedGlyphBinding {
+                    reference: second_ref,
+                    canonical_alias: 2,
+                    glyph_id: 2,
+                    content: second,
+                },
+            ],
+            line_states: Vec::new(),
+            applied_line_deltas: Vec::new(),
+            system_stems: NativeStemsBeamSystemStemTransactionState {
+                system_id: 1,
+                next_stem_identity: 0,
+                known_stems: Vec::new(),
+                authority: NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
+                exhaustive_lookup: None,
+            },
+        };
+
+        authorize_modeled_frontier_candidate(
+            &[first_ref, second_ref],
+            &mut state,
+            &compound,
+            &registry,
+        )
+        .unwrap();
+        let scan = state.glyph_index.exhaustive_lookup.as_ref().unwrap();
+        assert_eq!(scan.candidate, compound);
+        assert_eq!(scan.lookup, NativeStemsBeamExhaustiveGlyphLookup::Absent);
+
+        authorize_modeled_frontier_candidate(&[first_ref], &mut state, &first, &registry).unwrap();
+        assert!(state.glyph_index.exhaustive_lookup.is_none());
+    }
 
     #[test]
     fn c_link_beam_lookahead_reads_the_later_item_and_compares_groups() {
@@ -18175,17 +18420,29 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         *carrier = shadow;
         return Ok(advance);
     }
-    let mut base_state = roll_native_stems_beam_vlink_base_apply_state(
-        &shadow.latest_base_apply,
-        &transaction_state,
-        &reuse,
-        &shadow.sig,
-        &shadow.bindings,
-        NativeStemsBeamVLinkBaseRolloverAuthority {
-            stump_system: context.stumps,
-        },
-    )
-    .map_err(|error| stage("B14-rollover", error))?;
+    let mut base_state = if shadow.latest_base_apply.committed.is_none() {
+        initialize_native_stems_beam_vlink_base_apply_state_from_native_sig(
+            &transaction_state,
+            &reuse,
+            &shadow.sig,
+            &shadow.bindings,
+            context.stumps,
+            shadow.latest_base_apply.sheet_edit,
+        )
+        .map_err(|error| stage("B14-first-after-rejection", error))?
+    } else {
+        roll_native_stems_beam_vlink_base_apply_state(
+            &shadow.latest_base_apply,
+            &transaction_state,
+            &reuse,
+            &shadow.sig,
+            &shadow.bindings,
+            NativeStemsBeamVLinkBaseRolloverAuthority {
+                stump_system: context.stumps,
+            },
+        )
+        .map_err(|error| stage("B14-rollover", error))?
+    };
     let flag_base_state = base_state.clone();
     let base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
         &shadow.scheduler,

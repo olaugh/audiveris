@@ -52,8 +52,8 @@ use crate::{
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
         drive_native_stems_beam_stumps_from_modeled_registry, finalize_native_stems,
-        initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry,
-        initialize_native_stems_beam_sides_carrier_from_modeled_registry,
+        initialize_native_stems_beam_serial_sides_advance_from_modeled_registry,
+        initialize_native_stems_beam_sides_advance_from_modeled_registry,
         remove_native_stems_beam_competing_hook_and_resume,
     },
     native_stems_beam_stumps::{
@@ -139,6 +139,45 @@ pub struct NativeStemsSystemSidesStart {
     pub registry: NativeStemsModeledGlyphRegistry,
     pub carrier: NativeStemsBeamSidesCarrier,
     pub first_transaction: NativeStemsBeamSidesTransaction,
+}
+
+/// Internal production start which can carry either outcome of the first
+/// frontier. The public compatibility start remains linked-only because its
+/// callers inspect the concrete transaction directly.
+#[derive(Clone, Debug, PartialEq)]
+struct NativeStemsSystemSidesAdvanceStart {
+    system_id: usize,
+    registry: NativeStemsModeledGlyphRegistry,
+    carrier: NativeStemsBeamSidesCarrier,
+    first_advance: NativeStemsBeamSidesAdvance,
+}
+
+impl NativeStemsSystemSidesAdvanceStart {
+    fn into_linked_start(
+        self,
+        phase_name: &'static str,
+    ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
+        let NativeStemsSystemSidesAdvanceStart {
+            system_id,
+            registry,
+            carrier,
+            first_advance,
+        } = self;
+        let NativeStemsBeamSidesAdvance::Linked(first_transaction) = first_advance else {
+            return Err(phase(
+                format!(
+                    "system {system_id} rejected its first frontier; use the complete drive entry point"
+                ),
+                phase_name,
+            ));
+        };
+        Ok(NativeStemsSystemSidesStart {
+            system_id,
+            registry,
+            carrier,
+            first_transaction: *first_transaction,
+        })
+    }
 }
 
 /// Atomic completion of one system SIDES pass.
@@ -422,6 +461,13 @@ impl NativeStemsPreparedRecognition {
     pub fn initialize_first_system_sides(
         &self,
     ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
+        self.initialize_first_system_sides_advance()?
+            .into_linked_start("SIDES first transaction")
+    }
+
+    fn initialize_first_system_sides_advance(
+        &self,
+    ) -> Result<NativeStemsSystemSidesAdvanceStart, NativeStemsPreparationError> {
         let components = &self.components;
         let scheduler: &NativeStemsBeamSchedulerSystem = components
             .scheduler
@@ -453,16 +499,16 @@ impl NativeStemsPreparedRecognition {
             &components.head_builders,
         )
         .map_err(|error| phase(error, "SIDES modeled registry"))?;
-        let (carrier, first_transaction) =
-            initialize_native_stems_beam_sides_carrier_from_modeled_registry(
+        let (carrier, first_advance) =
+            initialize_native_stems_beam_sides_advance_from_modeled_registry(
                 scheduler, sig, bindings, context, &registry,
             )
             .map_err(|error| phase(error, "SIDES first transaction"))?;
-        Ok(NativeStemsSystemSidesStart {
+        Ok(NativeStemsSystemSidesAdvanceStart {
             system_id,
             registry,
             carrier,
-            first_transaction,
+            first_advance,
         })
     }
 
@@ -474,19 +520,19 @@ impl NativeStemsPreparedRecognition {
     pub fn drive_first_system_sides(
         &self,
     ) -> Result<NativeStemsFirstSystemSidesDrive, NativeStemsPreparationError> {
-        let start = self.initialize_first_system_sides()?;
+        let start = self.initialize_first_system_sides_advance()?;
         self.drive_system_sides_start(start)
     }
 
     fn drive_system_sides_start(
         &self,
-        start: NativeStemsSystemSidesStart,
+        start: NativeStemsSystemSidesAdvanceStart,
     ) -> Result<NativeStemsSystemSidesDrive, NativeStemsPreparationError> {
-        let NativeStemsSystemSidesStart {
+        let NativeStemsSystemSidesAdvanceStart {
             system_id,
             registry,
             mut carrier,
-            first_transaction,
+            first_advance,
         } = start;
         let context = self.sides_context(system_id)?;
         let transaction_limit = context.builders.builders.len();
@@ -496,8 +542,10 @@ impl NativeStemsPreparedRecognition {
                 "SIDES drive",
             ));
         }
-        let mut transactions = vec![first_transaction];
-        let mut rejected_transactions = Vec::new();
+        let (mut transactions, mut rejected_transactions) = match first_advance {
+            NativeStemsBeamSidesAdvance::Linked(transaction) => (vec![*transaction], Vec::new()),
+            NativeStemsBeamSidesAdvance::Rejected(transaction) => (Vec::new(), vec![*transaction]),
+        };
         let mut hook_removals = Vec::new();
         loop {
             match &carrier.scheduler.status {
@@ -572,19 +620,27 @@ impl NativeStemsPreparedRecognition {
         &self,
         completed: &NativeStemsSystemSidesDrive,
     ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
-        self.initialize_next_system_sides_from_carried(
+        self.initialize_next_system_sides_advance(completed)?
+            .into_linked_start("SIDES next-system transaction")
+    }
+
+    fn initialize_next_system_sides_advance(
+        &self,
+        completed: &NativeStemsSystemSidesDrive,
+    ) -> Result<NativeStemsSystemSidesAdvanceStart, NativeStemsPreparationError> {
+        self.initialize_next_system_sides_advance_from_carried(
             &completed.registry,
             &completed.carrier.latest_base_apply.transaction_state,
             completed.carrier.latest_base_apply.sheet_edit,
         )
     }
 
-    fn initialize_next_system_sides_from_carried(
+    fn initialize_next_system_sides_advance_from_carried(
         &self,
         completed_registry: &NativeStemsModeledGlyphRegistry,
         completed_state: &NativeStemsBeamVLinkTransactionState,
         sheet_edit: NativeStemsBeamSheetEditState,
-    ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
+    ) -> Result<NativeStemsSystemSidesAdvanceStart, NativeStemsPreparationError> {
         let registry = completed_registry
             .carry_into_next_system(completed_state, &self.components.head_builders)
             .map_err(|error| phase(error, "SIDES cross-system registry"))?;
@@ -608,16 +664,16 @@ impl NativeStemsPreparedRecognition {
             |bindings| bindings.system_id,
             "SIDES bindings",
         )?;
-        let (carrier, first_transaction) =
-            initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry(
+        let (carrier, first_advance) =
+            initialize_native_stems_beam_serial_sides_advance_from_modeled_registry(
                 scheduler, sig, bindings, context, &registry, sheet_edit,
             )
             .map_err(|error| phase(error, "SIDES next-system transaction"))?;
-        Ok(NativeStemsSystemSidesStart {
+        Ok(NativeStemsSystemSidesAdvanceStart {
             system_id,
             registry,
             carrier,
-            first_transaction,
+            first_advance,
         })
     }
 
@@ -640,7 +696,8 @@ impl NativeStemsPreparedRecognition {
     pub fn drive_second_system_sides(
         &self,
     ) -> Result<NativeStemsSystemSidesDrive, NativeStemsPreparationError> {
-        let start = self.initialize_second_system_sides()?;
+        let first = self.drive_first_system_sides()?;
+        let start = self.initialize_next_system_sides_advance(&first)?;
         self.drive_system_sides_start(start)
     }
 
@@ -660,7 +717,7 @@ impl NativeStemsPreparedRecognition {
         let mut systems = Vec::with_capacity(system_count);
         systems.push(self.drive_first_system_sides()?);
         while systems.len() < system_count {
-            let start = self.initialize_next_system_sides(
+            let start = self.initialize_next_system_sides_advance(
                 systems
                     .last()
                     .expect("nonempty after first system SIDES drive"),
@@ -699,7 +756,7 @@ impl NativeStemsPreparedRecognition {
 
     fn drive_system_stumps_start(
         &self,
-        start: NativeStemsSystemSidesStart,
+        start: NativeStemsSystemSidesAdvanceStart,
     ) -> Result<NativeStemsSystemStumpsDrive, NativeStemsPreparationError> {
         let sides = self.drive_system_sides_start(start)?;
         self.drive_system_stumps_from_sides(sides)
@@ -756,7 +813,15 @@ impl NativeStemsPreparedRecognition {
         &self,
         completed: &NativeStemsSystemStumpsDrive,
     ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
-        self.initialize_next_system_sides_from_carried(
+        self.initialize_next_system_sides_advance_after_stumps(completed)?
+            .into_linked_start("SIDES post-STUMPS next-system transaction")
+    }
+
+    fn initialize_next_system_sides_advance_after_stumps(
+        &self,
+        completed: &NativeStemsSystemStumpsDrive,
+    ) -> Result<NativeStemsSystemSidesAdvanceStart, NativeStemsPreparationError> {
+        self.initialize_next_system_sides_advance_from_carried(
             &completed.registry,
             &completed.carrier.latest_base_apply.transaction_state,
             completed.carrier.latest_base_apply.sheet_edit,
@@ -775,7 +840,7 @@ impl NativeStemsPreparedRecognition {
         let mut systems = Vec::with_capacity(system_count);
         systems.push(self.drive_first_system_stumps()?);
         while systems.len() < system_count {
-            let start = self.initialize_next_system_sides_after_stumps(
+            let start = self.initialize_next_system_sides_advance_after_stumps(
                 systems
                     .last()
                     .expect("nonempty after first system STUMPS drive"),

@@ -375,24 +375,37 @@ pub fn apply_native_stems_beam_vlink_head_transaction_to_native_sig(
         .map_err(|_| NativeStemsBeamVLinkHeadLinksError::InvalidState {
             phase: "native B17 base edge query",
         })?;
-    if !base_edges.iter().any(|edge| {
-        edge.kind == NativeSigRelationKind::BeamStem
-            && edge.origin
-                == (NativeSigRelationOrigin::BeamVBaseDraft {
-                    plan_ordinal: frontier.plan.plan_ordinal,
-                })
-    }) || b16.graph.appended_edges.iter().any(|id| {
-        sig.edges.get(id.0).is_none_or(|edge| {
-            !edge.active
-                || edge.kind != NativeSigRelationKind::BeamStem
-                || edge.target != stem_vertex.0
-                || !matches!(
-                    edge.origin,
-                    NativeSigRelationOrigin::BeamVSiblingDraft { plan_ordinal, .. }
-                        if plan_ordinal == frontier.plan.plan_ordinal
-                )
+    let base_edge_is_live = if b15.apply_returned {
+        base_edges.iter().any(|edge| {
+            edge.kind == NativeSigRelationKind::BeamStem
+                && edge.origin
+                    == (NativeSigRelationOrigin::BeamVBaseDraft {
+                        plan_ordinal: frontier.plan.plan_ordinal,
+                    })
         })
-    }) {
+    } else {
+        // `SIGraph.addEdge` returned false because this exact beam/stem pair
+        // already had a BeamStem relation.  B15 deliberately proceeds despite
+        // the ignored return, so B17 authenticates the pre-existing live edge
+        // rather than demanding a new base-draft origin.
+        base_edges
+            .iter()
+            .any(|edge| edge.active && edge.kind == NativeSigRelationKind::BeamStem)
+    };
+    if !base_edge_is_live
+        || b16.graph.appended_edges.iter().any(|id| {
+            sig.edges.get(id.0).is_none_or(|edge| {
+                !edge.active
+                    || edge.kind != NativeSigRelationKind::BeamStem
+                    || edge.target != stem_vertex.0
+                    || !matches!(
+                        edge.origin,
+                        NativeSigRelationOrigin::BeamVSiblingDraft { plan_ordinal, .. }
+                            if plan_ordinal == frontier.plan.plan_ordinal
+                    )
+            })
+        })
+    {
         return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
             phase: "native B17 post-B16 graph continuity",
         });

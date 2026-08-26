@@ -227,9 +227,6 @@ impl NativeStemsModeledGlyphRegistry {
         }
         let mut entries = self.entries.clone();
         for known in &completed.glyph_index.known_canonical_glyphs {
-            if !known.strongly_retained {
-                return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
-            }
             let identity = entries
                 .iter()
                 .position(|entry| entry.glyph_id == known.glyph_id);
@@ -419,6 +416,64 @@ impl NativeStemsModeledGlyphRegistry {
         self.entries.is_empty()
     }
 
+    /// Promote transaction-created glyphs into the owned production registry.
+    ///
+    /// Java's `GlyphIndex` may expose a rejected compound only through weak
+    /// references. The native production registry owns its exact content, so
+    /// carrying that entry between immediate STEMS transactions is complete
+    /// authority rather than a speculative Java-GC liveness claim.
+    fn retain_transaction_entries(
+        &self,
+        state: &mut NativeStemsBeamVLinkTransactionState,
+    ) -> Result<(), NativeStemsBeamVLinkTransactionError> {
+        validate_transaction_state(state)?;
+        if state.system_stems.system_id != self.system_id
+            || state.glyph_index.alias_order != NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal
+            || state.glyph_index.persistent_ids.sheet_last_id < self.persistent_ids.sheet_last_id
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "native modeled retained registry header",
+            });
+        }
+        let mut entries = self.entries.clone();
+        for known in &state.glyph_index.known_canonical_glyphs {
+            let identity_match = entries
+                .iter()
+                .position(|entry| entry.glyph_id == known.glyph_id);
+            let content_match = entries
+                .iter()
+                .position(|entry| entry.content == known.content);
+            match (identity_match, content_match) {
+                (Some(identity), Some(content)) if identity == content => {
+                    if entries[identity].canonical_alias != known.canonical_alias {
+                        return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                            phase: "native modeled retained registry alias",
+                        });
+                    }
+                }
+                (None, None) => entries.push(NativeStemsBeamGlyphRegistryBootstrapEntry {
+                    canonical_alias: known.canonical_alias,
+                    glyph_id: known.glyph_id,
+                    content: known.content.clone(),
+                    active_in_index: known.active_in_index,
+                    strongly_retained: true,
+                }),
+                _ => {
+                    return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                        phase: "native modeled retained registry identity/content join",
+                    });
+                }
+            }
+        }
+        if entries.len() != state.glyph_index.union_size {
+            return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
+        }
+        for known in &mut state.glyph_index.known_canonical_glyphs {
+            known.strongly_retained = true;
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn persistent_ids(&self) -> NativeStemsBeamPersistentIdState {
         self.persistent_ids
@@ -428,9 +483,8 @@ impl NativeStemsModeledGlyphRegistry {
     /// the next system's constructor registrations in their production order.
     ///
     /// The completed transaction state supplies every native registration
-    /// since this registry prefix. Weak-only entries are deliberately refused:
-    /// Java may have collected them before the next system, so their equality
-    /// presence cannot be inferred without a liveness authority.
+    /// since this registry prefix. Native ownership promotes Java weak-only
+    /// compounds while carrying them into the next system.
     pub fn carry_into_next_system(
         &self,
         completed: &NativeStemsBeamVLinkTransactionState,
@@ -470,9 +524,6 @@ impl NativeStemsModeledGlyphRegistry {
 
         let mut entries = self.entries.clone();
         for known in &completed.glyph_index.known_canonical_glyphs {
-            if !known.strongly_retained {
-                return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
-            }
             let identity_match = entries
                 .iter()
                 .position(|entry| entry.glyph_id == known.glyph_id);
@@ -1419,6 +1470,7 @@ pub fn prepare_native_stems_beam_vlink_frontier_state(
     shadow.applied_line_deltas.retain(|applied| {
         applied.source != NativeStemsBeamAppliedLineDeltaSource::ReadyTransaction
     });
+    carry_missing_deferred_line_states(scheduler_system, plan_system, &mut shadow)?;
     if shadow
         .line_states
         .iter()
@@ -1529,6 +1581,40 @@ pub fn prepare_native_stems_beam_vlink_frontier_state(
     })
 }
 
+fn carry_missing_deferred_line_states(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    state: &mut NativeStemsBeamVLinkTransactionState,
+) -> Result<(), NativeStemsBeamVLinkTransactionError> {
+    for delta in &scheduler_system.deferred_line_deltas {
+        if state
+            .line_states
+            .iter()
+            .any(|line| line.v_linker == delta.v_linker)
+        {
+            continue;
+        }
+        let (attempt, start_v) = resolve_plan(plan_system, delta.plan)?;
+        if start_v != delta.v_linker
+            || attempt.stored_theoretical_line_before != delta.before
+            || attempt.stored_theoretical_line_after != delta.after
+            || attempt.builder_line_aliases_stored_theoretical_line != delta.builder_line_aliases
+            || attempt.attachment_aliases_stored_theoretical_line != delta.attachment_aliases
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::LineStateMismatch {
+                reference: delta.v_linker,
+            });
+        }
+        state.line_states.push(NativeStemsBeamVLinkLineState {
+            v_linker: delta.v_linker,
+            stored_theoretical_line: delta.before,
+            builder_line: attempt.initial_stem_line,
+            current_attachment_line: delta.attachment_aliases.then_some(delta.before),
+        });
+    }
+    Ok(())
+}
+
 /// Prepare one frontier from a validated one-time first-STEMS bridge.
 ///
 /// This supplies no absence authority for the opaque page-global suffix. Each
@@ -1590,6 +1676,7 @@ pub fn prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
     if scheduler_system.system_id != registry.system_id {
         return Err(NativeStemsBeamVLinkTransactionError::SystemOrder);
     }
+    registry.retain_transaction_entries(state)?;
     let frontier = match &scheduler_system.status {
         NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
         _ => {
@@ -4273,6 +4360,62 @@ mod tests {
     }
 
     #[test]
+    fn modeled_production_registry_owns_rejected_transaction_compounds() {
+        let original = content(2, 1, 1, 2, &[(0, 0), (0, 1)]);
+        let rejected = content(4, 1, 1, 3, &[(0, 0), (0, 1), (0, 2)]);
+        let modeled = [NativeStemsModeledCanonicalGlyph {
+            modeled_canonical_ordinal: 0,
+            bounds: original.bounds,
+            weight: original.weight,
+            run_table: original.run_table.clone(),
+        }];
+        let registry = NativeStemsModeledGlyphRegistry::from_modeled_prefix(1, &modeled, 1)
+            .expect("owned modeled registry");
+        let mut state = NativeStemsBeamVLinkTransactionState {
+            scope: NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id: 1 },
+            glyph_index: NativeStemsBeamGlyphIndexTransactionState {
+                persistent_ids: NativeStemsBeamPersistentIdState {
+                    sheet_last_id: 2,
+                    glyph_index_last_id: 2,
+                    inter_index_last_id: 2,
+                },
+                alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
+                union_size: 2,
+                known_canonical_glyphs: vec![NativeStemsBeamKnownCanonicalGlyph {
+                    canonical_alias: 2,
+                    glyph_id: 2,
+                    content: rejected.clone(),
+                    active_in_index: true,
+                    strongly_retained: false,
+                }],
+                exhaustive_lookup: None,
+            },
+            selected_glyph_bindings: Vec::new(),
+            line_states: Vec::new(),
+            applied_line_deltas: Vec::new(),
+            system_stems: NativeStemsBeamSystemStemTransactionState {
+                system_id: 1,
+                next_stem_identity: 0,
+                known_stems: Vec::new(),
+                authority: NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline,
+                exhaustive_lookup: None,
+            },
+        };
+
+        assert!(matches!(
+            prepare_registration(&rejected, None, &state),
+            Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry)
+        ));
+        registry.retain_transaction_entries(&mut state).unwrap();
+        assert!(state.glyph_index.known_canonical_glyphs[0].strongly_retained);
+        assert!(prepare_registration(&rejected, None, &state).is_ok());
+        assert_eq!(
+            registry.completed_registry_entries(&state).unwrap().len(),
+            2
+        );
+    }
+
+    #[test]
     fn known_singleton_reuses_and_reinserts_without_allocating() {
         let candidate = vertical_content();
         let mut state = empty_state(absent_glyph_scan(candidate.clone()));
@@ -4597,6 +4740,80 @@ mod tests {
             validate_line_prefix(&scheduler, 2, reference(), &attempt, &state)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn later_frontier_carries_a_new_scheduler_deferred_line_state() {
+        let before = NativeStemLine {
+            start: NativeStemPoint { x: 3.0, y: 1.0 },
+            stop: NativeStemPoint { x: 3.0, y: 7.0 },
+        };
+        let after = NativeStemLine {
+            start: NativeStemPoint { x: 4.0, y: 1.0 },
+            stop: NativeStemPoint { x: 4.0, y: 7.0 },
+        };
+        let v_linker = reference_for(124);
+        let plan_ref = NativeStemsBeamPlanRef {
+            system_id: 1,
+            plan_ordinal: 0,
+            builder_ordinal: 0,
+            stem_profile: 4,
+        };
+        let mut attempt = ready_attempt(before);
+        attempt.stored_theoretical_line_after = after;
+        attempt.stored_theoretical_line_would_mutate = true;
+        let plan = NativeStemsBeamLinkPlanSystem {
+            system_id: 1,
+            interline: 10,
+            link_profile: 1,
+            min_linker_length: 4,
+            builders: vec![
+                crate::native_stems_beam_link_plans::NativeStemsBeamLinkPlanBuilder {
+                    builder_ordinal: 0,
+                    start: v_linker,
+                    construction_max_profile: 4,
+                    attempts: vec![attempt],
+                },
+            ],
+        };
+        let delta = NativeStemsBeamDeferredLineDelta {
+            delta_ordinal: 0,
+            invocation_ordinal: 16,
+            plan: plan_ref,
+            v_linker,
+            before,
+            after,
+            builder_line_aliases: true,
+            attachment_aliases: true,
+        };
+        let scheduler = NativeStemsBeamSchedulerSystem {
+            system_id: 1,
+            link_profile: 1,
+            glyphs_in_sig_order: Vec::new(),
+            live_exclusions: Vec::new(),
+            beams_by_reverse_width: Vec::new(),
+            prefix_events: Vec::new(),
+            deferred_line_deltas: vec![delta],
+            consumed_v_linkers: Vec::new(),
+            linked_b_linkers: Vec::new(),
+            status: NativeStemsBeamSchedulerStatus::Completed {
+                retained_for_stumps: Vec::new(),
+                final_local_worklist: Vec::new(),
+            },
+        };
+        let mut state = empty_state(absent_glyph_scan(vertical_content()));
+
+        carry_missing_deferred_line_states(&scheduler, &plan, &mut state).unwrap();
+
+        assert_eq!(
+            state.line_states,
+            [NativeStemsBeamVLinkLineState {
+                v_linker,
+                stored_theoretical_line: before,
+                builder_line: before,
+                current_attachment_line: Some(before),
+            }]
         );
     }
 }
