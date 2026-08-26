@@ -2371,6 +2371,9 @@ fn stable_sort_items(
     system_id: usize,
     phase: &'static str,
 ) -> Result<(), NativeStemsHeadBuilderError> {
+    // StemBuilder now assigns each item one context-independent ordinate
+    // before comparing it. Preserve Java's stable TimSort control flow while
+    // avoiding the former mixed half-linker comparator cycle.
     crate::jdk25_timsort::sort_by(items, |left, right| item_cmp(left, right, y_direction))
         .then_some(())
         .ok_or(NativeStemsHeadBuilderError::JdkTimSortContractViolation {
@@ -2385,26 +2388,23 @@ fn item_cmp(
     right: &NativeStemsHeadBuilderItem,
     y_direction: i32,
 ) -> Ordering {
-    let half = |kind| {
-        matches!(
-            kind,
-            NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
-                | NativeStemsHeadBuilderItemKind::HeadHalfLinker
-        )
-    };
-    if half(left.kind) && half(right.kind) {
-        let left_y = left
-            .reference_point
-            .map_or(left.line.start.y, |point| point.y);
-        let right_y = right
-            .reference_point
-            .map_or(right.line.start.y, |point| point.y);
-        return (y_direction * java_double_compare(left_y, right_y)).cmp(&0);
-    }
-    if y_direction > 0 {
-        java_double_compare(left.line.start.y, right.line.start.y).cmp(&0)
+    let left = item_ordinate_key(left, y_direction);
+    let right = item_ordinate_key(right, y_direction);
+    (y_direction * java_double_compare(left, right)).cmp(&0)
+}
+
+fn item_ordinate_key(item: &NativeStemsHeadBuilderItem, y_direction: i32) -> f64 {
+    if matches!(
+        item.kind,
+        NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
+            | NativeStemsHeadBuilderItemKind::HeadHalfLinker
+    ) {
+        item.reference_point
+            .map_or(item.line.start.y, |point| point.y)
+    } else if y_direction > 0 {
+        item.line.start.y
     } else {
-        java_double_compare(right.line.stop.y, left.line.stop.y).cmp(&0)
+        item.line.stop.y
     }
 }
 
@@ -2999,25 +2999,34 @@ mod tests {
     }
 
     #[test]
-    fn sort_carries_the_jdk_merge_boundary() {
-        let mut items = (0..32)
-            .rev()
-            .map(|y| {
-                item(
-                    NativeStemsHeadBuilderItemKind::SeedGlyph,
-                    f64::from(y),
-                    f64::from(y + 1),
-                )
-            })
-            .collect::<Vec<_>>();
-        stable_sort_items(&mut items, 1, 7, "items").expect("JDK TimSort merge path");
-        assert_eq!(
-            items
-                .iter()
-                .map(|item| item.line.start.y)
-                .collect::<Vec<_>>(),
-            (0..32).map(f64::from).collect::<Vec<_>>()
-        );
+    fn mixed_stem_items_sort_beyond_the_timsort_merge_threshold() {
+        for y_direction in [1, -1] {
+            let mut items = (0..40)
+                .rev()
+                .map(|ordinal| {
+                    let y = f64::from(ordinal * 11 % 97);
+                    if ordinal % 2 == 0 {
+                        let mut item = item(
+                            NativeStemsHeadBuilderItemKind::HeadHalfLinker,
+                            200.0 - y,
+                            210.0 - y,
+                        );
+                        item.reference_point = Some(NativeStemPoint { x: 0.0, y });
+                        item
+                    } else {
+                        item(NativeStemsHeadBuilderItemKind::Gap, y, y + 10.0)
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            stable_sort_items(&mut items, y_direction, 7, "items")
+                .expect("transitive mixed-item sort");
+            assert!(
+                items
+                    .windows(2)
+                    .all(|pair| { item_cmp(&pair[0], &pair[1], y_direction) != Ordering::Greater })
+            );
+        }
     }
 
     #[test]

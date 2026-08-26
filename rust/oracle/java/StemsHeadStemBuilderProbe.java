@@ -1642,17 +1642,20 @@ public final class StemsHeadStemBuilderProbe
 
     private static Comparator<ReplayItem> replayComparator (int yDir)
     {
-        return (left, right) -> {
-            if (left.linker instanceof StemHalfLinker
-                    && right.linker instanceof StemHalfLinker) {
-                return yDir * Double.compare(
-                        left.linker.getReferencePoint().getY(),
-                        right.linker.getReferencePoint().getY());
-            }
-            return yDir > 0
-                    ? Double.compare(left.line.getY1(), right.line.getY1())
-                    : Double.compare(right.line.getY2(), left.line.getY2());
-        };
+        return (left,
+                right) -> yDir * Double.compare(
+                        ordinateKeyOf(left, yDir),
+                        ordinateKeyOf(right, yDir));
+    }
+
+    private static double ordinateKeyOf (ReplayItem item,
+                                         int yDir)
+    {
+        if (item.linker instanceof StemHalfLinker) {
+            return item.linker.getReferencePoint().getY();
+        }
+
+        return yDir > 0 ? item.line.getY1() : item.line.getY2();
     }
 
     private static <T> SortAnomalies auditComparator (List<T> values,

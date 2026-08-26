@@ -2,8 +2,9 @@
 
 //! Exact object-array TimSort control flow used by OpenJDK 25.
 //!
-//! STEMS builder comparators are intentionally pair-dependent and can contain
-//! cycles, so substituting Rust's stable sort changes observable permutations.
+//! Some parity surfaces retain this implementation to reproduce Java's stable
+//! object-sort control flow. STEMS item comparators themselves are now total
+//! preorders, matching the fixed Java `StemBuilder` implementation.
 
 use std::cmp::Ordering;
 

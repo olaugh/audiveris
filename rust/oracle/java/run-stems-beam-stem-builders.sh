@@ -101,7 +101,7 @@ summary_signature=$(awk -v field_list="$summary_fields" '
     }
 ' "$probe_output")
 
-expected_signature='8:0:0:30:803:0:3521:0:2116:2417:2145:29:145:2261:2417:1390:1027:1:512:1905:590:2169:215:1954:6676:6:6670:1617:0:1617:5059:6:5053:1475:114:3:2851879:2174:2834360:4655:7267:2973:450:2615734:4524:2602329:6507:2374:6698:1442:3998:1442:0:1442:799:643:103:78:93:142:464:0:0:0:0:0:0:175:103:69:3:0:1930:10378:2417:1617:5053:24:1267:4657:14631:18:2503:11:14:0:9660:322:563:9419:2417:1617:4063:2:998:322:12085:35419:0:0:0:0:0'
+expected_signature='8:0:0:30:803:0:3521:0:2116:2417:2145:29:145:2261:2417:1390:1027:1:512:1905:590:2169:215:1954:6676:6:6670:1617:0:1617:5059:6:5053:1475:114:3:2851879:2174:2834360:4655:7267:2973:450:2615734:4524:2602329:6507:2374:6698:1442:3998:1442:0:1442:799:643:103:78:93:142:464:0:0:0:0:0:0:175:103:69:3:0:1930:10378:2417:1617:5053:24:1267:4657:14631:0:0:11:14:0:9660:320:563:9417:2417:1617:4063:2:998:320:12085:35419:0:0:0:0:0'
 if [ "$summary_signature" != "$expected_signature" ]; then
     echo "unexpected beam StemBuilder corpus totals" >&2
     echo "observed: $summary_signature" >&2
@@ -139,7 +139,7 @@ row_counts=$(awk '
                 sortRows, preItems, gaps, finalItems, lengths, ends, systemSummaries, pageSummaries
     }
 ' "$probe_output")
-expected_rows='8:30:30:2417:6676:1475:2169:2417:2417:3998:1442:1442:1442:1954:4657:14631:10378:9660:9419:12085:2417:30:8'
+expected_rows='8:30:30:2417:6676:1475:2169:2417:2417:3998:1442:1442:1442:1954:4657:14631:10378:9660:9417:12085:2417:30:8'
 if [ "$row_counts" != "$expected_rows" ]; then
     echo "beam StemBuilder detail row counts disagree with frozen totals" >&2
     echo "observed: $row_counts" >&2
@@ -198,10 +198,10 @@ runner_source_sha256=$(shasum -a 256 "$runner_source" | awk '{print $1}')
 body_sha256=$(shasum -a 256 "$probe_output" | awk '{print $1}')
 body_lines=$(wc -l < "$probe_output" | tr -d ' ')
 body_bytes=$(wc -c < "$probe_output" | tr -d ' ')
-expected_probe_source_sha256=c320870ea130e5156124b111e34c918fa4f640595109ac44b8a4de89b732d178
-expected_body_sha256=da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22
+expected_probe_source_sha256=acf21ca496ec309138cb530c05827a4e5b639763d7f4cc5cc0bff4d2b8657646
+expected_body_sha256=be00a4a2c5ee05b92b3fe70b157cbb246ab066ddd9fe89168db63657438672e4
 if [ "$probe_source_sha256:$body_sha256:$body_lines:$body_bytes" != \
-     "$expected_probe_source_sha256:$expected_body_sha256:91211:29195732" ]; then
+     "$expected_probe_source_sha256:$expected_body_sha256:91209:29164943" ]; then
     echo "unexpected beam StemBuilder source/body fingerprint" >&2
     echo "observed: $probe_source_sha256:$body_sha256:$body_lines:$body_bytes" >&2
     exit 1

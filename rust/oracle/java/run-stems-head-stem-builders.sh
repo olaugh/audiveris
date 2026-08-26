@@ -99,52 +99,52 @@ fi
 page_label=$(awk '/^stemsheadbuilderpagesummary / { print $2 }' "$probe_output")
 case "$page_label" in
     allegretto.png#1)
-        expected_body_sha=59379d10d0fabaab8d694fcd12400c1535a7fc8758ffa427a78a260f6c9a6cb5
+        expected_body_sha=2daadb0c60fe91347c38d92f2aac95507a215de08217582ca0ca58d296138d28
         expected_body_lines=57371
-        expected_body_bytes=16869864
-        expected_page_hash=11ed50600e3262b7
+        expected_body_bytes=16869642
+        expected_page_hash=ae9f9a467f8de3f9
         ;;
     BachInvention5.jpg#1)
-        expected_body_sha=a387886a910a67f01737e2157ab4a79b0d1ce6760bfa87c767fa3e84b6d13b2f
-        expected_body_lines=182405
-        expected_body_bytes=53577681
-        expected_page_hash=5a73c2dc2daeb4d4
+        expected_body_sha=253cd8d7dc7389ae456572309027f4433192ca460256a02756e7ef8ea2bfd05a
+        expected_body_lines=182410
+        expected_body_bytes=53575274
+        expected_page_hash=0a6c33b3a27cd9e3
         ;;
     batuque.png#1)
-        expected_body_sha=2011ae02307311a6b6b9deded093154f9d730e82bf14473fdc6c0ce61e83dc16
+        expected_body_sha=5e34029853f97a9989aae720fc68b1bc4b889b464f09677490c72b1c5414ec65
         expected_body_lines=57573
-        expected_body_bytes=16608267
-        expected_page_hash=6772265079b4a6cf
+        expected_body_bytes=16605908
+        expected_page_hash=cbddb04aab7283e3
         ;;
     carmen.png#1)
-        expected_body_sha=3e8c6d9290e4b7aa330c5575afa83a1fec11faf029d09cd525a0f2449a356ad0
+        expected_body_sha=1575122e296e2a29b3327125109ceeda38f04f6885f55c483991c55277bbfe59
         expected_body_lines=75555
-        expected_body_bytes=22025596
-        expected_page_hash=1b55e98b9ce8308f
+        expected_body_bytes=22025460
+        expected_page_hash=68ad106237507c72
         ;;
     chula.png#1)
-        expected_body_sha=0192b264d8ee80dcf7dde435451dfb18a44b498c70f0b741e903120251bc23c6
+        expected_body_sha=5a954865438e75ba066af5a1612e15f6bb5adea97515a83d4c773d1af17d75e2
         expected_body_lines=53833
-        expected_body_bytes=15336003
-        expected_page_hash=029f3c74392f96b4
+        expected_body_bytes=15334914
+        expected_page_hash=7d7b5b96e5a87026
         ;;
     cucaracha.png#1)
-        expected_body_sha=5fe7b525028ca8cc0fe28b971f8d6e81d16f265e561f81abc6638a1fb9fb8bc0
-        expected_body_lines=75110
-        expected_body_bytes=21838286
-        expected_page_hash=6d3b4087df9742b5
+        expected_body_sha=c5d8b5bc41636588141dbc674b07faaf3384f5efd7375e1a44879310eab745fa
+        expected_body_lines=75123
+        expected_body_bytes=21842911
+        expected_page_hash=89f41e15b47b65c9
         ;;
     hove.png#1)
-        expected_body_sha=0ea595037937a96b4e474b0fb2d2bd572e4b7e4e5f9efe7c16cf8d170fca201e
+        expected_body_sha=715797dff0dae1b2013e4529c8926811bca28ecfd0e92f7d4475a65ce32841ee
         expected_body_lines=56391
-        expected_body_bytes=15701515
-        expected_page_hash=407e4094185259c3
+        expected_body_bytes=15701156
+        expected_page_hash=d20ba66b1333ac9c
         ;;
     zizi.png#1)
-        expected_body_sha=5602434b8e6756695648d5e83f7b6980176cb1e415c8f394bf7e6cf9adbfbe47
+        expected_body_sha=9c28c67d555ce4f0cfae77f32a4091f4e5a7dd4adca2abbffeba0414d90877e9
         expected_body_lines=35503
-        expected_body_bytes=9972353
-        expected_page_hash=e9d648ab45c2568e
+        expected_body_bytes=9972186
+        expected_page_hash=ed4d2dd9fcce5c0c
         ;;
     *)
         echo "head StemBuilder target is outside the frozen eight-page corpus: $page_label" >&2

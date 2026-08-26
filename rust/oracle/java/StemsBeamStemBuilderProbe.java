@@ -2223,17 +2223,10 @@ public final class StemsBeamStemBuilderProbe
                     totals.builderMaxFinalSortItems, before.size());
         }
         if (before.size() >= 32) totals.builderSortListsAtLeast32++;
-        final Comparator<ReplayItem> comparator = (left, right) -> {
-            if (left.linker instanceof StemHalfLinker
-                    && right.linker instanceof StemHalfLinker) {
-                return yDir * Double.compare(
-                        left.linker.getReferencePoint().getY(),
-                        right.linker.getReferencePoint().getY());
-            }
-            return yDir > 0
-                    ? Double.compare(left.line.getY1(), right.line.getY1())
-                    : Double.compare(right.line.getY2(), left.line.getY2());
-        };
+        final Comparator<ReplayItem> comparator = (left,
+                                                   right) -> yDir * Double.compare(
+                                                           ordinateKeyOf(left, yDir),
+                                                           ordinateKeyOf(right, yDir));
         long cycles = 0;
         long equivalenceInconsistencies = 0;
         final MessageDigest offenderDigest = sha256Digest();
@@ -2295,6 +2288,16 @@ public final class StemsBeamStemBuilderProbe
                     emptyToken(equalInputs), emptyToken(stableEqualPredecessors)), hashes);
             totals.builderSortRows++;
         }
+    }
+
+    private static double ordinateKeyOf (ReplayItem item,
+                                         int yDir)
+    {
+        if (item.linker instanceof StemHalfLinker) {
+            return item.linker.getReferencePoint().getY();
+        }
+
+        return yDir > 0 ? item.line.getY1() : item.line.getY2();
     }
 
     private static boolean sameOptionalDoubleBits (Double left,

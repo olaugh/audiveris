@@ -87,11 +87,11 @@ const PROBE_PATH: &str = "rust/oracle/java/StemsHeadStemBuilderProbe.java";
 const RUNNER_PATH: &str = "rust/oracle/java/run-stems-head-stem-builders.sh";
 
 const EXPECTED_MANIFEST_SHA256: Option<&str> =
-    Some("21d8d11beb4a8895759198f17a45a981a66f9554c9559d1711db09f3db7b764e");
+    Some("31db6d63abc6c7e38152a9aac4a73f690717bfb814bf974825f2189a5a383480");
 const EXPECTED_PROBE_SHA256: Option<&str> =
-    Some("364ad5d74f15c9cbaf77b67da987f6bc3a309c0bd5c80093f34185d6c4ceadd9");
+    Some("ab657f96502869a4b710bcc98e507cb7539f1492635f9d097cff012b9629a9bb");
 const EXPECTED_RUNNER_SHA256: Option<&str> =
-    Some("215410766e419685c6cf3a5c9c8f2c8e7ac39b0f02ef18780f4a67450ae91b37");
+    Some("8542d682241d7be645f3bfc1e474a6acbc430f15a6e4c5ee92f25221a20d751b");
 
 const PREDECESSOR_HEADS: usize = 3_521;
 const PREDECESSOR_SYSTEMS: usize = 30;

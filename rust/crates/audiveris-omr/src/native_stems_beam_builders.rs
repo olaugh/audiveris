@@ -476,8 +476,7 @@ pub enum NativeStemsBeamBuilderError {
     UnsupportedBaselineCollision {
         system_id: usize,
     },
-    /// Java throws when TimSort detects a comparator-contract violation.
-    /// Preserve that terminal instead of publishing a partially sorted builder.
+    /// Defensive parity guard if a future Java comparator violates its contract.
     JdkTimSortContractViolation {
         system_id: usize,
         length: usize,
@@ -1992,9 +1991,9 @@ fn stable_sort_items(
     y_direction: i32,
     system_id: usize,
 ) -> Result<(), NativeStemsBeamBuilderError> {
-    // The comparator below is pair-dependent and has observed cycles, so the
-    // exact OpenJDK run discovery, binary insertion, merge, and gallop control
-    // flow is part of the visible result.
+    // Keep Java's stable TimSort control flow, but compare every item through
+    // one context-independent ordinate key. This is a total preorder and
+    // cannot form the mixed half-linker cycles of the former comparator.
     crate::jdk25_timsort::sort_by(items, |left, right| item_cmp(left, right, y_direction))
         .then_some(())
         .ok_or(NativeStemsBeamBuilderError::JdkTimSortContractViolation {
@@ -2039,26 +2038,23 @@ fn item_cmp(
     right: &NativeStemsBeamBuilderItem,
     y_direction: i32,
 ) -> Ordering {
-    let half = |kind| {
-        matches!(
-            kind,
-            NativeStemsBeamBuilderItemKind::StartHalfLinker
-                | NativeStemsBeamBuilderItemKind::HeadHalfLinker
-        )
-    };
-    if half(left.kind) && half(right.kind) {
-        let left = left
-            .reference_point
-            .map_or(left.line.start.y, |point| point.y);
-        let right = right
-            .reference_point
-            .map_or(right.line.start.y, |point| point.y);
-        return (y_direction * java_double_compare(left, right)).cmp(&0);
-    }
-    if y_direction > 0 {
-        left.line.start.y.total_cmp(&right.line.start.y)
+    let left = item_ordinate_key(left, y_direction);
+    let right = item_ordinate_key(right, y_direction);
+    (y_direction * java_double_compare(left, right)).cmp(&0)
+}
+
+fn item_ordinate_key(item: &NativeStemsBeamBuilderItem, y_direction: i32) -> f64 {
+    if matches!(
+        item.kind,
+        NativeStemsBeamBuilderItemKind::StartHalfLinker
+            | NativeStemsBeamBuilderItemKind::HeadHalfLinker
+    ) {
+        item.reference_point
+            .map_or(item.line.start.y, |point| point.y)
+    } else if y_direction > 0 {
+        item.line.start.y
     } else {
-        right.line.stop.y.total_cmp(&left.line.stop.y)
+        item.line.stop.y
     }
 }
 
@@ -2982,41 +2978,44 @@ mod tests {
     }
 
     #[test]
-    fn jdk25_mini_timsort_keeps_the_adversarial_cycle_permutation() {
+    fn stem_item_comparator_breaks_the_former_adversarial_cycle() {
         let mut first = item(NativeStemsBeamBuilderItemKind::HeadHalfLinker, 30.0);
         first.reference_point = Some(point(0.0));
         let mut second = item(NativeStemsBeamBuilderItemKind::HeadHalfLinker, 10.0);
         second.reference_point = Some(point(1.0));
         let third = item(NativeStemsBeamBuilderItemKind::BeamLinker, 20.0);
-        let fourth = item(NativeStemsBeamBuilderItemKind::SeedGlyph, 40.0);
-        // first < second by half-linker reference y; second < third and
-        // third < first by mixed-pair line y, a strict 3-cycle.
+        // Every item now supplies its own key: reference ordinate for a half
+        // linker and line-start ordinate for everything else.
         assert_eq!(item_cmp(&first, &second, 1), Ordering::Less);
         assert_eq!(item_cmp(&second, &third, 1), Ordering::Less);
-        assert_eq!(item_cmp(&third, &first, 1), Ordering::Less);
-        let expected = vec![first, second, third, fourth];
-        let mut actual = expected.clone();
-
-        stable_sort_items(&mut actual, 1, 3).unwrap();
-
-        assert_eq!(actual, expected);
+        assert_eq!(item_cmp(&third, &first, 1), Ordering::Greater);
     }
 
     #[test]
-    fn jdk25_merge_path_sorts_thirty_two_items() {
-        let mut items = (0..32)
-            .rev()
-            .map(|y| item(NativeStemsBeamBuilderItemKind::SeedGlyph, f64::from(y)))
-            .collect::<Vec<_>>();
+    fn mixed_stem_items_sort_beyond_the_timsort_merge_threshold() {
+        for y_direction in [1, -1] {
+            let mut items = (0..40)
+                .rev()
+                .map(|ordinal| {
+                    let y = f64::from(ordinal * 11 % 97);
+                    if ordinal % 2 == 0 {
+                        let mut item =
+                            item(NativeStemsBeamBuilderItemKind::HeadHalfLinker, 200.0 - y);
+                        item.reference_point = Some(point(y));
+                        item
+                    } else {
+                        item(NativeStemsBeamBuilderItemKind::Gap, y)
+                    }
+                })
+                .collect::<Vec<_>>();
 
-        stable_sort_items(&mut items, 1, 9).expect("JDK TimSort merge path");
-        assert_eq!(
-            items
-                .iter()
-                .map(|item| item.line.start.y)
-                .collect::<Vec<_>>(),
-            (0..32).map(f64::from).collect::<Vec<_>>()
-        );
+            stable_sort_items(&mut items, y_direction, 9).expect("transitive mixed-item sort");
+            assert!(
+                items
+                    .windows(2)
+                    .all(|pair| { item_cmp(&pair[0], &pair[1], y_direction) != Ordering::Greater })
+            );
+        }
     }
 
     #[test]

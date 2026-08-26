@@ -14,10 +14,10 @@
 //! Rust projector reconstructs that stream; it never trusts an oracle digest
 //! without independently deriving the bytes.
 //!
-//! Item sorting is not treated as an abstract stable sort: Java's comparator
-//! is pair-dependent and the live corpus contains strict cycles and equality
-//! inconsistencies. The gate therefore grades each occurrence's exact
-//! input/output permutation and independently recomputes the anomaly census.
+//! Item sorting is not treated as an abstract stable sort. The gate grades
+//! each occurrence's exact input/output permutation, independently recomputes
+//! the comparator anomaly census, and requires the corrected Java comparator
+//! to remain a total preorder across the corpus.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -82,15 +82,15 @@ const PROBE_PATH: &str = "rust/oracle/java/StemsBeamStemBuilderProbe.java";
 const RUNNER_PATH: &str = "rust/oracle/java/run-stems-beam-stem-builders.sh";
 
 const EXPECTED_FIXTURE_SHA256: Option<&str> =
-    Some("a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180");
+    Some("638dd815d5d110dd67bab202c31ee966c4fd229d6998107cdc3f9483045ffcf1");
 const EXPECTED_PROBE_SHA256: Option<&str> =
-    Some("c320870ea130e5156124b111e34c918fa4f640595109ac44b8a4de89b732d178");
+    Some("acf21ca496ec309138cb530c05827a4e5b639763d7f4cc5cc0bff4d2b8657646");
 const EXPECTED_RUNNER_SHA256: Option<&str> =
-    Some("adc2647152b925a2a81fe580a240b4c8be05fca3148ef3d3df29d73577e72806");
+    Some("54bad840185412fa504a6f093f464e904ae16f0b8e8c2e4e2fac84a294681b8e");
 const EXPECTED_BODY_SHA256: Option<&str> =
-    Some("da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22");
-const EXPECTED_FIXTURE_BYTES: Option<usize> = Some(29_197_924);
-const EXPECTED_FIXTURE_LINES: Option<usize> = Some(91_212);
+    Some("be00a4a2c5ee05b92b3fe70b157cbb246ab066ddd9fe89168db63657438672e4");
+const EXPECTED_FIXTURE_BYTES: Option<usize> = Some(29_167_131);
+const EXPECTED_FIXTURE_LINES: Option<usize> = Some(91_210);
 
 const EXPECTED_CORPUS_FIELDS: &str = concat!(
     "systems 30 beams 803 smallBeams 0 heads 3521 smallHeads 0 initialBs 2116 ",
@@ -114,10 +114,10 @@ const EXPECTED_CORPUS_FIELDS: &str = concat!(
     "reuseUnmodeledOrigins 0 chunkRemovals 175 chunkSeedDrops 103 ",
     "chunkUnalignedDrops 69 chunkStartDrops 3 chunkHeadPartsDrops 0 seedItemDrops 1930 ",
     "preItems 10378 preStart 2417 preB 1617 preC 5053 preSeed 24 preChunk 1267 ",
-    "sortAudits 4657 sortRows 14631 sortCycles 18 sortEquivalence 2503 ",
+    "sortAudits 4657 sortRows 14631 sortCycles 0 sortEquivalence 0 ",
     "maxTargetSortItems 11 maxFinalSortItems 14 sortListsAtLeast32 0 gapChecks 9660 ",
-    "gapInserts 322 gapTruncations 563 finalItems 9419 finalStart 2417 finalB 1617 ",
-    "finalC 4063 finalSeed 2 finalChunk 998 finalGap 322 lengthRows 12085 ",
+    "gapInserts 320 gapTruncations 563 finalItems 9417 finalStart 2417 finalB 1617 ",
+    "finalC 4063 finalSeed 2 finalChunk 998 finalGap 320 lengthRows 12085 ",
     "builderChecks 35419 sigMutations 0 systemStemMutations 0 linkMutations 0 ",
     "cBuilderMutations 0 unexpectedBuilderMutations 0",
 );
@@ -1878,20 +1878,20 @@ fn item_compare(
     right: &NativeStemsBeamBuilderItem,
     y_direction: i32,
 ) -> i32 {
-    if left.kind == NativeStemsBeamBuilderItemKind::HeadHalfLinker
-        && right.kind == NativeStemsBeamBuilderItemKind::HeadHalfLinker
-    {
-        return y_direction
-            * java_double_compare(
-                left.reference_point.expect("head reference").y,
-                right.reference_point.expect("head reference").y,
-            );
-    }
-    if y_direction > 0 {
-        java_double_compare(left.line.start.y, right.line.start.y)
-    } else {
-        java_double_compare(right.line.stop.y, left.line.stop.y)
-    }
+    let key = |item: &NativeStemsBeamBuilderItem| {
+        if matches!(
+            item.kind,
+            NativeStemsBeamBuilderItemKind::StartHalfLinker
+                | NativeStemsBeamBuilderItemKind::HeadHalfLinker
+        ) {
+            item.reference_point.expect("half-linker reference").y
+        } else if y_direction > 0 {
+            item.line.start.y
+        } else {
+            item.line.stop.y
+        }
+    };
+    y_direction * java_double_compare(key(left), key(right))
 }
 
 fn item_kind(kind: NativeStemsBeamBuilderItemKind) -> &'static str {

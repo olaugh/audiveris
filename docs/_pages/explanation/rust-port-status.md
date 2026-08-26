@@ -316,18 +316,17 @@ direction is distinct from the V direction: exactly one differs (Carmen system
 2, builder 56), producing 1,390 TOP and 1,027 BOTTOM builders. It removes 215
 of 2,169 seeds, retains 6,670 of 6,676 targets (1,617 B and 5,053 C), makes
 1,442 chunk-glyph registrations (799 new, 643 reuse), removes 175 chunks, and
-retains 9,419 final items with 12,085 length rows. Its sort audit records 18
-comparator cycles and 2,503 equivalence inconsistencies; only the JDK 25
-mini-TimSort cases are modeled, with maxima of 11 target and 14 final items and
-a fail-closed limit at 32. The registry is bounded: external members and
+retains 9,417 final items with 12,085 length rows. Its corrected-comparator
+audit records zero cycles and zero equivalence inconsistencies across all 4,657
+sorts, with maxima of 11 target and 14 final items. The registry is bounded: external members and
 unmodeled reuse are zero there, not a claim of global glyph novelty. All SIG,
 system-stem, linker, C-builder, and unexpected-builder mutations are zero. The
-emitted body is 91,211 lines / 29,195,732 bytes and the fixture 91,212 lines /
-29,197,924 bytes; probe, runner, body, and fixture SHA-256 values are
-`c320870ea130e5156124b111e34c918fa4f640595109ac44b8a4de89b732d178`,
-`adc2647152b925a2a81fe580a240b4c8be05fca3148ef3d3df29d73577e72806`,
-`da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
-`a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
+emitted body is 91,209 lines / 29,164,943 bytes and the fixture 91,210 lines /
+29,167,131 bytes; probe, runner, body, and fixture SHA-256 values are
+`acf21ca496ec309138cb530c05827a4e5b639763d7f4cc5cc0bff4d2b8657646`,
+`54bad840185412fa504a6f093f464e904ae16f0b8e8c2e4e2fac84a294681b8e`,
+`be00a4a2c5ee05b92b3fe70b157cbb246ab066ddd9fe89168db63657438672e4`, and
+`638dd815d5d110dd67bab202c31ee966c4fd229d6998107cdc3f9483045ffcf1`.
 
 `materialize_native_stems_head_corner_reachability` closes the eighth boundary.
 Across eight pages and 30 systems it visits 3,521 standard stem-capable
@@ -363,15 +362,15 @@ glyphs; it does not claim the contents or IDs of Java's global `GlyphIndex`.
 Across eight pages / 30 systems, all 14,084 C builders materialize through
 15,953,076 vertical and 14,436,784 horizontal section scans. They create 19,295
 filaments from 45,938 members and register them as 4,619 New / 14,676 Reuse,
-then retain 29,120 items and insert 165 gaps; the exact gate matches all 70,420
+then retain 29,130 items and insert 166 gaps; the exact gate matches all 70,420
 lengths for profiles 0 through 4. The complete chronology also contains
 8,939 stump registrations (5,581 New / 3,358 Reuse), 1,442 beam registrations (796 New /
 646 Reuse), eight stump action changes, and three head-to-later-beam reuse/action
 changes.
 
-The 42,252 JDK 25 small-list sort audits include 8 comparator cycles and 319
+All 42,252 corrected-comparator sort audits report zero cycles and zero
 equivalence findings. Frozen retrieve-seed / target / final list maxima are
-2 / 7 / 13; an input of 32 or more fails closed. Every system uses inspect
+2 / 7 / 13. Every system uses inspect
 profile 1 with no divergence, and production rejects an inspect/system-profile
 mismatch. The corpus has no VIP heads, but Java's VIP-only `filterHeadParts`
 bug remains exact: 6,087 low-remain non-VIP chunks are kept. The shared vertical
@@ -379,11 +378,11 @@ bug remains exact: 6,087 low-remain non-VIP chunks are kept. The shared vertical
 a thickening side to remain eligible as a later isolated sticker. SIG,
 `systemStems`, link-state, and unexpected-builder mutation counts are zero.
 
-The split fixtures total 593,749 lines / 171,932,512 bytes. Manifest, probe,
+The split fixtures total 593,767 lines / 171,930,398 bytes. Manifest, probe,
 and runner SHA-256 are
-`21d8d11beb4a8895759198f17a45a981a66f9554c9559d1711db09f3db7b764e`,
-`364ad5d74f15c9cbaf77b67da987f6bc3a309c0bd5c80093f34185d6c4ceadd9`, and
-`215410766e419685c6cf3a5c9c8f2c8e7ac39b0f02ef18780f4a67450ae91b37`.
+`31db6d63abc6c7e38152a9aac4a73f690717bfb814bf974825f2189a5a383480`,
+`ab657f96502869a4b710bcc98e507cb7539f1492635f9d097cff012b9629a9bb`, and
+`8542d682241d7be645f3bfc1e474a6acbc430f15a6e4c5ee92f25221a20d751b`.
 The normal eight-page full native semantic-stream gate passed independently in
 84.48 seconds and again in root verification in 88.93 seconds; strict
 integration-test Clippy is green.
@@ -7244,3 +7243,14 @@ with `org.audiveris.omr.sheet.ProcessingSwitches.smallHeads=true` and
 Dropping the second constant preserves ordinary cues while disabling recovery;
 `org.audiveris.omr.sheet.beam.CueBeamsStep.enabled=false` disables ordinary
 cue recognition separately.
+
+## Boundary 310: transitive Java/Rust StemBuilder ordering
+
+Audiveris PR 984 replaces the pair-dependent stem-item comparator with one
+ordinate key per item in Java and Rust. Half linkers use their reference-point
+ordinate; other items use the directional line endpoint. The former 34+-item
+TimSort contract failure is therefore impossible on this path. Independent
+40-item regressions cover both directions, and the fully regenerated eight-page
+beam/head Java corpora contain zero cycles and zero equivalence inconsistencies.
+Rust matches every corrected permutation and downstream gap decision exactly;
+no optional fallback ordering is needed.

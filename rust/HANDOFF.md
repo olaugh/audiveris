@@ -127,9 +127,9 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS BeamLinker stump-preparation boundary | the production compositor matches constructor-time `retrieveStumps()` for 803 BeamLinkers and all 1,606 sides: 3,934 neighbors, 1,820 seed inputs, 1,087 purge comparisons, 301 missing-side builds, 6 direction-accepted builds (5 new registrations and 1 canonical reuse), 1,821 final stumps, 1,311 final side stumps, and zero tremolos; it stops before `equipStumps`/`equipOrphanSides` creates B/V linker topology and geometry |
 | STEMS BeamLinker B/V-construction boundary | the production compositor matches sequential constructor-time `equipStumps`/`equipOrphanSides` for all 803 BeamLinkers: 2,116 BLinkers, 2,417 VLinkers, 2,860 Part folds, 9,186 closer-beam candidates with 703 limiter rebuilds, and 12,491 final-area seed checks with 2,169 reachable; it stops before HeadLinkers and source-ordered cross-beam anchor mutation |
 | STEMS source-ordered beam/head reachability boundary | the production compositor visits all 2,417 VLinkers in Java order, performs 1,617 cross-beam searches, creates 145 anchors and reuses 215 anchors, preserves immediate/final B arenas, and accepts 5,059 ordered head corners after exact area/distance/void-side filtering; it precedes the beam-origin builders |
-| STEMS beam-origin `StemBuilder` boundary | every beam-origin V inspection reaches the actual source-ordered `StemBuilder` constructor and V `sb` assignment for 2,417 builders. The direction differs from its V only for Carmen system 2 / builder 56 (1,390 TOP / 1,027 BOTTOM builders); 2,169 seeds become 1,954, 6,676 targets become 6,670 (1,617 B / 5,053 C), 1,442 chunk glyph registrations yield 799 new and 643 reuse, 175 chunks are removed, and 9,419 final items yield 12,085 length rows. The bounded registry has zero external/unmodeled reuse without claiming global novelty; SIG/system-stem/link/C-builder/unexpected mutation counts are all zero |
+| STEMS beam-origin `StemBuilder` boundary | every beam-origin V inspection reaches the actual source-ordered `StemBuilder` constructor and V `sb` assignment for 2,417 builders. The direction differs from its V only for Carmen system 2 / builder 56 (1,390 TOP / 1,027 BOTTOM builders); 2,169 seeds become 1,954, 6,676 targets become 6,670 (1,617 B / 5,053 C), 1,442 chunk glyph registrations yield 799 new and 643 reuse, 175 chunks are removed, and 9,417 final items yield 12,085 length rows. The PR-984 comparator audit has zero cycles/equivalence inconsistencies; the bounded registry has zero external/unmodeled reuse without claiming global novelty; SIG/system-stem/link/C-builder/unexpected mutation counts are all zero |
 | STEMS head-corner reachability boundary | `materialize_native_stems_head_corner_reachability` is production and exact across 8 pages / 30 systems / 3,521 heads / 14,084 corners. It assigns 1,340 seeds, retains 4,566 C and 8,120 B targets in C-before-B order, writes every C seed list, and creates 1,687 head-origin anchors for 3,948 final BLinkers. Its 16,501 checks preserve the 2,417 V builders and keep all 14,084 C builders null, with zero forbidden SIG/link/registry mutation; the normal gate has 2 tests and 0 ignored |
-| STEMS head-origin `StemBuilder` boundary | `materialize_native_stems_head_builders` is the ninth exact boundary: all 14,084 C-origin builders materialize after the 2,417 beam builders in the real system-interleaved registry chronology. The full stream matches 19,295 head registrations (4,619 new / 14,676 reuse), 29,120 items, 165 gaps, 70,420 profile lengths, and 42,252 sort audits; SIG/system-stem/link/unexpected mutations are zero. The corpus is inspect-profile 1 with no profile divergence or VIP heads; profile divergence and JDK sort inputs at 32 fail closed, while Java's 6,087 non-VIP low-remain keeps and processed-without-compound sticker rule remain live. The normal eight-page gate passed twice (84.48s / 88.93s), and strict integration-test Clippy is green |
+| STEMS head-origin `StemBuilder` boundary | `materialize_native_stems_head_builders` is the ninth exact boundary: all 14,084 C-origin builders materialize after the 2,417 beam builders in the real system-interleaved registry chronology. The full stream matches 19,295 head registrations (4,619 new / 14,676 reuse), 29,130 items, 166 gaps, 70,420 profile lengths, and 42,252 zero-cycle/zero-equivalence sort audits; SIG/system-stem/link/unexpected mutations are zero. The corpus is inspect-profile 1 with no profile divergence or VIP heads; profile divergence fails closed, while Java's 6,087 non-VIP low-remain keeps and processed-without-compound sticker rule remain live. The corrected eight-page exact gate passes, and strict integration-test Clippy remains required in final verification |
 | STEMS beam-origin `VLinker.expand`/link-plan boundary | `materialize_native_stems_beam_link_plans` is the tenth exact boundary: an immutable matrix evaluates profiles 0 through 3/4 for every inspected non-anchor beam builder and stops before `StemBuilder.createStem`. The full eight-page gate matches 11,573 plans, 18,345 final relations, 12,523 final Glyph entries, and all 120,646 body lines (120,636 semantic rows plus the 10-line shared header). It exposes 3,226 downward shared-line/current-attachment deltas, 49 rollback-line divergences, two dynamic-side mismatches, the profile-4 terminal-head 9/632/645 partition, and zero forbidden mutations without applying scheduler state. Eleven focused units, two full runs (32.25s / 32.41s), and strict integration-test Clippy are green |
 | STEMS deterministic beam-scheduler frontier | `materialize_native_stems_beam_scheduler_frontiers` is the eleventh exact boundary: it reconstructs 651 page-global canonical live Glyph aliases and 78 live raw hook/full-beam Exclusions, then replays all 803 beams in stable reverse-width/SIG order across 322 width ties. The 30 systems reach 56 attempts: 26 empty-target skips remove 14 beams from local worklists, then 30 `ReadyForCreateStem` plans stop as typed `AwaitingVLinkTransaction` frontiers. Ready is feasibility, not success. Fourteen pending downward line/attachment deltas remain unapplied; known-false invocation, stump, hook-removal, retry, completion, and persistent-mutation counts are zero. Eight focused units, three active integration tests with one fast diagnostic ignored, the 31.09-second integration run, the independent 31.41-second root full gate, and strict integration-test Clippy are green |
 | STEMS first awaited beam-V `createStem` transaction | `apply_native_stems_beam_vlink_create_stem_transaction` is the twelfth exact boundary: it applies prior/pending aliased line deltas and exactly executes candidate construction, structural GlyphIndex registration, structural `systemStems` lookup, `StemChecker`, and checked/artificial/reused return. Across 30 transactions it matches 15 compound candidates with pre-registration object ID 0, 15 singletons, 14 line changes, 30 active `ReuseActive` Glyph lookups, 30 Absent real system-stem lookups, and 30 `CreatedChecked` results. Returned median/mean-thickness bits and vertical-ribbon integer bounds are exact; every returned Inter is ID 0, non-abnormal, and SIG-null. Allocator/SIG/relation/link-flag deltas are zero. Eleven focused units and the 5/5 31.98-second gate are green |
@@ -879,19 +879,19 @@ only divergence is Carmen system 2 / builder 56, leaving 1,390 TOP and 1,027
 BOTTOM builders. The constructor removes 215 of 2,169 seeds, retains 1,954,
 and reduces 6,676 targets to 6,670: all 1,617 B targets and 5,053 C targets.
 It registers 1,442 chunk glyphs (799 new and 643 canonical reuse), removes 175
-chunks, retains 9,419 final items, and emits 12,085 length rows. The bounded
+chunks, retains 9,417 final items, and emits 12,085 length rows. The bounded
 registry records zero external members and zero unmodeled reuse; this is not a
-global glyph-novelty claim. Its JDK 25 mini-TimSort-only audit records 18
-comparator cycles and 2,503 equivalence inconsistencies. Target lists reach 11
-items and final lists 14; an observed list length of 32 or greater fails closed.
+global glyph-novelty claim. The PR-984 context-independent ordinate comparator
+records zero cycles and zero equivalence inconsistencies across all 4,657 sort
+audits. Target lists reach 11 items and final lists 14.
 All 35,419 builder checks record zero SIG, system-stem, linker, C-builder, and
-unexpected-builder mutations. The emitted body is 91,211 lines / 29,195,732
-bytes and the complete fixture 91,212 lines / 29,197,924 bytes. Probe, runner,
+unexpected-builder mutations. The emitted body is 91,209 lines / 29,164,943
+bytes and the complete fixture 91,210 lines / 29,167,131 bytes. Probe, runner,
 emitted-body, and complete-fixture SHA-256 are
-`c320870ea130e5156124b111e34c918fa4f640595109ac44b8a4de89b732d178`,
-`adc2647152b925a2a81fe580a240b4c8be05fca3148ef3d3df29d73577e72806`,
-`da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
-`a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
+`acf21ca496ec309138cb530c05827a4e5b639763d7f4cc5cc0bff4d2b8657646`,
+`54bad840185412fa504a6f093f464e904ae16f0b8e8c2e4e2fac84a294681b8e`,
+`be00a4a2c5ee05b92b3fe70b157cbb246ab066ddd9fe89168db63657438672e4`, and
+`638dd815d5d110dd67bab202c31ee966c4fd229d6998107cdc3f9483045ffcf1`.
 
 `materialize_native_stems_head_corner_reachability` closes the eighth
 production semantic STEMS boundary. Across eight pages and 30 systems it
@@ -944,13 +944,11 @@ All 14,084 C-origin builders materialize in head-x then TR/BL/TL/BR inspection
 order, split evenly between 7,042 TOP and 7,042 BOTTOM, with no direction
 divergence. The constructor scans 15,953,076 vertical and 14,436,784 horizontal
 sections, accepts 34,526 and 23,787, builds 19,295 filaments from 45,938 members,
-and retains 29,120 final items. Its 35,424 gap checks insert 165 gaps and record
-6,469 truncations; the exact gate reproduces all 70,420 profile-0-through-4
-lengths from the independent Java replay. Its 42,252 sort rows retain all 8
-comparator cycles and 319 equivalence findings. The three frozen list maxima are
-2 retrieve-seed, 7 target,
-and 13 final items; production rejects any JDK sort input of 32 or more rather
-than claiming the unported large-array merge path.
+and retains 29,130 final items. Its 35,432 gap checks insert 166 gaps and record
+6,468 truncations; the exact gate reproduces all 70,420 profile-0-through-4
+lengths from the independent Java replay. All 42,252 sort audits now report zero
+cycles and zero equivalence findings. The three frozen list maxima are 2
+retrieve-seed, 7 target, and 13 final items.
 
 The corpus uses inspect profile 1 in every system and has zero profile
 divergences; production rejects a page inspect profile that differs from the
@@ -965,21 +963,21 @@ unexpected-builder mutation counts are all zero. The seam ends after the C
 linker's `sb` assignment, before `VLinker.expand`, `StemBuilder.createStem`, or
 any relation/SIG mutation.
 
-Two fresh-JVM corpus passes produced byte-identical split fixtures totaling
-593,749 lines / 171,932,512 bytes. Manifest, probe, and runner SHA-256 are
-`21d8d11beb4a8895759198f17a45a981a66f9554c9559d1711db09f3db7b764e`,
-`364ad5d74f15c9cbaf77b67da987f6bc3a309c0bd5c80093f34185d6c4ceadd9`, and
-`215410766e419685c6cf3a5c9c8f2c8e7ac39b0f02ef18780f4a67450ae91b37`.
+Fresh corrected-Java corpus runs produced split fixtures totaling 593,767 lines /
+171,930,398 bytes. Manifest, probe, and runner SHA-256 are
+`31db6d63abc6c7e38152a9aac4a73f690717bfb814bf974825f2189a5a383480`,
+`ab657f96502869a4b710bcc98e507cb7539f1492635f9d097cff012b9629a9bb`, and
+`8542d682241d7be645f3bfc1e474a6acbc430f15a6e4c5ee92f25221a20d751b`.
 The eight full fixture SHA-256 values, in manifest order (Chula, Allegretto,
 Batuque, Carmen, Cucaracha, Hove, Zizi, Bach), are
-`c001dd763ccd8849c6d95379d45ce15f94e6ce7d8bf364e7a9b408f072ff645c`,
-`195a65e77f321aa45758d19e7448f7f1c1458918858a64099936e741d0a456b0`,
-`8320a7b4e645620784d66f67ad7b8e5cee866c72a30e310102f4726542a498bf`,
-`43d94ddb7af2ebd36c29dae70446b27189d9b045afcf4724d79566e2608ff03a`,
-`87c8b9ba51361a777d0529fa8a397263cafce593bd552ddbbf1fe5408758ed21`,
-`c098170dc32bc1773c1d5319a459cbf3b4ba93fa076626a78f2aaa9fbaffcbc4`,
-`745b90cb61b637ab829c9495dd379709479fd7cfbe59b1cdfef73807523cac43`, and
-`66b77dd58f4cf3ac3b8e3971695bb7aab953f95e44cd6ba69625efb7450aa6a6`.
+`cb80aa2601596fd956144cd086e5500f24e7f10ad21adf1bfe282716e0af44c0`,
+`2f6b98785ff2b6f867a62fcf918108fbcfbd732d8027c648ce963d3bbba79874`,
+`551dafd731b7dd1c1360bb7545cba3e0728c067e4a4780e3b2043b93d901d793`,
+`7dffdfdc897b0a31f6675b4d10ee629d8baa63de48a6f85c575d22d9984c0709`,
+`e467d41e46fa0fcb5d9c7e1a0cf5a6504f91bc1135f12e84484cb21a146f3f69`,
+`7af707f95a8f687abf93cd7f2f4df45d057bbd018a1f90070d51459e34ab1a69`,
+`ad35a832adc2f10e331dca442da4f7a2d01b9e0376fedfd5e44ab30b0a6b2289`, and
+`497bd42a8baeaa39d0aadb1e260aee9c3d0c6f960f46bd92cf9494a05c282d58`.
 The normal eight-page full native semantic-stream gate is green twice:
 84.48 seconds in the independent run and 88.93 seconds in root verification.
 Strict integration-test Clippy is also green. That ninth seam ends before the
@@ -12394,3 +12392,23 @@ with one optional real-sidecar gate skipped in the ordinary run and that gate
 passes when supplied the generated Chopin v5 sidecar. Formatting, strict
 workspace/all-target/all-feature Clippy, and diff checks pass. The sole full
 CLI failure remains the pre-existing Cucaracha 115-versus-114 stem fixture.
+
+## Boundary 310: transitive StemBuilder item ordering
+
+Audiveris PR 984 is applied to both runtimes. Java `StemBuilder.sortItems` now
+assigns every item one context-independent ordinate key: a half linker's
+reference-point y, or the directional line endpoint y for every other item.
+The Rust beam-origin and head-origin builders use the same rule with Java's
+exact `Double.compare` semantics. Mixed half-linker/chunk comparisons therefore
+form a total preorder instead of changing keys according to the comparison
+partner, eliminating the OpenJDK TimSort contract exception seen at 34 items.
+
+The upstream 40-item Java regression reproduces the former exception and sorts
+100 shuffled inputs in both directions with the fixed comparator. Rust has
+independent 40-item regressions in both builder paths. Corrected Java probes
+regenerated the complete eight-page beam fixture and all eight split head
+fixtures rather than updating expected permutations by assumption. Their exact
+differential gates pass: beam builders in 40.97 seconds and head builders in
+91.39 seconds. The audit census is now zero cycles / zero equivalence
+inconsistencies in both corpora. This is the normal Java-exact behavior, so no
+optional recovery ordering is required or exposed.

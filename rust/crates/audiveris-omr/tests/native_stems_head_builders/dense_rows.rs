@@ -1144,28 +1144,20 @@ fn item_compare(
     right: &NativeStemsHeadBuilderItem,
     y_direction: i32,
 ) -> i32 {
-    let is_half = |kind| {
-        matches!(
-            kind,
+    let key = |item: &NativeStemsHeadBuilderItem| {
+        if matches!(
+            item.kind,
             NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
                 | NativeStemsHeadBuilderItemKind::HeadHalfLinker
-        )
+        ) {
+            item.reference_point.expect("half-linker reference").y
+        } else if y_direction > 0 {
+            item.line.start.y
+        } else {
+            item.line.stop.y
+        }
     };
-    if is_half(left.kind) && is_half(right.kind) {
-        return y_direction
-            * java_double_compare(
-                left.reference_point.expect("left half-linker reference").y,
-                right
-                    .reference_point
-                    .expect("right half-linker reference")
-                    .y,
-            );
-    }
-    if y_direction > 0 {
-        java_double_compare(left.line.start.y, right.line.start.y)
-    } else {
-        java_double_compare(right.line.stop.y, left.line.stop.y)
-    }
+    y_direction * java_double_compare(key(left), key(right))
 }
 
 fn item_kind(kind: NativeStemsHeadBuilderItemKind) -> &'static str {
