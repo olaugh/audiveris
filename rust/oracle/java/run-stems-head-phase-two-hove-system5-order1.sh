@@ -107,8 +107,8 @@ base_retarget_transform="$script_dir/stems-head-phase-two-cucaracha-system3-orde
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
 base_retarget_transform_sha=$(shasum -a 256 "$base_retarget_transform" | awk '{print $1}')
-if [ "$base_runner_sha" != "26af234811b815d1e2012311838045cd80adec4c3d67c3dd19c732160600fb34" ] || \
-        [ "$base_fixture_sha" != "a4ede84ed937da65006924da3b3de35e24d33dd229d9391aae136e436b1477ff" ] || \
+if [ "$base_runner_sha" != "670ebd04085df636dc55ec5d3c08c0f35b98de388dcd67c813741a500b08689a" ] || \
+        [ "$base_fixture_sha" != "2f8c813e1d9616b6273e98bf4a371003bb05ee548d08e89e2a6a38d1c79bdf21" ] || \
         [ "$base_retarget_transform_sha" != "35f69316834081b0e6f8354e0bfbb856952930941652ccd04db2ee23dcc1d432" ]; then
     echo "Hove system-5 queue-1 strict predecessor drifted" >&2
     exit 1

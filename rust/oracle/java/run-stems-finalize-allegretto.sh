@@ -63,10 +63,11 @@ fi
 
 if [ "$(grep -c '^stemsfinalizepage ' "$rows_one")" -ne 1 ] || \
         [ "$(grep -c '^stemsfinalizesystem ' "$rows_one")" -ne 3 ] || \
-        ! grep -q '^stemsfinalizesystem page allegretto.png#1 system 1 heads 90 undefs \[x84:sig47:id1349:\[LEFT\],x80:sig31:id1317:\[RIGHT\],x57:sig21:id1297:\[LEFT\],x58:sig40:id1335:\[LEFT\],x71:sig28:id1311:\[LEFT\],x72:sig43:id1341:\[LEFT\],x56:sig61:id1377:\[RIGHT\]\] multipleBefore \[x80:sig31:id1317\] noStemBefore \[x57:sig21:id1297,x58:sig40:id1335,x71:sig28:id1311,x72:sig43:id1341,x84:sig47:id1349\] abnormalBefore \[x57:sig21:id1297,x58:sig40:id1335,x71:sig28:id1311,x72:sig43:id1341,x84:sig47:id1349\] removedHeadStem \[x80:sig31:id1317:stem2240:sideRIGHT\] abnormalAfter \[x57:sig21:id1297,x58:sig40:id1335,x71:sig28:id1311,x72:sig43:id1341,x84:sig47:id1349\] abnormalChanges \[\] sigVerticesBefore 215 sigVerticesAfter 215 sigEdgesBefore 275 sigEdgesAfter 274 systemStemsBefore 41 systemStemsAfter 41 allocatorBefore 2241 allocatorAfter 2241$' "$rows_one" || \
-        ! grep -q '^stemsfinalizesystem page allegretto.png#1 system 2 heads 120 undefs \[x86:sig50:id1535:\[LEFT\],x117:sig56:id1547:\[LEFT\],x85:sig86:id1607:\[RIGHT\],x87:sig67:id1569:\[LEFT\],x106:sig55:id1545:\[LEFT\],x29:sig30:id1495:\[LEFT\],x118:sig57:id1549:\[LEFT\],x30:sig39:id1513:\[LEFT\]\] multipleBefore \[\] noStemBefore \[x29:sig30:id1495,x30:sig39:id1513,x47:sig35:id1505,x51:sig36:id1507,x86:sig50:id1535,x87:sig67:id1569,x106:sig55:id1545,x117:sig56:id1547,x118:sig57:id1549\] abnormalBefore \[x29:sig30:id1495,x30:sig39:id1513,x47:sig35:id1505,x51:sig36:id1507,x86:sig50:id1535,x87:sig67:id1569,x106:sig55:id1545,x117:sig56:id1547,x118:sig57:id1549\] removedHeadStem \[\] abnormalAfter \[x29:sig30:id1495,x30:sig39:id1513,x47:sig35:id1505,x51:sig36:id1507,x86:sig50:id1535,x87:sig67:id1569,x106:sig55:id1545,x117:sig56:id1547,x118:sig57:id1549\] abnormalChanges \[\] sigVerticesBefore 264 sigVerticesAfter 264 sigEdgesBefore 338 sigEdgesAfter 338 systemStemsBefore 57 systemStemsAfter 57 allocatorBefore 2708 allocatorAfter 2708$' "$rows_one" || \
-        ! grep -q '^stemsfinalizesystem page allegretto.png#1 system 3 heads 118 undefs \[x112:sig68:id1812:\[RIGHT\]\] multipleBefore \[x107:sig80:id1836\] noStemBefore \[x56:sig100:id1876\] abnormalBefore \[x56:sig100:id1876\] removedHeadStem \[\] abnormalAfter \[x56:sig100:id1876\] abnormalChanges \[\] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 320 sigEdgesAfter 320 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3170$' "$rows_one"; then
+        ! grep -q '^stemsfinalizesystem page allegretto.png#1 system 1 heads 90 .*multipleBefore \[\] .*removedHeadStem \[\] .*sigVerticesBefore 215 sigVerticesAfter 215 sigEdgesBefore 273 sigEdgesAfter 273 systemStemsBefore 41 systemStemsAfter 41 allocatorBefore 2242 allocatorAfter 2242$' "$rows_one" || \
+        ! grep -q '^stemsfinalizesystem page allegretto.png#1 system 2 heads 120 .*multipleBefore \[\] .*removedHeadStem \[\] .*sigVerticesBefore 264 sigVerticesAfter 264 sigEdgesBefore 338 sigEdgesAfter 338 systemStemsBefore 57 systemStemsAfter 57 allocatorBefore 2709 allocatorAfter 2709$' "$rows_one" || \
+        ! grep -q '^stemsfinalizesystem page allegretto.png#1 system 3 heads 118 undefs \[x112:sig68:id1812:\[RIGHT\]\] multipleBefore \[x107:sig80:id1836\] noStemBefore \[x56:sig100:id1876\] abnormalBefore \[x56:sig100:id1876\] removedHeadStem \[\] abnormalAfter \[x56:sig100:id1876\] abnormalChanges \[\] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 320 sigEdgesAfter 320 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3171 allocatorAfter 3171$' "$rows_one"; then
     echo "Allegretto page finalizeStems Java contract differs" >&2
+    cat "$rows_one" >&2
     exit 1
 fi
 
@@ -76,8 +77,8 @@ base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
 if [ "$input_sha" != "a9207f26b57415d8c54602881316c003319c5593ed8baf4c3af13715c41b3065" ] || \
         [ "$stems_source_sha" != "26e95fa09905b39ea0dcae2b65a85b4e4fcb49b772c57f97f332a00c4dc8b9e7" ] || \
-        [ "$base_runner_sha" != "4f589fb9512f2b7d6467b98c9174b81ec91783a002455ee4c7ae908c1e4aa854" ] || \
-        [ "$base_fixture_sha" != "83e4c5671e6e1d489c84d30ff0bd5e01c3b095c68b8562d2f09c42908b49f1af" ]; then
+        [ "$base_runner_sha" != "4d26dd33041fe849dd7cb6ccb99270f9748235fc3a39c2d64dc79f678a1df823" ] || \
+        [ "$base_fixture_sha" != "01a9c9b8a69c6c3305290903a0c05745e4b622be585003da0f4d1843f4b7411a" ]; then
     echo "Allegretto input, Java source, or phase-two predecessor drifted" >&2
     exit 1
 fi

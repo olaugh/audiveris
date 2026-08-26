@@ -93,7 +93,7 @@ fi
 if [ "$(wc -l < "$tmp_dir/rows1" | tr -d ' ')" -ne 7 ] || \
         ! grep -q '^stemsheadphase2baseline page cucaracha.png#1 system 3 heads 113 queueSize 20 .*sigVertices 198 sigEdges 250 systemStems 34 allocator 3009$' "$tmp_dir/rows1" || \
         ! grep -q '^stemsheadphase2cucarachas3q19frontier headInterId 1555 corner BL hSide LEFT vSide BOTTOM .*lastIndex 2 maxIndex 2 relations 2 .*glyphs 2 selected \[id317:834:1560:4:91:weight307,id2868:834:1560:4:91:weight198\] .*existingStem id2989:.*verticesBefore 198 edgesBefore 250 allocatorBefore 3009 terminal ReadyForHeadCreateStem$' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2cucarachas3q19reusematch headInterId 1555 sourceHeadId 1632 sourceCorner BL sourceSide LEFT relationGrade 3fedecef2ef1a8ba stem id2989:.*terminal SelectedReuseStem$' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2cucarachas3q19reusematch headInterId 1555 sourceHeadId 1632 sourceCorner BL sourceSide LEFT relationGrade 3fedecef2ef1a619 stem id2989:.*terminal SelectedReuseStem$' "$tmp_dir/rows1" || \
         ! grep -q '^stemsheadphase2cucarachas3q19result headInterId 1555 linkedStem id2989:.*reusedExisting true applied grade3fe4e1c61700dadc:dx3fbe433d3ee06618:.*verticesBefore 198 verticesAfter 198 edgesBefore 250 edgesAfter 251 allocatorBefore 3009 allocatorAfter 3009 terminal ReturnedHeadCLinkTransaction$' "$tmp_dir/rows1" || \
         ! grep -q '^stemsheadphase2retry page cucaracha.png#1 system 3 queueIndex 19 headX 37 headSig 11 headInterId 1555 grade 3fc5874e6adca3c0 append true .*decisions \[LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=false:bottom=false:branch=Neither\] returned true .*sideChanges \[x37:sig11:LEFT:false:true->true:true\] .*sigEdgesBefore 250 sigEdgesAfter 251 .*allocatorBefore 3009 allocatorAfter 3009$' "$tmp_dir/rows1"; then
     echo "Cucaracha system-3 queue-19 Java contract differs" >&2
@@ -107,8 +107,8 @@ base_retarget_transform="$script_dir/stems-head-phase-two-cucaracha-system2-orde
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
 base_retarget_transform_sha=$(shasum -a 256 "$base_retarget_transform" | awk '{print $1}')
-if [ "$base_runner_sha" != "0307f76f0da438d3609c1dcaa602656eca732de9fd377bd25325e94c78ffea77" ] || \
-        [ "$base_fixture_sha" != "200afe8ef54faf6a11ecf094bc2394b485dee7f0eb6ed68aa632e4e4bdbbdd5d" ] || \
+if [ "$base_runner_sha" != "9e2aa04a328fec08178fca9d3682677fef8c58174a585faa596c111ed5094e7c" ] || \
+        [ "$base_fixture_sha" != "ffef65c024c156c464949598a44dd38b87bf1b8c40240496081110c7944ad9f1" ] || \
         [ "$base_retarget_transform_sha" != "bc9205d1e88c653d7d7cb553cc525d559a69e87b4736efe615c975daf82ae425" ]; then
     echo "Cucaracha system-3 queue-19 strict predecessor drifted" >&2
     exit 1

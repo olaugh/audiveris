@@ -85,7 +85,7 @@ fi
 if [ "$(wc -l < "$tmp_dir/rows1" | tr -d ' ')" -ne 8 ] || \
         ! grep -q '^stemsheadphase2baseline page cucaracha.png#1 system 2 heads 150 queueSize 24 .*sigVertices 255 sigEdges 347 systemStems 43 allocator 2659$' "$tmp_dir/rows1" || \
         ! grep -q '^stemsheadphase2cucarachas2q8frontier headInterId 1388 corner BL hSide LEFT vSide BOTTOM .*lastIndex 2 maxIndex 2 relations 2 .*glyphs 2 selected \[id250:1076:1211:3:135:weight317,id2487:1078:1211:1:135:weight135\] .*existingStem id2647:.*verticesBefore 255 edgesBefore 347 allocatorBefore 2659 terminal ReadyForHeadCreateStem$' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2cucarachas2q8reusematch headInterId 1388 sourceHeadId 1471 sourceCorner BL sourceSide LEFT relationGrade 3fefa1c8c523138f stem id2647:.*terminal SelectedReuseStem$' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2cucarachas2q8reusematch headInterId 1388 sourceHeadId 1471 sourceCorner BL sourceSide LEFT relationGrade 3fefa1c8c52316ef stem id2647:.*terminal SelectedReuseStem$' "$tmp_dir/rows1" || \
         ! grep -q '^stemsheadphase2cucarachas2q8result headInterId 1388 linkedStem id2647:.*reusedExisting true applied grade3feb7adfb837fb8d:dxbfbae2955082830c:.*verticesBefore 255 verticesAfter 255 edgesBefore 347 edgesAfter 348 allocatorBefore 2659 allocatorAfter 2659 terminal ReturnedHeadCLinkTransaction$' "$tmp_dir/rows1" || \
         ! grep -q '^stemsheadphase2cucarachas2q8reuse headInterId 1388 lastIndex 0 selectedStem - terminal ReturnedFromReuseStem$' "$tmp_dir/rows1" || \
         ! grep -q '^stemsheadphase2retry page cucaracha.png#1 system 2 queueIndex 8 headX 56 headSig 78 headInterId 1388 grade 3fe14688c5a3a00b append true .*decisions \[LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=false:bottom=true:branch=BottomOnly\] returned true .*sideChanges \[x56:sig78:LEFT:false:true->true:true\] .*sigEdgesBefore 347 sigEdgesAfter 348 .*allocatorBefore 2659 allocatorAfter 2659$' "$tmp_dir/rows1"; then
@@ -100,8 +100,8 @@ base_retarget_transform="$script_dir/stems-head-phase-two-cucaracha-system1-orde
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
 base_retarget_transform_sha=$(shasum -a 256 "$base_retarget_transform" | awk '{print $1}')
-if [ "$base_runner_sha" != "3ad18d6e2db7b60980a27deef414bf54ac86df1fdfc127b26539172b4665e918" ] || \
-        [ "$base_fixture_sha" != "457f8f28ca9a62fd085b27d5e574b1ff71a9f2f211dec9a0a82d4c30432c20d5" ] || \
+if [ "$base_runner_sha" != "d4f997ca66f1340a89cee87df928d09e321fc544aacb4e32f357c52a962cf4f6" ] || \
+        [ "$base_fixture_sha" != "877c3a9f20ac5ac2a023a046a9ac752a289a4dd5711596fa650ca7557836f7a6" ] || \
         [ "$base_retarget_transform_sha" != "a9daae9d492b63c9b9e091f0522bf7e42d270ef113a6f63f5a323066764c0d01" ]; then
     echo "Cucaracha system-2 queue-8 strict predecessor drifted" >&2
     exit 1

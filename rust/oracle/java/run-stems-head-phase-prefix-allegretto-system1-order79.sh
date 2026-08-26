@@ -109,10 +109,11 @@ cmp "$tmp_dir/semantic1" "$tmp_dir/semantic2"
 rows="$tmp_dir/rows"
 grep '^stemshead' "$tmp_dir/pass1" > "$rows"
 if [ "$(grep -c '^stemsheadphasecontinue ' "$rows")" -ne 1 ] || \
-        ! grep -q '^stemsheadclinkfrontier allegretto.png#1 system 1 headOrder 79 headX 82 headSig 89 headInterId 1433 cAlias h:82:LEFT:TOP .*lastIndex 1 maxIndex 2 relations 2 .*glyphs 1 .*existingGlyph glyph:297 existingActive true existingStem - ' "$rows" || \
-        ! grep -q '^stemsheadclinkresult headOrder 79 allocatorBefore 2239 allocatorAfter 2240 .*addedVertices \[id2240:.*bounds=2299:692:3:47:.*addedEdges \[system1:sourceId1317:targetId2240:.*system1:sourceId1433:targetId2240:.*addedSystemStems \[g:2299:692:2:47:.*:stemId2240\] ' "$rows" || \
-        ! grep -q '^stemsheadphasecontinue allegretto.png#1 system 1 headOrder 79 headX 82 headSig 89 headInterId 1433 .*decisions \[LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=true:branch=BottomOnly\].*returned true .*closedValueChanges 0 .*sigVerticesBefore 637 sigVerticesAfter 638 sigEdgesBefore 562 sigEdgesAfter 564 .*nextHeadOrder 80 nextHeadX 81 nextHeadSig 48 nextHeadInterId 1351 ' "$rows"; then
+        ! grep -q '^stemsheadclinkfrontier allegretto.png#1 system 1 headOrder 79 headX 82 headSig 89 headInterId 1433 cAlias h:82:LEFT:TOP .*lastIndex 0 maxIndex 2 relations 1 .*glyphs 1 .*existingGlyph glyph:297 existingActive true existingStem - ' "$rows" || \
+        ! grep -q '^stemsheadclinkresult headOrder 79 allocatorBefore 2239 allocatorAfter 2241 .*addedVertices \[id2240:.*bounds=2299:692:3:47:.*addedEdges \[system1:sourceId1433:targetId2240:.*addedSystemStems \[g:2299:692:2:47:.*:stemId2240\] ' "$rows" || \
+        ! grep -q '^stemsheadphasecontinue allegretto.png#1 system 1 headOrder 79 headX 82 headSig 89 headInterId 1433 .*decisions \[LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=true:branch=BottomOnly\].*returned true .*closedValueChanges 0 .*sigVerticesBefore 637 sigVerticesAfter 638 sigEdgesBefore 562 sigEdgesAfter 563 .*nextHeadOrder 80 nextHeadX 81 nextHeadSig 48 nextHeadInterId 1351 ' "$rows"; then
     echo "Allegretto system-1 order-79 crossed-side C-link contract differs" >&2
+    sed -n '1,200p' "$rows" >&2
     exit 1
 fi
 
@@ -133,8 +134,10 @@ if [ "$base_probe_sha" != "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d3
         [ "$base_runner_sha" != "be1f28c0528721e23ba24e1b8107f5069310d47a1a537945052d2a536a260e74" ] || \
         [ "$base_fixture_sha" != "0bccd92c0a4305704c5903984ccf9734823bf4879b5aa6f2621595700fa6507d" ] || \
         [ "$probe_sha" != "b22c21f1b9410ec66aa5445f8aa2f9aa4e4149c02b733abe03617ec6be05c032" ] || \
-        [ "$body_sha" != "e9802845ac23e54fb14617dc21a63ac1a5be0d5b64e998bf0b8cd0ff1a288d62" ]; then
+        [ "$body_sha" != "0c870b0a40e37521fc1768c4c9c17e5b06f0234c0c3bf80981c3133ffb9c47b2" ]; then
     echo "Allegretto system-1 order-79 provenance drifted" >&2
+    printf 'observed probeSha %s runnerSha %s bodySha %s semanticSha %s baseFixtureSha %s\n' \
+        "$probe_sha" "$runner_sha" "$body_sha" "$semantic_sha" "$base_fixture_sha" >&2
     exit 1
 fi
 row_count=$(wc -l < "$rows" | tr -d ' ')

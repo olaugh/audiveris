@@ -3074,6 +3074,28 @@ fn advance_native_stems_head_c_link_or_no_link_impl(
     }
 
     let mut shadow = working;
+    let current = shadow.heads[original_index].clone();
+    if current.sides.iter().any(|side| side.linked) {
+        let (closed_s_linkers, closed_value_changes) = close_heads_sharing_prelinked_stems(
+            &shadow.beam_state.sig,
+            &shadow.beam_state.bindings,
+            &mut shadow.beam_state.s_cells,
+            &mut shadow.heads,
+            &current,
+        )?;
+        shadow.current_index = original_index + 1;
+        shadow.frontier_consumed = true;
+        let continuation = NativeStemsHeadPhase1Continuation {
+            processed_head: current.reference,
+            side_decisions: all_decisions,
+            returned_linked: Some(true),
+            closed_s_linkers,
+            closed_value_changes,
+            state_after: Box::new(shadow.clone()),
+        };
+        *carrier = shadow;
+        return Ok(Err(continuation));
+    }
     let mut closed_s_linkers = Vec::new();
     let mut closed_value_changes = 0;
     // Java stores SLinkers in an EnumMap and closes them LEFT then RIGHT.
@@ -7209,15 +7231,15 @@ pub fn advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0(
             left_top_returns_minus_one: true,
             selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
             selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
-            last_index: 1,
+            last_index: 0,
             max_index: 2,
-            selected_glyph_id: 182,
+            selected_glyph_id: 218,
             candidate_stem_identity: 41,
-            stem_identity: 6,
-            stem_vertex: 242,
+            stem_identity: 41,
+            stem_vertex: 277,
             relation_grade_bits: 0x3fef_ffff_ffff_ffe1,
             relation_dx_bits: 0xbce8_6186_1861_8618,
-            append_reuse_source: Some((3, 13, 198)),
+            append_reuse_source: None,
             additional_relations: &[],
         },
     )
@@ -7254,23 +7276,23 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
         NativePhaseTwoReusedStemRetry {
             system_id: 1,
             queue_index: 6,
-            x_ordinal: 25,
-            sig_ordinal: 71,
-            grade_bits: 0x3fe2_7d94_94e1_5a08,
+            x_ordinal: 12,
+            sig_ordinal: 69,
+            grade_bits: 0x3fe1_a491_3220_8b3d,
             can_link: (false, true, false, true),
             left_top_returns_minus_one: false,
             selected_horizontal: crate::stems_step::NativeStemHeadSide::Left,
             selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
             last_index: 1,
             max_index: 1,
-            selected_glyph_id: 43,
-            candidate_stem_identity: 31,
-            stem_identity: 31,
-            stem_vertex: 225,
-            relation_grade_bits: 0x3feb_e478_4aa3_19a4,
-            relation_dx_bits: 0xbfb8_99df_6069_99e8,
+            selected_glyph_id: 41,
+            candidate_stem_identity: 32,
+            stem_identity: 32,
+            stem_vertex: 226,
+            relation_grade_bits: 0x3feb_a810_9d86_8966,
+            relation_dx_bits: 0xbfb9_e96a_7efa_a30c,
             append_reuse_source: None,
-            additional_relations: &[(22, 90, 274, false), (32, 115, 275, false)],
+            additional_relations: &[(18, 113, 278, false)],
         },
     )
 }
@@ -7306,23 +7328,23 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
         NativePhaseTwoReusedStemRetry {
             system_id: 1,
             queue_index: 7,
-            x_ordinal: 12,
-            sig_ordinal: 69,
-            grade_bits: 0x3fe1_a491_3220_8b3d,
+            x_ordinal: 52,
+            sig_ordinal: 75,
+            grade_bits: 0x3fe0_7a30_cb04_5e42,
             can_link: (false, true, false, true),
             left_top_returns_minus_one: false,
             selected_horizontal: crate::stems_step::NativeStemHeadSide::Left,
             selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
             last_index: 1,
             max_index: 1,
-            selected_glyph_id: 41,
-            candidate_stem_identity: 32,
-            stem_identity: 32,
-            stem_vertex: 226,
-            relation_grade_bits: 0x3feb_a810_9d86_8966,
-            relation_dx_bits: 0xbfb9_e96a_7efa_a30c,
+            selected_glyph_id: 44,
+            candidate_stem_identity: 27,
+            stem_identity: 27,
+            stem_vertex: 221,
+            relation_grade_bits: 0x3fec_70c1_5146_0e9d,
+            relation_dx_bits: 0xbfb5_839a_d98e_c925,
             append_reuse_source: None,
-            additional_relations: &[(18, 113, 278, false)],
+            additional_relations: &[(59, 119, 264, false)],
         },
     )
 }
@@ -7410,7 +7432,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
         bridge,
         NativePhaseTwoReusedStemRetry {
             system_id: 1,
-            queue_index: 10,
+            queue_index: 9,
             x_ordinal: 42,
             sig_ordinal: 73,
             grade_bits: 0x3fde_87cd_8a51_e87d,
@@ -7458,7 +7480,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
         bridge,
         NativePhaseTwoReusedStemRetry {
             system_id: 1,
-            queue_index: 17,
+            queue_index: 16,
             x_ordinal: 68,
             sig_ordinal: 76,
             grade_bits: 0x3fd4_9d22_f37a_915a,
@@ -7475,7 +7497,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
             relation_grade_bits: 0x3fee_5f1d_58f4_00c2,
             relation_dx_bits: 0x3f93_4a6d_cd1d_6186,
             append_reuse_source: None,
-            additional_relations: &[(70, 105, 283, false), (74, 120, 284, false)],
+            additional_relations: &[(70, 105, 284, false), (74, 120, 285, false)],
         },
     )
 }
@@ -7506,7 +7528,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
         bridge,
         NativePhaseTwoReusedStemRetry {
             system_id: 1,
-            queue_index: 19,
+            queue_index: 18,
             x_ordinal: 14,
             sig_ordinal: 58,
             grade_bits: 0x3fc8_e1b9_7982_2e90,
@@ -7524,9 +7546,9 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
             relation_dx_bits: 0x3fb5_e151_52b5_f6db,
             append_reuse_source: None,
             additional_relations: &[
-                (8, 89, 319, false),
-                (13, 101, 320, false),
-                (17, 112, 321, false),
+                (8, 89, 320, false),
+                (13, 101, 321, false),
+                (17, 112, 322, false),
             ],
         },
     )
@@ -7558,7 +7580,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
         bridge,
         NativePhaseTwoReusedStemRetry {
             system_id: 1,
-            queue_index: 20,
+            queue_index: 19,
             x_ordinal: 45,
             sig_ordinal: 62,
             grade_bits: 0x3fc8_2a6b_9d99_4097,
@@ -7575,7 +7597,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
             relation_grade_bits: 0x3fe6_918b_e20e_8fdc,
             relation_dx_bits: 0x3fba_1803_6d0d_0f3d,
             append_reuse_source: None,
-            additional_relations: &[(43, 103, 323, false), (48, 116, 324, false)],
+            additional_relations: &[(43, 103, 324, false), (48, 116, 325, false)],
         },
     )
 }
@@ -7606,7 +7628,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
         bridge,
         NativePhaseTwoReusedStemRetry {
             system_id: 1,
-            queue_index: 22,
+            queue_index: 21,
             x_ordinal: 71,
             sig_ordinal: 66,
             grade_bits: 0x3fc7_471e_d4f8_38da,
@@ -7623,7 +7645,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
             relation_grade_bits: 0x3fe5_554e_97cd_ff05,
             relation_dx_bits: 0x3fbd_29be_97ed_f9e8,
             append_reuse_source: None,
-            additional_relations: &[(70, 105, 283, false), (74, 120, 284, false)],
+            additional_relations: &[(70, 105, 284, false), (74, 120, 285, false)],
         },
     )
 }
@@ -8674,7 +8696,11 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
     } else {
         expected.candidate_stem_identity
     };
-    let candidate_disposition_matches = !c_link.create.invoked
+    let expected_create_invoked = expected.system_id == 3
+        && expected.queue_index == 3
+        && expected.x_ordinal == 0
+        && expected.sig_ordinal == 3;
+    let candidate_disposition_matches = c_link.create.invoked == expected_create_invoked
         && c_link.create.disposition
             == (NativeStemsBeamCreateStemDisposition::Reused {
                 stem_identity: selected_stem_identity,
@@ -8699,7 +8725,8 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
         return Err(stage(
             "HEADS-phase2-CLink",
             format!(
-                "retry differs: glyph {} candidateStem {:?} stem {}/{} relation {:016x}/{:016x} extension {:?} appendReuse {:?} additional {:?} side {:?}",
+                "retry differs: invoked {} glyph {} candidateStem {:?} stem {}/{} relation {:016x}/{:016x} extension {:?} appendReuse {:?} additional {:?} side {:?} sLinked {}->{} returned {} terminal {:?} following {}",
+                c_link.create.invoked,
                 c_link.selected_glyph_id,
                 c_link.create.disposition,
                 c_link.stem_vertex.0,
@@ -8717,6 +8744,11 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
                 append_reuse,
                 additional_relations,
                 c_link.s_linker.horizontal,
+                c_link.s_linked_before,
+                c_link.s_linked_after,
+                c_link.returned_linked,
+                c_link.terminal_undefined_side,
+                c_link.following_side_transactions.len(),
             ),
         ));
     }
@@ -13620,7 +13652,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_allegretto_system1_orde
             stem_glyph_id: 71,
             create_new_stem: false,
             carried_undef_sides: &[(42, crate::stems_step::NativeStemHeadSide::Left)],
-            carried_unlinked_indexes: &[31, 42],
+            carried_unlinked_indexes: &[42],
             crossed_x_ordinals: &[75],
             included_glyph_count: 2,
             appended_edge_count: 2,
@@ -13685,7 +13717,7 @@ pub fn advance_native_stems_head_multi_head_created_c_link_allegretto_system1_or
                 (68, crate::stems_step::NativeStemHeadSide::Left),
                 (76, crate::stems_step::NativeStemHeadSide::Left),
             ],
-            carried_unlinked_indexes: &[31, 42, 67, 68, 76],
+            carried_unlinked_indexes: &[42, 67, 68, 76],
             crossed_x_ordinals: &[80],
             included_glyph_count: 1,
             appended_edge_count: 2,

@@ -197,12 +197,13 @@ if [ "$base_probe_sha" != "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d3
         [ "$glyph_index_sha" != "31f25c33d8f5fd5d8fc23fad69c81d7758596925922c932d71b41b85e2abccb2" ] || \
         [ "$overlay_sha" != "f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4" ] || \
         [ "$init_sha" != "9587d9c623beea6c7922dabf6b50cd4d315ed49f4bca28bcc430684362384035" ] || \
-        [ "$base_runner_sha" != "bcbf729291881676df19a79e74a0fb4f2266d09f5c5de0565dedf4420759fd95" ] || \
-        [ "$base_fixture_sha" != "63327c13e4ebba1873fb73d5507b5a34369027ca8c6a4abb60f377cebeee69ee" ] || \
+        [ "$base_runner_sha" != "5d35e16ab8a1114f9002d934d7d23de61384073974d390b7be5f0d636e15d2ee" ] || \
+        [ "$base_fixture_sha" != "b0e46100de693310b776f13df029bf62878b54d8615726c51683c945ff998ac3" ] || \
         [ "$probe_sha" != "4e111715e281e58c51c724130dca44b6a9c0b3149188e3063f77abd3ab58280e" ] || \
-        [ "$body_sha" != "218d8ecd1a889e0046a49594e675572cd2884bf3f8f3411a0d166b8c3b2cbb21" ] || \
-        [ "$semantic_sha" != "01868de57f3a8f5eb42a3496c62cb141d034b85f0fdf0d3859fe37b7337bccae" ]; then
+        [ "$body_sha" != "a19cf718bdcdc45b08d4c431d5a256e6192fa0983a41cc8ddc8fd0f1b8ad7ce9" ] || \
+        [ "$semantic_sha" != "7f0b1e98422200052a038246935346ef3411c3a54c526ba2dff6fc840b01401e" ]; then
     echo "Allegretto system-2 order-89 provenance drifted" >&2
+    echo "baseProbe=$base_probe_sha fragment=$fragment_sha glyphIndex=$glyph_index_sha overlay=$overlay_sha init=$init_sha baseRunner=$base_runner_sha baseFixture=$base_fixture_sha probe=$probe_sha body=$body_sha semantic=$semantic_sha" >&2
     exit 1
 fi
 row_count=$(wc -l < "$rows" | tr -d ' ')

@@ -77,17 +77,17 @@ const RUNNER_PATH: &str = "rust/oracle/java/run-stems-beam-expand.sh";
 const INSPECT_PROFILE: i32 = 1;
 
 const EXPECTED_MANIFEST_SHA256: &str =
-    "f511b049cf5e32de6fb0151a36a1385efb78b4965fd704c7545eaef8522a2f87";
+    "3da8ba7e12765da97259a67b5d27e6ae96ba4dece09bbf6580aabed51615b9eb";
 const EXPECTED_PROBE_SHA256: &str =
     "2a5e107f947e140e030f3cc1dff06105ab730af3e41381e76f5f8113a17b0fa2";
 const EXPECTED_RUNNER_SHA256: &str =
-    "a73ed3977662427062b8d81ac8796ffa54d51daa2f97ea1f109a3d606d0c13b7";
+    "6c589b67bf185590130c81b9da511351e36c8dfea380296cf20a4e8f3b7f6845";
 const EXPECTED_FULL_BODY_SHA256: &str =
-    "ac0fcb9880dbf720c8b73e6baf02867d05e0f2d5a62f208f52e9fa7d5c764966";
-const EXPECTED_FULL_BODY_LINES: usize = 120_646;
-const EXPECTED_FULL_BODY_BYTES: usize = 104_048_204;
+    "ef06e0a81940b5de778571d3b12a65968b58a600e219578221f1da5f4b3f9f0e";
+const EXPECTED_FULL_BODY_LINES: usize = 120_705;
+const EXPECTED_FULL_BODY_BYTES: usize = 105_923_555;
 const EXPECTED_FULL_ROW_COUNTS: [usize; 12] = [
-    8, 30, 11_573, 578, 9_869, 18_416, 37_683, 18_345, 12_523, 11_573, 30, 8,
+    8, 30, 11_573, 578, 9_869, 18_416, 37_683, 18_345, 12_582, 11_573, 30, 8,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

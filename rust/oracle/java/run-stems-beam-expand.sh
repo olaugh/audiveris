@@ -181,22 +181,22 @@ if [ "$mode" = chula ]; then
         echo "observed: $row_counts" >&2
         exit 1
     fi
-    expected_page_summary='stemsbeamexpandpagesummary chula.png#1 systems 3 systems 3 builders 354 plans 1735 noHeadTarget 625 expandFailed 100 noRelations 2 noGlyphs 14 ready 994 relations 2034 glyphs 1478 postReturnRelations 0 plansWithPostReturnRelations 0 rollbackLineDivergences 0 relationSideMismatches 2 storedTheoMutations 161 attachmentLineMutations 161 beamSideReady 178 beamSideReadyWithoutStoppingHead 9 beamSideReadyBeyondStoppingHead 82 beamSideReadyAtStoppingHead 87 maxAbsStoredTheoShift 0x1.0f8e60e2a3f8p3/4020f8e60e2a3f80 sigMutations 0 systemStemMutations 0 glyphIndexMutations 0 filamentIndexMutations 0 linkMutations 0 builderMutations 0 hash 2f436688d138874d'
+    expected_page_summary='stemsbeamexpandpagesummary chula.png#1 systems 3 systems 3 builders 354 plans 1735 noHeadTarget 625 expandFailed 100 noRelations 2 noGlyphs 14 ready 994 relations 2034 glyphs 1478 postReturnRelations 0 plansWithPostReturnRelations 0 rollbackLineDivergences 0 relationSideMismatches 2 storedTheoMutations 161 attachmentLineMutations 161 beamSideReady 178 beamSideReadyWithoutStoppingHead 9 beamSideReadyBeyondStoppingHead 0 beamSideReadyAtStoppingHead 169 maxAbsStoredTheoShift 0x1.0f8e60e2a3f8p3/4020f8e60e2a3f80 sigMutations 0 systemStemMutations 0 glyphIndexMutations 0 filamentIndexMutations 0 linkMutations 0 builderMutations 0 hash 4f0e154b30c7bc49'
     observed_page_summary=$(awk '/^stemsbeamexpandpagesummary / { print }' "$probe_output")
     if [ "$observed_page_summary" != "$expected_page_summary" ]; then
         echo "unexpected Chula beam-expand page summary" >&2
         echo "observed: $observed_page_summary" >&2
         exit 1
     fi
-    expected_body_sha256=ec622657c466029d5e696727df60d09a02f48c4349583a18c6fa1c65573986fc
+    expected_body_sha256=bdbc96ee23ecca16cf04821b8159543c2d9e4053eb2768a287e5c482c2658f47
     if [ "$body_sha256:$body_lines:$body_bytes" != \
-         "$expected_body_sha256:14774:12629914" ]; then
+         "$expected_body_sha256:14774:12824966" ]; then
         echo "unexpected Chula beam-expand body fingerprint" >&2
         echo "observed: $body_sha256:$body_lines:$body_bytes" >&2
         exit 1
     fi
 else
-    expected_rows=8:30:11573:578:9869:18416:37683:18345:12523:11573:30:8
+    expected_rows=8:30:11573:578:9869:18416:37683:18345:12582:11573:30:8
     if [ "$row_counts" != "$expected_rows" ]; then
         echo "unexpected full beam-expand detail row counts" >&2
         echo "observed: $row_counts" >&2
@@ -204,7 +204,7 @@ else
     fi
     page_summaries_sha256=$(awk '/^stemsbeamexpandpagesummary / { print }' \
         "$probe_output" | shasum -a 256 | awk '{print $1}')
-    expected_page_summaries_sha256=df1796b2e584556ef1fd51a56003bc2f5d95b3f4e12d412b8f71a62f63bec099
+    expected_page_summaries_sha256=1f56ff67826c44048798f177cad33282a16d5526ddc778c84c3d5c18ac009c4d
     if [ "$page_summaries_sha256" != "$expected_page_summaries_sha256" ]; then
         echo "unexpected full beam-expand page summaries" >&2
         echo "observed summary fingerprint: $page_summaries_sha256" >&2
@@ -212,15 +212,15 @@ else
     fi
     system_summaries_sha256=$(awk '/^stemsbeamexpandsystemsummary / { print }' \
         "$probe_output" | shasum -a 256 | awk '{print $1}')
-    expected_system_summaries_sha256=64ae52a8e25d35f99c7c7c10792fdd466480393da627768edd9cab7febbf4010
+    expected_system_summaries_sha256=fba00eb956f422775883a09ad50a1e2d5cd3bfa23e407cedff1712057458ef2a
     if [ "$system_summaries_sha256" != "$expected_system_summaries_sha256" ]; then
         echo "unexpected full beam-expand system summaries" >&2
         echo "observed summary fingerprint: $system_summaries_sha256" >&2
         exit 1
     fi
-    expected_body_sha256=ac0fcb9880dbf720c8b73e6baf02867d05e0f2d5a62f208f52e9fa7d5c764966
+    expected_body_sha256=ef06e0a81940b5de778571d3b12a65968b58a600e219578221f1da5f4b3f9f0e
     if [ "$body_sha256:$body_lines:$body_bytes" != \
-         "$expected_body_sha256:120646:104048204" ]; then
+         "$expected_body_sha256:120705:105923555" ]; then
         echo "unexpected full beam-expand body fingerprint" >&2
         echo "observed: $body_sha256:$body_lines:$body_bytes" >&2
         exit 1

@@ -161,13 +161,13 @@ row_count=$(wc -l < "$tmp_dir/body" | tr -d ' ')
 if [ "$row_count" -ne 9 ] || \
         ! grep -Fq 'stemsheadclinkfrontier zizi.png#1 system 2 headOrder 23 headX 94 headSig 61 headInterId 1183' "$tmp_dir/body" || \
         ! grep -Fq 'cAlias h:94:LEFT:BOTTOM' "$tmp_dir/body" || \
-        ! grep -Fq 'lastIndex 1 maxIndex 2 relations 2' "$tmp_dir/body" || \
-        ! grep -Fq 'glyphs 1 selected [glyph:245:active:id=245:g:1940:913:4:57:' "$tmp_dir/body" || \
-        ! grep -Fq 'stemsheadclinkresult headOrder 23 allocatorBefore 1723 allocatorAfter 1724' "$tmp_dir/body" || \
-        ! grep -Fq 'id1724:org.audiveris.omr.sig.inter.StemInter:shape=STEM:grade=0x1.6591e13343564p-1/3fe6591e13343564:bounds=1940:913:4:57' "$tmp_dir/body" || \
-        ! grep -Fq 'sourceId1183:targetId1724:org.audiveris.omr.sig.relation.HeadStemRelation:manual=false:grade=0x1.ffffffffffefcp-1/3feffffffffffefc' "$tmp_dir/body" || \
-        ! grep -Fq 'sourceId1191:targetId1724:org.audiveris.omr.sig.relation.HeadStemRelation:manual=false:grade=0x1.d7a5f9d83ce32p-2/3fdd7a5f9d83ce32' "$tmp_dir/body" || \
+        ! grep -Fq 'lastIndex -1 maxIndex 2 relations 2' "$tmp_dir/body" || \
+        ! grep -Fq 'glyphs 2 selected [glyph:1448:active:id=1448:g:1951:940:3:12:' "$tmp_dir/body" || \
+        ! grep -Fq 'glyph:245:active:id=245:g:1940:913:4:57:' "$tmp_dir/body" || \
+        ! grep -Fq 'candidate g:1940:913:14:57:' "$tmp_dir/body" || \
+        ! grep -Fq 'stemsheadclinkresult headOrder 23 allocatorBefore 1723 allocatorAfter 1723 registeredGlyphs - addedVertices - addedEdges - addedSystemStems -' "$tmp_dir/body" || \
         ! grep -Fq 'stemsheadphasecontinue zizi.png#1 system 2 headOrder 23 headX 94 headSig 61 headInterId 1183' "$tmp_dir/body" || \
+        ! grep -Fq 'closureWrites [x93:sig60:LEFT:false->true,x93:sig60:RIGHT:false->true] closedValueChanges 2' "$tmp_dir/body" || \
         ! grep -Fq 'nextHeadOrder 24 nextHeadX 86 nextHeadSig 94 nextHeadInterId 1253' "$tmp_dir/body"; then
     echo "Zizi system-2 order-23 Java contract drifted" >&2
     cat "$tmp_dir/body" >&2
@@ -191,8 +191,8 @@ if [ "$input_sha" != "f6c613b3a60423dadde60d5e61ee7c1a641eef71c9fc6b6e8bdf5fab4c
         [ "$fragment_sha" != "4f27146b667a76b23e38607b8669ae78edeb73af78cad818ce8a95cedf54300c" ] || \
         [ "$glyph_index_sha" != "31f25c33d8f5fd5d8fc23fad69c81d7758596925922c932d71b41b85e2abccb2" ] || \
         [ "$init_sha" != "46241f0adbc0ef8746240567b2b54d09ffad062962e07f4deee9c745e6b43d97" ] || \
-        [ "$base_runner_sha" != "de07f1e244641a2f9f41379b871595201b5158428e28d0f1701927b7221b7f90" ] || \
-        [ "$base_fixture_sha" != "0970b0dafe3a456d30e72b55a2716205e06caa4a93367e9390f00263139117f6" ]; then
+        [ "$base_runner_sha" != "3522c1cc1139b07988d03c897a363c7a5146e9997c59b48d7fc045c14ff4e586" ] || \
+        [ "$base_fixture_sha" != "6cb0d6892e62c46b29c3aef267fec7780ff917ae68da79e64e3dc83fc1a16303" ]; then
     echo "Zizi source or Boundary-184 predecessor drifted" >&2
     exit 1
 fi
@@ -202,6 +202,6 @@ fi
     echo '# schema: stems-head-phase-zizi-system2-order23-v1'
     cat "$tmp_dir/body"
     printf '%s\n' \
-        "stemsheadzizisystem2order23summary schema stems-head-phase-zizi-system2-order23-v1 page zizi.png#1 system 2 rows $row_count inputSha256 $input_sha baseProbeSourceSha256 $base_probe_sha fragmentSourceSha256 $fragment_sha glyphIndexSourceSha256 $glyph_index_sha retainedGlyphOverlaySha256 $overlay_sha ziziSystem2InitSha256 $init_sha baseSystem1Order34RunnerSha256 $base_runner_sha baseSystem1Order34FixtureSha256 $base_fixture_sha probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha freshRuns 2 freshRunsByteIdentical true nativeScope ZiziSystem2Order23CrossedHeadStumpBeforeChunkRejection javaEvidence ReturnedBeforeTwentyFifthHead"
+        "stemsheadzizisystem2order23summary schema stems-head-phase-zizi-system2-order23-v1 page zizi.png#1 system 2 rows $row_count inputSha256 $input_sha baseProbeSourceSha256 $base_probe_sha fragmentSourceSha256 $fragment_sha glyphIndexSourceSha256 $glyph_index_sha retainedGlyphOverlaySha256 $overlay_sha ziziSystem2InitSha256 $init_sha baseSystem1Order34RunnerSha256 $base_runner_sha baseSystem1Order34FixtureSha256 $base_fixture_sha probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha freshRuns 2 freshRunsByteIdentical true nativeScope ZiziSystem2Order23CompoundChunkRejectionAndExistingStemClosure javaEvidence ReturnedBeforeTwentyFifthHead"
 } > "$out"
 echo "wrote $out"

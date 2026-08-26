@@ -101,8 +101,8 @@ base_retarget_transform="$script_dir/stems-head-phase-two-cucaracha-system2-orde
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
 base_retarget_transform_sha=$(shasum -a 256 "$base_retarget_transform" | awk '{print $1}')
-if [ "$base_runner_sha" != "e862cb9e24ca33a0f9381b1990b25a3a59c607337b60720930871b93936e5b7d" ] || \
-        [ "$base_fixture_sha" != "5290a3261024d312098f1671c536df2bf2e89721e9b6713574c25d95107a58b5" ] || \
+if [ "$base_runner_sha" != "9429f19526bb11a328010ac26492b69752e8a04867bdbee849a072d4edfe819b" ] || \
+        [ "$base_fixture_sha" != "91dfeb0bca61fe69edc32d57b26ef98ebe799afce225f364126cc9019f57c04a" ] || \
         [ "$base_retarget_transform_sha" != "3f696415a4450338b60c29d343aaccd7ba88772868abaf2deac3ea1c46272cbf" ]; then
     echo "Cucaracha system-2 queue-9 strict predecessor drifted" >&2
     exit 1

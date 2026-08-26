@@ -45,6 +45,15 @@ The first non-empty real Chopin gate now publishes stable connected
 head/stem/beam/group/aggregate IDs and exact endpoint metadata: one cue beam,
 one cue group, and four BeamStem relations survive to the terminal SIG.
 
+The transitive `StemBuilder` item-order fix changes Java's downstream STEMS
+frontiers, so every affected oracle in the eight-page corpus has been
+regenerated from the frozen JDK rather than edited by assumption. That refresh
+exposed and fixed one generic Rust state transition: when a rejected head
+candidate already has its opposite side linked, Rust now closes every head
+sharing the prelinked stem and continues the phase-one queue, matching Java.
+The complete 35-case sibling-link gate and the broader focused STEMS suite pass
+against the refreshed fixtures.
+
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
 HEADERS, STEM_SEEDS, BEAMS, LEDGERS, HEADS, STEMS, REDUCTION, or CUE_BEAMS, and the viewer can select any

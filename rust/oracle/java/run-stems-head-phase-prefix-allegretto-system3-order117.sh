@@ -237,8 +237,9 @@ grep '^stemshead' "$tmp_dir/pass1" > "$rows"
 if ! grep -q '^stemsheadclinkfrontier allegretto.png#1 system 3 headOrder 53 headX 107 headSig 80 headInterId 1836 cAlias h:107:RIGHT:TOP .*lastIndex 3 maxIndex 3 relations 4 .*existingStem 2398 .*terminal ReadyForHeadCreateStem$' "$rows" || \
         ! grep -q '^stemsheadclinkresult headOrder 53 allocatorBefore 2400 allocatorAfter 2400 registeredGlyphs - addedVertices - addedEdges \[.*sourceId1810:targetId2398:.*sourceId1818:targetId2398:.*sourceId1836:targetId2394:.*sourceId1836:targetId2398:.*\] addedSystemStems - .*terminal ReturnedHeadCLinkTransaction$' "$rows" || \
         ! grep -q '^stemsheadphasecontinue allegretto.png#1 system 3 headOrder 53 headX 107 headSig 80 headInterId 1836 .*decisions \[LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=true:bottom=true:branch=Both\] incident - returned true sidesAfter \[LEFT:true:false,RIGHT:true:false\].*sigEdgesBefore 573 sigEdgesAfter 577 .*nextHeadOrder 54 nextHeadX 26 nextHeadSig 56 ' "$rows" || \
-        ! grep -q '^stemsheadphasecontinue allegretto.png#1 system 3 headOrder 117 headX 86 headSig 18 headInterId 1711 .*sidesBefore \[LEFT:true:true,RIGHT:false:true\] decisions \[LEFT:SkipAlreadyLinked,RIGHT:SkipClosed\] incident \[stem2368:headSideLEFT:heads\[x84:sig27:id1731:sideLEFT,x85:sig28:id1733:sideLEFT,x86:sig18:id1711:sideLEFT\]\] returned true sidesAfter \[LEFT:true:true,RIGHT:false:true\] undefs \[\] closureWrites \[x84:sig27:LEFT:true->true,x84:sig27:RIGHT:true->true,x85:sig28:LEFT:true->true,x85:sig28:RIGHT:true->true\] closedValueChanges 0 unlinkedCount 0 sigVerticesBefore 649 sigVerticesAfter 649 sigEdgesBefore 593 sigEdgesAfter 593 systemStemsBefore 52 systemStemsAfter 52 relationStateHashBefore 63240815cfaf84ffc2ec724c7da0de08d085ca149d6f754e79266e1fedfe6ceb relationStateHashAfter 63240815cfaf84ffc2ec724c7da0de08d085ca149d6f754e79266e1fedfe6ceb linkerStateHashBefore 8c951e957d7a414e47facb5e9217390f4d9c4de875467ee5b1bec1dcbdcfd3ac linkerStateHashAfter 8c951e957d7a414e47facb5e9217390f4d9c4de875467ee5b1bec1dcbdcfd3ac terminal ReturnedAfterLastHead$' "$rows"; then
+        ! grep -q '^stemsheadphasecontinue allegretto.png#1 system 3 headOrder 117 headX 86 headSig 18 headInterId 1711 .*sidesBefore \[LEFT:true:true,RIGHT:false:true\] decisions \[LEFT:SkipAlreadyLinked,RIGHT:SkipClosed\] incident \[stem2368:headSideLEFT:heads\[x84:sig27:id1731:sideLEFT,x85:sig28:id1733:sideLEFT,x86:sig18:id1711:sideLEFT\]\] returned true sidesAfter \[LEFT:true:true,RIGHT:false:true\] undefs \[\] closureWrites \[x84:sig27:LEFT:true->true,x84:sig27:RIGHT:true->true,x85:sig28:LEFT:true->true,x85:sig28:RIGHT:true->true\] closedValueChanges 0 unlinkedCount 0 sigVerticesBefore 649 sigVerticesAfter 649 sigEdgesBefore 593 sigEdgesAfter 593 systemStemsBefore 52 systemStemsAfter 52 relationStateHashBefore c854fb010d04e2461870c768a51eab96a9df7c23aa27e865dcb3580ca78ee93d relationStateHashAfter c854fb010d04e2461870c768a51eab96a9df7c23aa27e865dcb3580ca78ee93d linkerStateHashBefore 8c951e957d7a414e47facb5e9217390f4d9c4de875467ee5b1bec1dcbdcfd3ac linkerStateHashAfter 8c951e957d7a414e47facb5e9217390f4d9c4de875467ee5b1bec1dcbdcfd3ac terminal ReturnedAfterLastHead$' "$rows"; then
     echo "Allegretto system-3 queue-117 audit contract differs" >&2
+    cat "$rows" >&2
     exit 1
 fi
 base_probe_sha=$(shasum -a 256 "$script_dir/StemsBeamSidesLoopProbe.java" | awk '{print $1}')
@@ -259,8 +260,8 @@ if [ "$base_probe_sha" != "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d3
         [ "$glyph_index_sha" != "31f25c33d8f5fd5d8fc23fad69c81d7758596925922c932d71b41b85e2abccb2" ] || \
         [ "$overlay_sha" != "f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4" ] || \
         [ "$init_sha" != "c801a89d512ffc1751c178e41c6dee30a17d559bfe1b6b1822e6bc050f8b91b9" ] || \
-        [ "$base_runner_sha" != "2e2c10929798d25ea10ec0b5912288db59e5feb71f806c784fd60b445fbe89f3" ] || \
-        [ "$base_fixture_sha" != "cc6b2240cc6f6fa13fa294ef17eb01cae65afc8189fba4e4a244d99d76891a8e" ]; then
+        [ "$base_runner_sha" != "3bd7b06bbc829582d6ab226f5f9b2662bf4276d294668d7b19c09d1f05d14927" ] || \
+        [ "$base_fixture_sha" != "677c3e9f60e2ba422fa13f5067bc457df7db4d885440236ea8d35e1661be7d70" ]; then
     echo "Allegretto system-3 queue-117 provenance drifted" >&2
     exit 1
 fi

@@ -61,9 +61,9 @@ case "$page_key" in
     cucaracha)
         page_file=cucaracha.png
         expected_row_counts=1:3:25:7:2:2:0:3:0:3:1
-        expected_page_summary_sha256=e248edde26dbe1e9a1f925fb11fbb029282dc81b871cd1192dcfc0b4e947a15d
-        expected_frontier_digest=773b49280bcaabcd304474be4fb50fd364d7e0ad31c3f3a57da3fbfaa9d2d6b4
-        expected_body_sha256=3fd195d8b9c133bddf4e59cea3d6110b1acd2bbc57509b9fe26c942555ea6192
+        expected_page_summary_sha256=246c0871752f52680831748fa055b58dfb3f6e9276f2ded997919088df1754cd
+        expected_frontier_digest=6594be77a1718dd95af086c5cb87c1ae7f77fb006c7fe707755cbc43913d6754
+        expected_body_sha256=c5196008a5f1ef6b4b12ac3e06bc9bbca3900b63a0cd7d11d52db3057c072db9
         expected_body_lines=52
         expected_body_bytes=21444
         ;;

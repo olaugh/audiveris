@@ -249,22 +249,22 @@ const MANIFEST_PATH: &str = "rust/oracle/stems-beam-create-stem-manifest.txt";
 const PROBE_PATH: &str = "rust/oracle/java/StemsBeamCreateStemProbe.java";
 const RUNNER_PATH: &str = "rust/oracle/java/run-stems-beam-create-stem.sh";
 const EXPECTED_MANIFEST_SHA256: &str =
-    "b7e6fe6e7dc2f5eeba106133c930249f20e2c75d764704252289724bbe28c3e0";
+    "00cfde049641d291bde6d5e2266225298af2a51656076ec87987584ba5a43682";
 const EXPECTED_PROBE_SHA256: &str =
     "36fecabe18d7713c823ce6990dae717e78997354a9ae0b142cba55f7d75004f3";
 const EXPECTED_RUNNER_SHA256: &str =
     "6d95ff62d0acb502d531d6fb2aea0382fcb9dcb8fdd871fb7b0e2fba2ffb1de8";
 const EXPECTED_CORPUS_BODY_SHA256: &str =
-    "0c8c51e1c170a0dc3ec7e5910e6dca63a82f7d8fe6699b585c9556f183b359dc";
+    "8c086bbb69a541f56a5f8957918d7a4672da8ab6c8ebf0fe06c7a9f9c8f885e4";
 const EXPECTED_CORPUS_BODY_LINES: usize = 261;
-const EXPECTED_CORPUS_BODY_BYTES: usize = 153_517;
+const EXPECTED_CORPUS_BODY_BYTES: usize = 153_727;
 const EXPECTED_CORPUS_ROW_COUNTS: [usize; 10] = [8, 30, 30, 30, 30, 30, 30, 30, 30, 8];
 const EXPECTED_MANIFEST_BODY_SHA256: &str =
-    "67d983b056548118015f5b7d18a9e2772860e08e0d2ab076118b25a9678c40af";
+    "a41b31c00968735ef061154fe79ee1bcaf1bc540bcbfa61a22f88daa37f8e80d";
 const EXPECTED_MANIFEST_BODY_LINES: usize = 9;
 const EXPECTED_MANIFEST_BODY_BYTES: usize = 5_691;
 const EXPECTED_CHULA_FIXTURE_SHA256: &str =
-    "10ada930287be952dcb31666b7af0e77a30f2c513ca69698cc53ab00b206ef6c";
+    "22218928371598979f3cd063d372aae37e2ae426623d33fcb216ebc9315eebd2";
 const MANIFEST_ENTRY_FIELDS: &[&str] = &[
     "ordinal",
     "page",
@@ -3248,7 +3248,7 @@ fn native_beam_create_stem_matches_java_corpus_exactly() {
     assert_eq!(transaction_count, 30);
     assert_eq!(
         (compound_count, singleton_count, changed_line_count),
-        (15, 15, 14)
+        (16, 14, 14)
     );
     assert_eq!(corpus_body.len(), manifest.corpus_body_bytes);
     assert_eq!(line_count(&corpus_body), manifest.corpus_body_lines);

@@ -37,10 +37,10 @@ const CORPUS_PAGES: [&str; 8] = [
 const FLAG_MANIFEST_SCHEMA: &str = "# schema: stems-beam-vlink-b-linker-flag-manifest-v1";
 const FLAG_MANIFEST_PATH: &str = "rust/oracle/stems-beam-vlink-b-linker-flag-manifest.txt";
 const FLAG_MANIFEST_SHA256: &str =
-    "c7032ac4871188ef0cf48ac63d99996e78a0e163bf1470d3be84c5e9b10d1d92";
+    "446dae1a985c496be117f4e75cb29f27d656c2cd2f2e5dd844dc4980a141da7a";
 const FLAG_MANIFEST_BODY_SHA256: &str =
-    "3f332e7751d5de73e296294ccc6882ff6a578d0328b8c0d717c96666ffbb3e4d";
-const FLAG_CORPUS_SHA256: &str = "6125665f38d894f6b05a24651f56f0a38c01e2acc2a7d18167a4175d5ae81c34";
+    "0bd9b12393ab0624e9a78cf97dcf40bcc7900284bbfb8bc3db320e823257c6c7";
+const FLAG_CORPUS_SHA256: &str = "182bd44d7173cd69a2ece63bf4fa06102f5bd8dc95013171f0b5994e3b65601b";
 const FLAG_CORPUS_LINES: usize = 4_562;
 const FLAG_CORPUS_BYTES: usize = 2_535_981;
 const FLAG_SPLIT_LINES: usize = 4_634;
@@ -222,7 +222,7 @@ const BASE_APPLY_MANIFEST: &str = "rust/oracle/stems-beam-vlink-base-apply-manif
 const BASE_APPLY_GATE_SOURCE: &str =
     "rust/crates/audiveris-omr/tests/native_stems_beam_vlink_base_apply.rs";
 const BASE_APPLY_GATE_SOURCE_SHA256: &str =
-    "9969c862f83dec954e15d37429d07d99a720dec4a7b72f8e6162467796d3e6b3";
+    "e5b4fb1cddeb33ff22a3a66a3c25377254955172ef10393ecfbddd5d1f6e3e34";
 const JGRAPHT_CORE_VERSION: &str = "1.5.2";
 const JGRAPHT_CORE_JAR: &str = "jgrapht-core-1.5.2.jar";
 const JGRAPHT_CORE_JAR_SHA256: &str =
@@ -249,7 +249,7 @@ const V_LINKER_CLASS_SHA256: &str =
 const STEM_LINKER_CLASS_SHA256: &str =
     "74244246274f00ad582c122b3154a60d66527a3db36897abe435ec28f31c1438";
 const EFFECTIVE_CLASSPATH_SHA256: &str =
-    "fd4e52c2275675a53459dff2b2e2d89636f3c5fb6ab5a1f7be65f74157663fb3";
+    "f74d8c490d6d50c7b51d91f66d864c223b1d9213331597e78723f4697ca88320";
 const JGRAPHT_CORE_GRADLE_DECLARATION: &str = "\"org.jgrapht:jgrapht-core:1.5.2\",";
 const SOURCE_PATHS: &[(&str, &str)] = &[
     (

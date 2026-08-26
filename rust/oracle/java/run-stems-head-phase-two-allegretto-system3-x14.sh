@@ -65,9 +65,9 @@ if ! cmp -s "$tmp_dir/rows1" "$tmp_dir/rows2"; then
 fi
 
 if [ "$(wc -l < "$tmp_dir/rows1" | tr -d ' ')" -ne 3 ] || \
-        ! grep -q '^stemsheadphase2x14frontier headInterId 1777 corner BR hSide RIGHT vSide BOTTOM .*lastIndex 2 maxIndex 2 relations 2 .*glyphs 2 .*existingStem id3148:' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2x14result headInterId 1777 .*reusedExisting true .*verticesBefore 267 verticesAfter 267 edgesBefore 317 edgesAfter 318 allocatorBefore 3170 allocatorAfter 3170 ' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2retry page allegretto.png#1 system 3 queueIndex 1 headX 14 headSig 50 headInterId 1777 .*returned true .*sideChanges \[x14:sig50:RIGHT:false:true->true:true\] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 317 sigEdgesAfter 318 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3170$' "$tmp_dir/rows1"; then
+        ! grep -q '^stemsheadphase2x14frontier headInterId 1777 corner BR hSide RIGHT vSide BOTTOM .*lastIndex 2 maxIndex 2 relations 2 .*glyphs 2 .*existingStem id3149:' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2x14result headInterId 1777 .*reusedExisting true .*verticesBefore 267 verticesAfter 267 edgesBefore 317 edgesAfter 318 allocatorBefore 3171 allocatorAfter 3171 ' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2retry page allegretto.png#1 system 3 queueIndex 1 headX 14 headSig 50 headInterId 1777 .*returned true .*sideChanges \[x14:sig50:RIGHT:false:true->true:true\] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 317 sigEdgesAfter 318 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3171 allocatorAfter 3171$' "$tmp_dir/rows1"; then
     echo "Allegretto x14 phase-two Java contract differs" >&2
     cat "$tmp_dir/rows1" >&2
     exit 1
@@ -77,8 +77,8 @@ base_runner="$script_dir/run-stems-head-phase-two-allegretto.sh"
 base_fixture="$repo_root/rust/oracle/stems-head-phase-two-allegretto.txt"
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
-if [ "$base_runner_sha" != "9196aa6841aba9d234c4a82d21185c4ed1367b0329fcfca9930c14f0c6a15331" ] || \
-        [ "$base_fixture_sha" != "242260a9fe7b873ca8597840ea7253d45d6518742e924496ccc4a14bb2a8c41c" ]; then
+if [ "$base_runner_sha" != "fb25fd337099679a486f2d1195dcee13a6f3cdbd93b69132b3177fd7e95c51dd" ] || \
+        [ "$base_fixture_sha" != "56e70841b5b69a75d547143af08d661317778f4b0a4c67c56cce928eb6aaec29" ]; then
     echo "Allegretto x14 strict phase-two predecessor drifted" >&2
     exit 1
 fi

@@ -84,8 +84,8 @@ base_runner="$script_dir/run-stems-head-phase-cucaracha-system2-order56.sh"
 base_fixture="$repo_root/rust/oracle/stems-head-phase-cucaracha-system2-order56.txt"
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
-if [ "$base_runner_sha" != "08eb22aa38c46490765215c7a1a3b45c6528afb1d3db599fb9a38d69226e6340" ] || \
-        [ "$base_fixture_sha" != "51d9d82641a79a98bc1523cc61237bce3994fa2ba9622710ad009aeb0862a73b" ]; then
+if [ "$base_runner_sha" != "c8cce481193b34d23f19f0d0408fb263a286cadb05a6031699adc1e56e0bbaed" ] || \
+        [ "$base_fixture_sha" != "7869c3f8348d48db71a41173c1fe5de71a0a14890f1d838a5b8c452cbafbef03" ]; then
     echo "Cucaracha queue-6 strict predecessor drifted" >&2
     exit 1
 fi

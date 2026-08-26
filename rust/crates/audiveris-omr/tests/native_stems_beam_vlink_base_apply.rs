@@ -142,19 +142,19 @@ const SYSTEM_ONE_SUPPLEMENTAL_CASES: &[(&str, &str)] = &[
 // Frozen only after all eight pages produced two byte-identical fresh serial
 // passes and the normalized split corpus was independently reconstructed.
 const BASE_APPLY_MANIFEST_SHA256: &str =
-    "5da20f701d38bf9b81c6000ed4e8aba4fadd285c85d81753ef4a862f0a4875bc";
+    "e0d932733c52577d2d112c7aa2a5001e6cd0571be17726815e60aa7919720c80";
 const BASE_APPLY_MANIFEST_BODY_SHA256: &str =
-    "8bbd189d9c7e82702ce8513347841cfe5aff2f96f8b39bf9dd07e05bea4e6b35";
+    "329f17f1a644b0e868bc4470bfe064fda8dfc6ba40d5830d7ca31c6e214e6c87";
 const BASE_APPLY_CORPUS_BODY_SHA256: &str =
-    "ece76c038ef1b2017d2f356dd6ead59379376ffc5ab0306e8c5e8c34a9471e53";
+    "215a154c416fe0e38616564c22e974236c3ed801f74bd3fb469f523a5acf91e0";
 const BASE_APPLY_MANIFEST_LINES: usize = 10;
 const BASE_APPLY_MANIFEST_BYTES: usize = 20_812;
 const BASE_APPLY_MANIFEST_BODY_LINES: usize = 9;
 const BASE_APPLY_MANIFEST_BODY_BYTES: usize = 16_479;
 const BASE_APPLY_CORPUS_BODY_LINES: usize = 1_314;
-const BASE_APPLY_CORPUS_BODY_BYTES: usize = 1_185_901;
+const BASE_APPLY_CORPUS_BODY_BYTES: usize = 1_186_005;
 const BASE_APPLY_SPLIT_FIXTURE_LINES: usize = 1_386;
-const BASE_APPLY_SPLIT_FIXTURE_BYTES: usize = 1_227_749;
+const BASE_APPLY_SPLIT_FIXTURE_BYTES: usize = 1_227_853;
 const JGRAPHT_CORE_VERSION: &str = "1.5.2";
 const JGRAPHT_CORE_JAR: &str = "jgrapht-core-1.5.2.jar";
 const JGRAPHT_CORE_JAR_SHA256: &str =

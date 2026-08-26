@@ -158,10 +158,11 @@ fi
 if [ "$(grep -c '^stemsheadphase1audit ' "$tmp_dir/rows1")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadphase2page ' "$tmp_dir/rows1")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadphase2baseline ' "$tmp_dir/rows1")" -ne 3 ] || \
-        [ "$(grep -c '^stemsheadphase2retry ' "$tmp_dir/rows1")" -ne 25 ] || \
-        ! grep -q '^stemsheadphase1audit page allegretto.png#1 system 3 headOrder 100 headX 0 headSig 19 returned true glyph 369:1595:2:48 weight 63 stemId 3170 grade 3fe49d64653090d5 bounds 368:1595:3:48 median 40771723de22d21c:4098ec0000000000:40771f7fd38ffa01:4099ac0000000000 width 3ff5000000000000 rightBottomStump 369:1595:2:48 sigVerticesBefore 266 sigVerticesAfter 267 sigEdgesBefore 315 sigEdgesAfter 316 systemStemsBefore 51 systemStemsAfter 52 allocatorBefore 3169 allocatorAfter 3170$' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2baseline page allegretto.png#1 system 3 heads 118 queueSize 5 queue \[x112:sig68:id1812,x14:sig50:id1777,x13:sig0:id1675,x56:sig100:id1876,x113:sig75:id1826\] sigVertices 267 sigEdges 317 systemStems 52 allocator 3170$' "$tmp_dir/rows1"; then
+        [ "$(grep -c '^stemsheadphase2retry ' "$tmp_dir/rows1")" -ne 24 ] || \
+        ! grep -q '^stemsheadphase1audit page allegretto.png#1 system 3 headOrder 100 headX 0 headSig 19 returned true glyph 369:1595:2:48 weight 63 stemId 3171 grade 3fe49d64653090d5 bounds 368:1595:3:48 median 40771723de22d21c:4098ec0000000000:40771f7fd38ffa01:4099ac0000000000 width 3ff5000000000000 rightBottomStump 369:1595:2:48 sigVerticesBefore 266 sigVerticesAfter 267 sigEdgesBefore 315 sigEdgesAfter 316 systemStemsBefore 51 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3171$' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2baseline page allegretto.png#1 system 3 heads 118 queueSize 5 queue \[x112:sig68:id1812,x14:sig50:id1777,x13:sig0:id1675,x56:sig100:id1876,x113:sig75:id1826\] sigVertices 267 sigEdges 317 systemStems 52 allocator 3171$' "$tmp_dir/rows1"; then
     echo "Allegretto head-phase Java contract differs" >&2
+    cat "$tmp_dir/rows1" >&2
     exit 1
 fi
 

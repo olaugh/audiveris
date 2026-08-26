@@ -78,8 +78,8 @@ base_runner="$script_dir/run-stems-head-phase-carmen-system5-order62.sh"
 base_fixture="$repo_root/rust/oracle/stems-head-phase-carmen-system5-order62.txt"
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
-if [ "$base_runner_sha" != "9cdf28ad67460f64ab4273020e177fa82626d8eeb781a0d2b26f4fb4ad48a423" ] || \
-        [ "$base_fixture_sha" != "6ee7e36c9294bcb861c128f11b25072ba5f7f84dec3f61a00b4df8d282054358" ]; then
+if [ "$base_runner_sha" != "c85a08ed03abe174bf8d2f3d6f478c59ac46efa15c4a9192411da748767cdcc0" ] || \
+        [ "$base_fixture_sha" != "8af051e700bc0ef07ccf83f4037f0c358de67038073d8335676a050c166bb38f" ]; then
     echo "Carmen phase-two strict phase-one predecessor drifted" >&2
     exit 1
 fi

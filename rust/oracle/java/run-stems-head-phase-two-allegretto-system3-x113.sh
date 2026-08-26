@@ -65,9 +65,9 @@ if ! cmp -s "$tmp_dir/rows1" "$tmp_dir/rows2"; then
 fi
 
 if [ "$(wc -l < "$tmp_dir/rows1" | tr -d ' ')" -ne 3 ] || \
-        ! grep -q '^stemsheadphase2x113frontier headInterId 1826 corner TR hSide RIGHT vSide TOP .*lastIndex 1 maxIndex 1 relations 2 .*glyphs 1 selected \[id397:2198:1806:4:107:weight264\] .*existingStem id3165:' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2x113result headInterId 1826 linkedStem id3165:.*reusedExisting true applied grade3fea63f9c75cf906:dx3fb0115caff3c30c:.*consistency3ffd1d9afe422d47 .*verticesBefore 267 verticesAfter 267 edgesBefore 319 edgesAfter 320 allocatorBefore 3170 allocatorAfter 3170 ' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2retry page allegretto.png#1 system 3 queueIndex 4 headX 113 headSig 75 headInterId 1826 .*returned true .*sideChanges \[x113:sig75:RIGHT:false:true->true:true\] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 319 sigEdgesAfter 320 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3170$' "$tmp_dir/rows1"; then
+        ! grep -q '^stemsheadphase2x113frontier headInterId 1826 corner TR hSide RIGHT vSide TOP .*lastIndex 1 maxIndex 1 relations 2 .*glyphs 1 selected \[id397:2198:1806:4:107:weight264\] .*existingStem id3166:' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2x113result headInterId 1826 linkedStem id3166:.*reusedExisting true applied grade3fea63f9c75cf906:dx3fb0115caff3c30c:.*consistency3ffd1d9afe422d47 .*verticesBefore 267 verticesAfter 267 edgesBefore 319 edgesAfter 320 allocatorBefore 3171 allocatorAfter 3171 ' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2retry page allegretto.png#1 system 3 queueIndex 4 headX 113 headSig 75 headInterId 1826 .*returned true .*sideChanges \[x113:sig75:RIGHT:false:true->true:true\] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 319 sigEdgesAfter 320 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3171 allocatorAfter 3171$' "$tmp_dir/rows1"; then
     echo "Allegretto x113 phase-two Java contract differs" >&2
     cat "$tmp_dir/rows1" >&2
     exit 1
@@ -77,8 +77,8 @@ base_runner="$script_dir/run-stems-head-phase-two-allegretto-system3-x13.sh"
 base_fixture="$repo_root/rust/oracle/stems-head-phase-two-allegretto-system3-x13.txt"
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
-if [ "$base_runner_sha" != "1bdfd26b350170a8f4d17290ea6f336f544b6ee8ee9dc1566bcf00654cd59ac2" ] || \
-        [ "$base_fixture_sha" != "4ebbaa69132cdee430d38b9b27622ae1e64e0d12554ead8e6a782ab8dcdbde3f" ]; then
+if [ "$base_runner_sha" != "42bf7bc8f563fe6c0220a6ee4caa948c54a9407400bffd887dc232bdd23e6257" ] || \
+        [ "$base_fixture_sha" != "22f71a5ec119c409ec1ba7eec1e8784dea30b3ab5707a31f832eeb2d143ecacc" ]; then
     echo "Allegretto x113 strict phase-two predecessor drifted" >&2
     exit 1
 fi

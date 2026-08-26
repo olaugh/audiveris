@@ -178,7 +178,7 @@ if [ "$row_count" -ne 4 ] || \
         ! grep -Fq 'existingGlyph glyph:1838 existingActive true existingStem - lineChanged false' "$tmp_dir/body" || \
         ! grep -Fq 'stemsheadclinkresult headOrder 56 allocatorBefore 2207 allocatorAfter 2207 registeredGlyphs - addedVertices - addedEdges - addedSystemStems -' "$tmp_dir/body" || \
         ! grep -Fq 'sigHashBefore 922233cc69aa82ebb7cd15a9073e86c41cb21e270125564a60b9baab771b096b sigHashAfter 922233cc69aa82ebb7cd15a9073e86c41cb21e270125564a60b9baab771b096b' "$tmp_dir/body" || \
-        ! grep -Fq 'relationStateHashBefore bc17a70e8d4204b060162783c88a8ddfa5daa635d3db313bb809e85de244b113 relationStateHashAfter bc17a70e8d4204b060162783c88a8ddfa5daa635d3db313bb809e85de244b113' "$tmp_dir/body" || \
+        ! grep -Fq 'relationStateHashBefore a4e8d73472206589f1b13094d462a5f44100e0d77637dd24b54c8cde610c064e relationStateHashAfter a4e8d73472206589f1b13094d462a5f44100e0d77637dd24b54c8cde610c064e' "$tmp_dir/body" || \
         ! grep -Fq 'stemsheadphasecontinue cucaracha.png#1 system 2 headOrder 56 headX 56 headSig 78 headInterId 1388' "$tmp_dir/body" || \
         ! grep -Fq 'decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=true:branch=BottomOnly]' "$tmp_dir/body" || \
         ! grep -Fq 'returned false sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] closureWrites - closedValueChanges 0 unlinkedCount 0' "$tmp_dir/body" || \
@@ -219,8 +219,10 @@ if [ "$input_sha" != "ab54d23f0fdcb17c2e5211db88692facae8cf99cd190d318174d7e3a8c
         [ "$fragment_sha" != "4f27146b667a76b23e38607b8669ae78edeb73af78cad818ce8a95cedf54300c" ] || \
         [ "$glyph_index_sha" != "31f25c33d8f5fd5d8fc23fad69c81d7758596925922c932d71b41b85e2abccb2" ] || \
         [ "$init_sha" != "4a66495632f0e1a650e57e260e15c7a6f68370fbbaf4bf900b27aa643a2f26e0" ] || \
-        [ "$predecessor_fixture_sha" != "e365077c7432b03f811987470a1f8c7b9666ffcea8135dd0b28b4e823cef0a1d" ]; then
+        [ "$predecessor_fixture_sha" != "958158ee16590069bb5a3e2c2549dc37a199703a3452638b35694a7d3f2259a6" ]; then
     echo "Cucaracha order-56 source or predecessor fixtures drifted" >&2
+    printf 'observed predecessorFixtureSetSha256 %s bodySha256 %s semanticSha256 %s\n' \
+        "$predecessor_fixture_sha" "$body_sha" "$semantic_sha" >&2
     exit 1
 fi
 {

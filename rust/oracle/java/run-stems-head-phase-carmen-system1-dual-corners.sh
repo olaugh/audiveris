@@ -78,8 +78,8 @@ if [ "$input_sha" != "249330d6558d410f64f550180d3a659dd3c9c340dcdcb5ae08e809c273
         [ "$stems_source_sha" != "26e95fa09905b39ea0dcae2b65a85b4e4fcb49b772c57f97f332a00c4dc8b9e7" ] || \
         [ "$probe_sha" != "9b5e9dbefbf400887f49feba934c573d851c67e65b3e43bfaabc86d6f2c36714" ] || \
         [ "$init_sha" != "e0ff89792bf75286317ef011e079f338696d29cc14918f4a3018307ba4ed9548" ] || \
-        [ "$base_runner_sha" != "33f2ce87e7c727156de4250410052b95dbd209590419c15bb2428be3edec8b9b" ] || \
-        [ "$base_fixture_sha" != "fb9797eb2039cf3f052f7bd7285a94b737a8771075406f772261deded352be9d" ]; then
+        [ "$base_runner_sha" != "e27ee7698499b6074866b3ff475632ca9620e6ac92f7d07dcd785c4ef6e8f431" ] || \
+        [ "$base_fixture_sha" != "958080b017b8132b3e545296d537f2728ff2609d809312c4a88e569767864629" ]; then
     echo "Carmen input, Java source, probe, init, or Boundary-185 predecessor drifted" >&2
     exit 1
 fi

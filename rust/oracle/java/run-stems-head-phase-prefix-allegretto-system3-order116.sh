@@ -233,8 +233,8 @@ if [ "$base_probe_sha" != "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d3
         [ "$glyph_index_sha" != "31f25c33d8f5fd5d8fc23fad69c81d7758596925922c932d71b41b85e2abccb2" ] || \
         [ "$overlay_sha" != "f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4" ] || \
         [ "$init_sha" != "c801a89d512ffc1751c178e41c6dee30a17d559bfe1b6b1822e6bc050f8b91b9" ] || \
-        [ "$base_runner_sha" != "b3c426db85a5c5402c7e8d5741e249c15905e0f2d8f4888d491ee9783982afa4" ] || \
-        [ "$base_fixture_sha" != "01bda66e6eecf7d46bdd21f3d2d4d8ec977deff9bc51f01b4a3291092680fca2" ]; then
+        [ "$base_runner_sha" != "bd18a245900ad5abcc36ff470c47529ed402f4131dfeb75f6f8a50f42714cd90" ] || \
+        [ "$base_fixture_sha" != "54d9e6b30d0725cbbd3c078c2937fd9f2b0a43c5d0403f91c7db9fa3b8d3fcfc" ]; then
     echo "Allegretto system-3 queue-116 provenance drifted" >&2
     exit 1
 fi

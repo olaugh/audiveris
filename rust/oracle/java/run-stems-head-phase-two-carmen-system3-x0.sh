@@ -71,9 +71,9 @@ if ! cmp -s "$tmp_dir/rows1" "$tmp_dir/rows2"; then
 fi
 
 if [ "$(wc -l < "$tmp_dir/rows1" | tr -d ' ')" -ne 3 ] || \
-        ! grep -q '^stemsheadphase2carmens3x0frontier headInterId 2405 corner BR hSide RIGHT vSide BOTTOM .*lastIndex 1 maxIndex 2 relations 1 .*glyphs 1 selected \[id531:298:1680:2:50:weight99\] .*existingStem id3984:glyphid531:298:1680:2:50:weight99:grade3fe59495bdb6bfc6:.* verticesBefore 279 edgesBefore 324 allocatorBefore 3985 ' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2carmens3x0result headInterId 2405 linkedStem id3949:glyphid495:304:1695:3:93:weight265:grade3fe91634207ae7b3:.*reusedExisting false applied grade3fefffffffffffe1:dxbce8618618618618:.*consistency3ff94e5e0a72f054 .*verticesBefore 279 verticesAfter 279 edgesBefore 324 edgesAfter 325 allocatorBefore 3985 allocatorAfter 3985 ' "$tmp_dir/rows1" || \
-        ! grep -q '^stemsheadphase2retry page carmen.png#1 system 3 queueIndex 3 headX 0 headSig 3 headInterId 2405 grade 3fca4063aab2cd80 append true .*returned true .*sideChanges \[x0:sig3:RIGHT:false:true->true:true\] sigVerticesBefore 279 sigVerticesAfter 279 sigEdgesBefore 324 sigEdgesAfter 325 systemStemsBefore 43 systemStemsAfter 43 allocatorBefore 3985 allocatorAfter 3985$' "$tmp_dir/rows1"; then
+        ! grep -q '^stemsheadphase2carmens3x0frontier headInterId 2405 corner BR hSide RIGHT vSide BOTTOM .*lastIndex 0 maxIndex 2 relations 1 .*glyphs 1 selected \[id531:298:1680:2:50:weight99\] .*existingStem id3984:glyphid531:298:1680:2:50:weight99:grade3fe59495bdb6bfc6:.* verticesBefore 279 edgesBefore 324 allocatorBefore 3985 ' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2carmens3x0result headInterId 2405 linkedStem id3984:glyphid531:298:1680:2:50:weight99:grade3fe59495bdb6bfc6:.*reusedExisting true applied grade3fefffffffffffe1:dxbce8618618618618:.*consistency3feb35fc845a8ece .*verticesBefore 279 verticesAfter 279 edgesBefore 324 edgesAfter 325 allocatorBefore 3985 allocatorAfter 3985 ' "$tmp_dir/rows1" || \
+        ! grep -q '^stemsheadphase2retry page carmen.png#1 system 3 queueIndex 3 headX 0 headSig 3 headInterId 2405 grade 3fca4063aab2cd80 append true .*returned true .*sideChanges \[x0:sig3:RIGHT:false:true->true:true,x2:sig2:LEFT:true:false->true:true,x2:sig2:RIGHT:false:false->false:true\] sigVerticesBefore 279 sigVerticesAfter 279 sigEdgesBefore 324 sigEdgesAfter 325 systemStemsBefore 43 systemStemsAfter 43 allocatorBefore 3985 allocatorAfter 3985$' "$tmp_dir/rows1"; then
     echo "Carmen system-3 x0 phase-two Java contract differs" >&2
     cat "$tmp_dir/rows1" >&2
     exit 1
@@ -83,8 +83,8 @@ base_runner="$script_dir/run-stems-head-phase-two-carmen-system3-x1.sh"
 base_fixture="$repo_root/rust/oracle/stems-head-phase-two-carmen-system3-x1.txt"
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
-if [ "$base_runner_sha" != "e0bf5408f12c652e530990c35bce21ca3ec64bd610d02139919198133dccb4f8" ] || \
-        [ "$base_fixture_sha" != "f9656d9bb2a917fbd059c58c0692803d8d8fd3c714ed95d3ac981d9e3604c8e0" ]; then
+if [ "$base_runner_sha" != "7ca5c2ee389c328bafbb88f3c560c75179cc1421211645d606264e20d380ac5c" ] || \
+        [ "$base_fixture_sha" != "bed8d9d4e8ca5a272f3ca3b26fbac36261ad1f1df344c83d178f5d36da7dcf66" ]; then
     echo "Carmen system-3 x0 strict phase-two predecessor drifted" >&2
     exit 1
 fi

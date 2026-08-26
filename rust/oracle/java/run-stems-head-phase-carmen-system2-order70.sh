@@ -205,8 +205,8 @@ if [ "$input_sha" != "249330d6558d410f64f550180d3a659dd3c9c340dcdcb5ae08e809c273
         [ "$fragment_sha" != "4f27146b667a76b23e38607b8669ae78edeb73af78cad818ce8a95cedf54300c" ] || \
         [ "$glyph_index_sha" != "31f25c33d8f5fd5d8fc23fad69c81d7758596925922c932d71b41b85e2abccb2" ] || \
         [ "$init_sha" != "cdd0f38b472bd6c29b90d389783e99b16b788578cdb6ab409632c612ad86c5f6" ] || \
-        [ "$base_runner_sha" != "070c3febcf34348fc8ce643c17d99757a7845daf4f1379e591a7922b1a0da1b9" ] || \
-        [ "$base_fixture_sha" != "28018b4010fc1a08a45569298b06f737164c86398a2e46f277bceb869fedf089" ]; then
+        [ "$base_runner_sha" != "e856b946cbb0495bd2d78339839b99544866b5f2de156764927bf9ed8dab7fe1" ] || \
+        [ "$base_fixture_sha" != "f70994fcfcf75cb2215e213dafdef944548671f0910787f007dcfd2099d5610e" ]; then
     echo "Carmen source or Boundary-186 predecessor drifted" >&2
     exit 1
 fi

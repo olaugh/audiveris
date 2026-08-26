@@ -72,8 +72,8 @@ base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
 body_sha=$(shasum -a 256 "$tmp_dir/row1" | awk '{print $1}')
 if [ "$input_sha" != "f6c613b3a60423dadde60d5e61ee7c1a641eef71c9fc6b6e8bdf5fab4c3c3e94" ] || \
         [ "$stems_source_sha" != "26e95fa09905b39ea0dcae2b65a85b4e4fcb49b772c57f97f332a00c4dc8b9e7" ] || \
-        [ "$base_runner_sha" != "abafa7d183ae151baa7ed4d8005257c562e0c49fb939fe931a7571994d70d890" ] || \
-        [ "$base_fixture_sha" != "cfb9e6011ed29aa30e6e90db6eeae931a3a6533d7339d80519a5ddd650c0ff0c" ]; then
+        [ "$base_runner_sha" != "24869900e1cc58ddba25247722ae37f4dee489649bd436b77ffa480217411f71" ] || \
+        [ "$base_fixture_sha" != "9e3e334607974e2da6a5791454f5041bb79c31a61620ac724183e139de473654" ]; then
     echo "Zizi source or Boundary-183 predecessor drifted" >&2
     exit 1
 fi

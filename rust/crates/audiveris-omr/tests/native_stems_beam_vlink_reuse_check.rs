@@ -941,16 +941,16 @@ const REUSE_ROW_COUNT_FIELDS: usize = 22;
 const REUSE_MANIFEST_SCHEMA: &str = "# schema: stems-beam-vlink-reuse-check-manifest-v1";
 const REUSE_MANIFEST_PATH: &str = "rust/oracle/stems-beam-vlink-reuse-check-manifest.txt";
 const EXPECTED_REUSE_MANIFEST_SHA256: &str =
-    "4ab7078b760daca6691fcc03e8f29684ec4c976f918d747cb2047f01accd0559";
+    "eaf1d38613a3d8f8c39e07c9e3e561f9eaeeffe9278b1c4246fa0871ed5cffab";
 const EXPECTED_REUSE_CORPUS_BODY_SHA256: &str =
-    "76a6d20865a5a372bb6485ff6debeb0c435b64d1f92cf5ee07e1fbe0cf61418f";
+    "fd086d5934df78ba8da80173d06e659767aa9deb564c74a64fe2562b9a4dad44";
 const EXPECTED_REUSE_CORPUS_BODY_LINES: usize = 601;
-const EXPECTED_REUSE_CORPUS_BODY_BYTES: usize = 472_445;
+const EXPECTED_REUSE_CORPUS_BODY_BYTES: usize = 472_549;
 const EXPECTED_REUSE_CORPUS_ROW_COUNTS: [usize; REUSE_ROW_COUNT_FIELDS] = [
     8, 30, 30, 0, 65, 0, 30, 54, 54, 54, 30, 30, 16, 32, 24, 24, 32, 8, 8, 8, 8, 8,
 ];
 const EXPECTED_REUSE_MANIFEST_BODY_SHA256: &str =
-    "58259448c36c5c684cbfef2215eb124a2ca62e5aae8f12d1a73510345687fb6d";
+    "23578739c791afbfb8a9c933b9718e5c3d52d83ae6f41a418b4bd499e3f92ac4";
 const EXPECTED_REUSE_MANIFEST_BODY_LINES: usize = 9;
 const EXPECTED_REUSE_MANIFEST_BODY_BYTES: usize = 9_202;
 const REUSE_MANIFEST_ENTRY_FIELDS: &[&str] = &[
@@ -6112,7 +6112,7 @@ fn paired_create_stem_fixture_parser_fails_closed() {
         .expect("frozen paired Chula createStem fixture");
     assert_eq!(
         sha256_hex(&bytes),
-        "10ada930287be952dcb31666b7af0e77a30f2c513ca69698cc53ab00b206ef6c"
+        "22218928371598979f3cd063d372aae37e2ae426623d33fcb216ebc9315eebd2"
     );
     let text = std::str::from_utf8(&bytes).expect("paired fixture UTF-8");
     let fixture = CreateStemFixture::parse(text).expect("strict paired createStem parser");
@@ -6145,7 +6145,7 @@ fn chula_reuse_fixture_parser_and_provenance_fail_closed() {
             .expect("retained polished Chula reuse/check fixture");
     assert_eq!(
         sha256_hex(&bytes),
-        "a80973509f1d46ea714a9423b25e990b569232ec2c06f91328a309742ae39692"
+        "fc6e7c3578ba586251e2a531fd5054b06746633a8664bbc84e2321bc208b1f2c"
     );
     assert_eq!(bytes.iter().filter(|byte| **byte == b'\n').count(), 68);
     let text = std::str::from_utf8(&bytes).expect("reuse/check fixture UTF-8");
@@ -6163,7 +6163,7 @@ fn chula_reuse_fixture_parser_and_provenance_fail_closed() {
     assert_eq!(body.iter().filter(|byte| **byte == b'\n').count(), 67);
     assert_eq!(
         sha256_hex(body),
-        "28699385cf109cbb393bb8d49db65b5e71a3f8820c0a7591816aec9f6f58a1dd"
+        "7d4a8da3848022cf30b3c20be9beeb0803003672ec04ffccff46719ee328109e"
     );
     for field in [
         "schedulerFixtureSha256",

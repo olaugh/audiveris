@@ -173,9 +173,10 @@ grep '^stemshead' "$tmp_dir/pass1" > "$rows"
 if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 9 ] || \
         ! grep -q '^stemsheadphaseprefixbaseline allegretto.png#1 system 3 heads 118 sigVertices 636 sigEdges 559 systemStems 39 ' "$rows" || \
         ! grep -q '^stemsheadclinkfrontier allegretto.png#1 system 3 headOrder 29 headX 114 headSig 76 headInterId 1828 cAlias h:114:RIGHT:TOP .*lastIndex 1 maxIndex 1 relations 2 .*glyphs 1 selected \[glyph:397:active:id=397:g:2198:1806:4:107:.*candidateIdBefore 397 existingGlyph glyph:397 existingActive true existingStem - lineChanged false terminal ReadyForHeadCreateStem$' "$rows" || \
-        ! grep -q '^stemsheadclinkresult headOrder 29 allocatorBefore 2397 allocatorAfter 2398 registeredGlyphs - addedVertices \[id2398:org.audiveris.omr.sig.inter.StemInter:shape=STEM:grade=.*bounds=2198:1806:3:107:.*\] addedEdges \[system3:sourceId1812:targetId2398:org.audiveris.omr.sig.relation.HeadStemRelation:.*system3:sourceId1828:targetId2398:org.audiveris.omr.sig.relation.HeadStemRelation:.*\] addedSystemStems \[g:2198:1806:4:107:.*:stemId2398\] .*sigHashBefore 81c956983d90d48098a770435aa31974bd7edf4b16fc81229e40b62cd59dde7e sigHashAfter 8e9623ef40ef6b71df12cf5e3f9e57d1426efb902b7c6d6c8d43c6f9c4bb4add .*relationStateHashBefore 22155f18fb36e66d5d9f9361e0cf4ed5bf2d8cdcb14942fc3ffef4b0509147d7 relationStateHashAfter bbb1145e7e3df43c40182a53235f43432efd7a070c652f9778c66b2b270666a5 terminal ReturnedHeadCLinkTransaction$' "$rows" || \
+        ! grep -q '^stemsheadclinkresult headOrder 29 allocatorBefore 2397 allocatorAfter 2398 registeredGlyphs - addedVertices \[id2398:org.audiveris.omr.sig.inter.StemInter:shape=STEM:grade=.*bounds=2198:1806:3:107:.*\] addedEdges \[system3:sourceId1812:targetId2398:org.audiveris.omr.sig.relation.HeadStemRelation:.*system3:sourceId1828:targetId2398:org.audiveris.omr.sig.relation.HeadStemRelation:.*\] addedSystemStems \[g:2198:1806:4:107:.*:stemId2398\] .*sigHashBefore 81c956983d90d48098a770435aa31974bd7edf4b16fc81229e40b62cd59dde7e sigHashAfter 8e9623ef40ef6b71df12cf5e3f9e57d1426efb902b7c6d6c8d43c6f9c4bb4add .*relationStateHashBefore 7f4e89a9eca73b8b523b88a480e584b7f89f211faa4fc27241a7589ffb1e86cb relationStateHashAfter 6c495d3e0b8d807cc25ef12f91ced3a4d1b95dfaaea25d6c5c0e5da282cc1e59 terminal ReturnedHeadCLinkTransaction$' "$rows" || \
         ! grep -q '^stemsheadphasecontinue allegretto.png#1 system 3 headOrder 29 headX 114 headSig 76 headInterId 1828 .*decisions \[LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=false:branch=TopOnly\] incident - returned true sidesAfter \[LEFT:false:false,RIGHT:true:false\] undefs \[\] closureWrites - closedValueChanges 0 unlinkedCount 0 sigVerticesBefore 644 sigVerticesAfter 645 sigEdgesBefore 567 sigEdgesAfter 569 systemStemsBefore 47 systemStemsAfter 48 .*nextHeadOrder 30 nextHeadX 25 nextHeadSig 4 nextHeadInterId 1683 .*terminal ReturnedBeforeNextHead$' "$rows"; then
     echo "Allegretto system-3 order-29 multi-head creation contract differs" >&2
+    cat "$rows" >&2
     exit 1
 fi
 base_probe_sha=$(shasum -a 256 "$script_dir/StemsBeamSidesLoopProbe.java" | awk '{print $1}')
@@ -196,12 +197,13 @@ if [ "$base_probe_sha" != "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d3
         [ "$glyph_index_sha" != "31f25c33d8f5fd5d8fc23fad69c81d7758596925922c932d71b41b85e2abccb2" ] || \
         [ "$overlay_sha" != "f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4" ] || \
         [ "$init_sha" != "c801a89d512ffc1751c178e41c6dee30a17d559bfe1b6b1822e6bc050f8b91b9" ] || \
-        [ "$base_runner_sha" != "55020b3e312fe20cea3913f4e1b8ac849235f8e84753be66ecdc969b6f4b3365" ] || \
-        [ "$base_fixture_sha" != "1d2dfdec360fcc575ef9b852cbb6502dc82ee6fa8b951d24914bf0ae1bb66063" ] || \
+        [ "$base_runner_sha" != "7b3bb33bccecdaad6a7e813201a263bc622b8a6cf4635340bedabfe523bfdefc" ] || \
+        [ "$base_fixture_sha" != "48c9adda2137582df18b43698f07cf2d65eb7156c726c9834d9ecafa0e908025" ] || \
         [ "$probe_sha" != "d9e98b372c7baa03cdb0473162127793ef295538c9021bb7f58025d94f2d9731" ] || \
-        [ "$body_sha" != "9b339591efe421f2a73c3c10eee7e8f092bf66f5eae506e0480a2b462e3bf5c9" ] || \
-        [ "$semantic_sha" != "b834f6c87d003428b73242a1081835096d9a63c4c36e1af53dc248ed8dad964a" ]; then
+        [ "$body_sha" != "01f3f63014ec22a8ee275d98848e0d73b52296b9b4b0cf94184091a48a9c73ce" ] || \
+        [ "$semantic_sha" != "55b823afaf2dc7bb6bcefc7cfcb6421f81594105e98f54e08cd21db9e5599c63" ]; then
     echo "Allegretto system-3 order-29 provenance drifted" >&2
+    echo "runner $runner_sha body $body_sha semantic $semantic_sha" >&2
     exit 1
 fi
 row_count=$(wc -l < "$rows" | tr -d ' ')
