@@ -87,23 +87,23 @@ const HEAD_LINKS_MANIFEST_OVERRIDE_ENV: &str = "AUDIVERIS_B17_HEAD_LINKS_MANIFES
 const HEAD_LINKS_MANIFEST_ENTRY_LABEL: &str = "stemsbeamvlinkheadlinksmanifestentry";
 const HEAD_LINKS_MANIFEST_SUMMARY_LABEL: &str = "stemsbeamvlinkheadlinksmanifestsummary";
 const HEAD_LINKS_MANIFEST_SHA256: &str =
-    "87b1f5fb459551cb247f4702449128f35d94ac5ee738d764e25e523dd21955ab";
+    "e5d6203b25c3e1627feb3e3b9eb84abcf371b9640e1101d1adefee2439fa934e";
 const HEAD_LINKS_MANIFEST_LINES: usize = 10;
 const HEAD_LINKS_MANIFEST_BYTES: usize = 35_839;
 const HEAD_LINKS_MANIFEST_BODY_SHA256: &str =
-    "a7934a066b47654b56184e6506825d9f1f5986d96f25b3eb52b2281308185a08";
+    "fb9358094a9f4970a82e3b23b007e481c184fe706ea3eeafebec9ab4dcfa06b4";
 const HEAD_LINKS_MANIFEST_BODY_LINES: usize = 9;
 const HEAD_LINKS_MANIFEST_BODY_BYTES: usize = 25_997;
 const HEAD_LINKS_NORMALIZED_CORPUS_SHA256: &str =
-    "b57ec3f2bf401fce6d6d62c7522285dd3288b35b40d7c5c453468cf5dde4ce48";
+    "07e9700a5da0a48c1e99b0a7da3739d22f963641ee269d57baf8f77c9ded8400";
 const HEAD_LINKS_NORMALIZED_CORPUS_LINES: usize = 1_583;
 const HEAD_LINKS_NORMALIZED_CORPUS_BYTES: usize = 785_671;
 const HEAD_LINKS_SPLIT_EMITTED_BODY_SHA256: &str =
-    "044631a9dc5177b3fbe074a03cc031f52cb6087b3ea3491377f820d633b44d01";
+    "3965677c5cd9f97fac80a723e98dd884cc898133627a765160b4de3ca3772b7f";
 const HEAD_LINKS_SPLIT_EMITTED_BODY_LINES: usize = 1_639;
 const HEAD_LINKS_SPLIT_EMITTED_BODY_BYTES: usize = 790_438;
 const HEAD_LINKS_SPLIT_FIXTURE_SHA256: &str =
-    "6e9abd60f5274622bd9638cc6e1cd6c489ee5fdc36ec96769507ef9f16f418aa";
+    "49bd33391e56f7218f2beaab4e8f7104ab2fc25db1da6e3f120b064012fdddef";
 const HEAD_LINKS_SPLIT_FIXTURE_LINES: usize = 1_655;
 const HEAD_LINKS_SPLIT_FIXTURE_BYTES: usize = 873_975;
 const HEAD_LINKS_FIXTURE_HEADER: &[&str] = &[
@@ -135,14 +135,14 @@ const CORPUS_PAGES: [(&str, &str); 8] = [
 const BOUNDARY_FIFTEEN_MANIFEST_PATH: &str =
     "rust/oracle/stems-beam-vlink-b-linker-flag-manifest.txt";
 const BOUNDARY_FIFTEEN_MANIFEST_SHA256: &str =
-    "c7032ac4871188ef0cf48ac63d99996e78a0e163bf1470d3be84c5e9b10d1d92";
+    "446dae1a985c496be117f4e75cb29f27d656c2cd2f2e5dd844dc4980a141da7a";
 const BOUNDARY_FIFTEEN_GATE_PATH: &str =
     "rust/crates/audiveris-omr/tests/native_stems_beam_vlink_b_linker_flag.rs";
 const BOUNDARY_FIFTEEN_GATE_SHA256: &str =
-    "9085f461c143615f47659d3b5f0a760ad9bdfc0098084ef6e376d8a32afe61b6";
+    "587f6f3a78c1f1cc3249c47954ee491fe7b9ac29c86e56565ee9075eca0f0989";
 const BOUNDARY_FIFTEEN_FIXTURE_PATH: &str = "rust/oracle/stems-beam-vlink-b-linker-flag-chula.txt";
 const BOUNDARY_FIFTEEN_FIXTURE_SHA256: &str =
-    "85681437af5e7a5b3c5fc220fe7ced7299516b9de8c4d95a6c651dd5ebf926d6";
+    "afc01b47298dc2b86253cde6512e7311533df51aa0ca35f25b98e1f72b886658";
 const PROBE_SOURCE_PATH: &str = "rust/oracle/java/StemsBeamVLinkSiblingLinksProbe.java";
 const RUNNER_SOURCE_PATH: &str = "rust/oracle/java/run-stems-beam-vlink-sibling-links.sh";
 const MANIFEST_SCHEMA: &str = "# schema: stems-beam-vlink-sibling-links-manifest-v1";
@@ -150,15 +150,15 @@ const MANIFEST_PATH: &str = "rust/oracle/stems-beam-vlink-sibling-links-manifest
 const MANIFEST_OVERRIDE_ENV: &str = "AUDIVERIS_B16_SIBLING_LINKS_MANIFEST";
 const MANIFEST_ENTRY_LABEL: &str = "stemsbeamvlinksiblinglinksmanifestentry";
 const MANIFEST_SUMMARY_LABEL: &str = "stemsbeamvlinksiblinglinksmanifestsummary";
-const MANIFEST_SHA256: &str = "6dcca78c13facf7fa9ee29506eab2961d1410babf396930724dce16f5474e29d";
+const MANIFEST_SHA256: &str = "1aa1fc22e157effd663f8303a76b3ece4aa44889d3db18e0c5821ee710ee5748";
 const MANIFEST_LINES: usize = 10;
 const MANIFEST_BYTES: usize = 31_471;
 const MANIFEST_BODY_SHA256: &str =
-    "c5d44bf655814aac1a297d4ad67fe401291449e231d581d11c812e197ef0fba0";
+    "772cea57e170d5ea794f1e1ace2bc5dc2fcf34b8952e4c89415b11c92688d168";
 const MANIFEST_BODY_LINES: usize = 9;
 const MANIFEST_BODY_BYTES: usize = 23_218;
 const NORMALIZED_CORPUS_SHA256: &str =
-    "c6a62f9b98ce55eda2bd142b083a2ff6b14d08dab6b1a2ce3c1a0d643d5efd66";
+    "55bf2dfdbcd235d19d5d717646a8f1b55503912ee2b387cb423bd31a60df3dda";
 const NORMALIZED_CORPUS_LINES: usize = 717;
 const NORMALIZED_CORPUS_BYTES: usize = 580_329;
 const SPLIT_FIXTURE_LINES: usize = 789;

@@ -1,7 +1,7 @@
 # Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) boundary-20 manifest.
 # schema: stems-beam-txn2-manifest-v1
-stemsbeamtxn2page carmen.png#1 systems 5 schedulerResumeFixtureSha256 cbdb9532fbfd4bcc903e160bb8b2cca9ce2b53f9a9c3297b973279cbf1edc3fc executionMode foregroundJvmPerSystem evidence FreshSelfPinnedPerFamily stop SecondTransactionOuterAssignmentComplete
-stemsbeamschedulerresumepage carmen.png#1 systems 5 outerBLinkerFixtureSha256 30aeb7b4f23e33e3746dcfd78e35a55b84227fe22331bbc5336eb23028bd917d executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
+stemsbeamtxn2page carmen.png#1 systems 5 schedulerResumeFixtureSha256 998a013b354af227efeeb812576322f133bb4cfab75ab728c4c97b5288e68aed executionMode foregroundJvmPerSystem evidence FreshSelfPinnedPerFamily stop SecondTransactionOuterAssignmentComplete
+stemsbeamschedulerresumepage carmen.png#1 systems 5 outerBLinkerFixtureSha256 86c58086f9f6f58e99a92df6c83896d53101fb2af2fb3f7143b62ece15d046de executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
 stemsbeamschedulerresumeside carmen.png#1 system 1 event 0 beamSig 12 bAlias beam:12:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
 stemsbeamschedulerresumefrontier carmen.png#1 system 1 event 1 beamSig 12 bAlias beam:12:b:1 hSide RIGHT vSide BOTTOM plan 229 stemProfile 4 linkProfile 1 lastIndex 5 relationEntries 2 glyphs 2 lineChanged true terminal AwaitingVLinkTransaction
 stemsbeamschedulerresumesummary carmen.png#1 system 1 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction

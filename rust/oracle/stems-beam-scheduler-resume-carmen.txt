@@ -7,7 +7,7 @@
 # with exact Java loop semantics and stops at the second ReadyForCreateStem frontier
 # (recorded, not executed) or SIDES-worklist exhaustion.
 # Post-frontier expands run against the mutated SIG; lineChanged records their effect.
-stemsbeamschedulerresumepage carmen.png#1 systems 5 outerBLinkerFixtureSha256 30aeb7b4f23e33e3746dcfd78e35a55b84227fe22331bbc5336eb23028bd917d executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
+stemsbeamschedulerresumepage carmen.png#1 systems 5 outerBLinkerFixtureSha256 86c58086f9f6f58e99a92df6c83896d53101fb2af2fb3f7143b62ece15d046de executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
 stemsbeamschedulerresumeside carmen.png#1 system 1 event 0 beamSig 12 bAlias beam:12:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
 stemsbeamschedulerresumefrontier carmen.png#1 system 1 event 1 beamSig 12 bAlias beam:12:b:1 hSide RIGHT vSide BOTTOM plan 229 stemProfile 4 linkProfile 1 lastIndex 5 relationEntries 2 glyphs 2 lineChanged true terminal AwaitingVLinkTransaction
 stemsbeamschedulerresumesummary carmen.png#1 system 1 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction

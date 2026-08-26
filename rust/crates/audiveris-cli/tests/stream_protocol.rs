@@ -306,7 +306,7 @@ fn active_chopin_cue_beams_publish_a_connected_stable_graph() {
         "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i995\",\"provenance\":\"cue\"",
         "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i989\",\"provenance\":\"cue\"",
         "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i993\",\"provenance\":\"cue\"",
-        "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i974\",\"provenance\":\"cue\"",
+        "\"source_id\":\"s1:i1015\",\"target_id\":\"s1:i973\",\"provenance\":\"cue\"",
         "\"kind\":\"Containment\",\"source_id\":\"s1:i1016\",\"target_id\":\"s1:i1015\",\"provenance\":\"cue\"",
     ] {
         assert!(
@@ -315,7 +315,7 @@ fn active_chopin_cue_beams_publish_a_connected_stable_graph() {
         );
     }
     assert_eq!(payload.matches("\"kind\":\"BeamStem\"").count(), 4);
-    assert_eq!(payload.matches("\"kind\":\"HeadStem\"").count(), 6);
+    assert_eq!(payload.matches("\"kind\":\"HeadStem\"").count(), 7);
     assert_eq!(payload.matches("\"kind\":\"Containment\"").count(), 1);
     assert_eq!(payload.matches("\"shape\":\"BEAM_SMALL\"").count(), 1);
 }
@@ -375,8 +375,8 @@ fn stems_json_completes_the_parity_corpus_and_beyond_corpus_scan() {
             3,
             150,
             328,
-            314,
-            15,
+            313,
+            16,
         ),
         (example("batuque.png"), "batuque.png", 3, 148, 327, 323, 4),
         (example("carmen.png"), "carmen.png", 5, 178, 429, 403, 26),
@@ -384,21 +384,21 @@ fn stems_json_completes_the_parity_corpus_and_beyond_corpus_scan() {
             example("cucaracha.png"),
             "cucaracha.png",
             3,
-            114,
+            115,
             405,
             400,
             5,
         ),
         (example("hove.png"), "hove.png", 5, 150, 343, 343, 0),
-        (example("zizi.png"), "zizi.png", 2, 104, 221, 221, 5),
+        (example("zizi.png"), "zizi.png", 2, 103, 221, 220, 6),
         (
             example("BachInvention5.jpg"),
             "BachInvention5.jpg",
             6,
             412,
             1142,
-            1040,
-            102,
+            1039,
+            103,
         ),
         (
             example("D0392410-1.256.png"),
@@ -461,12 +461,12 @@ fn stems_json_completes_the_parity_corpus_and_beyond_corpus_scan() {
                 "\"removed_empty_beam_group_count\":12",
                 "\"beam_head_relation_count\":342",
                 "\"contextualized_inter_count\":766",
-                "\"contextual_grade_digest\":\"ba83426ee73b2b10\"",
+                "\"contextual_grade_digest\":\"c42a5b6b287e28b0\"",
                 // The remaining system-2/system-3 digest differences are exactly
                 // four inherited HEADERS values and two inherited LEDGERS ULPs;
                 // every STEMS-owned contextual result is Java-identical.
-                "\"contextual_grade_digest\":\"125acaf46320d86e\"",
-                "\"contextual_grade_digest\":\"21bda55a2a32d2c4\"",
+                "\"contextual_grade_digest\":\"0e6031e2d3db7942\"",
+                "\"contextual_grade_digest\":\"58f7962d132bff94\"",
             ] {
                 assert!(
                     payload.contains(exact),
@@ -474,10 +474,10 @@ fn stems_json_completes_the_parity_corpus_and_beyond_corpus_scan() {
                 );
             }
             for exact in [
-                "beamHeadCount 123 beamHeadGradeSha256 0f5d270e4fa00c861645e77257f2fa79325b8a0ad3ace617a86da8578d2769f1",
-                "beamHeadCount 109 beamHeadGradeSha256 e14c28b3700ac34023baa529788df9c02cca8d6567e9df0237ca9c1a02619755",
-                "beamHeadCount 110 beamHeadGradeSha256 f9d268028846f675aade61a319af4f4ff4be5012639c42227498053932c0f057",
-                "contextualGradeFnv64 ba83426ee73b2b10",
+                "beamHeadCount 123 beamHeadGradeSha256 bf3e6389a88830b4598dcd20c82225abb150ed7d9c9c6b9bec3e234d035f10fe",
+                "beamHeadCount 109 beamHeadGradeSha256 556ae5783a9c9450f26da1086a06ba2c75786952f0c7ba42156d1358a2e463bf",
+                "beamHeadCount 110 beamHeadGradeSha256 e4c0fd107782f3bd5bcab379aebca6793a2f9ed2fc881456be1bd0d941518b3e",
+                "contextualGradeFnv64 c42a5b6b287e28b0",
                 "freshRuns 2 freshRunsByteIdentical true",
                 "nativeScope GenericFinalizeBeamsAndContextualization",
             ] {

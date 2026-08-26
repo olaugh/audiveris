@@ -1,7 +1,7 @@
 # Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) boundary-20 manifest.
 # schema: stems-beam-txn2-manifest-v1
-stemsbeamtxn2page hove.png#1 systems 5 schedulerResumeFixtureSha256 34b72101f253cfcd5503696fb1562bdf0e6587593f89bcf317a251e6d6934907 executionMode foregroundJvmPerSystem evidence FreshSelfPinnedPerFamily stop SecondTransactionOuterAssignmentComplete
-stemsbeamschedulerresumepage hove.png#1 systems 5 outerBLinkerFixtureSha256 005426787dfc2d46636569be5da7b854643a0fc7d1fe4b579a78e8c3fbe80784 executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
+stemsbeamtxn2page hove.png#1 systems 5 schedulerResumeFixtureSha256 29535108937bc4f8017b7e879ac7446421c77ad1e1e58ef8945ce8b11010ab87 executionMode foregroundJvmPerSystem evidence FreshSelfPinnedPerFamily stop SecondTransactionOuterAssignmentComplete
+stemsbeamschedulerresumepage hove.png#1 systems 5 outerBLinkerFixtureSha256 3452b01c56824309aa56e329854ab70dd8cd13ca81447c7d7b2ffc1b625ac7e9 executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
 stemsbeamschedulerresumeside hove.png#1 system 1 event 0 beamSig 0 bAlias beam:0:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
 stemsbeamschedulerresumefrontier hove.png#1 system 1 event 1 beamSig 0 bAlias beam:0:b:3 hSide RIGHT vSide BOTTOM plan 151 stemProfile 4 linkProfile 1 lastIndex 3 relationEntries 2 glyphs 2 lineChanged true terminal AwaitingVLinkTransaction
 stemsbeamschedulerresumesummary hove.png#1 system 1 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction

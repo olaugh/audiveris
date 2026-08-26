@@ -23,9 +23,9 @@ run_pass > "$tmp_dir/pass2"
 cmp "$tmp_dir/pass1" "$tmp_dir/pass2"
 rows="$tmp_dir/pass1"
 if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 3 ] || \
-        ! grep -Fq 'system 1 removedCount 4 removed [969, 971, 973, 975] beamHeadCount 123 beamHeadGradeSha256 0f5d270e4fa00c861645e77257f2fa79325b8a0ad3ace617a86da8578d2769f1 contextualCount 259 contextualNull 0' "$rows" || \
-        ! grep -Fq 'system 2 removedCount 3 removed [1018, 1075, 1077] beamHeadCount 109 beamHeadGradeSha256 e14c28b3700ac34023baa529788df9c02cca8d6567e9df0237ca9c1a02619755 contextualCount 233 contextualNull 0' "$rows" || \
-        ! grep -Fq 'system 3 removedCount 5 removed [1101, 1102, 1103, 1104, 1105] beamHeadCount 110 beamHeadGradeSha256 f9d268028846f675aade61a319af4f4ff4be5012639c42227498053932c0f057 contextualCount 274 contextualNull 0' "$rows"; then
+        ! grep -Fq 'system 1 removedCount 4 removed [969, 971, 973, 975] beamHeadCount 123 beamHeadGradeSha256 bf3e6389a88830b4598dcd20c82225abb150ed7d9c9c6b9bec3e234d035f10fe contextualCount 259 contextualNull 0' "$rows" || \
+        ! grep -Fq 'system 2 removedCount 3 removed [1018, 1075, 1077] beamHeadCount 109 beamHeadGradeSha256 556ae5783a9c9450f26da1086a06ba2c75786952f0c7ba42156d1358a2e463bf contextualCount 233 contextualNull 0' "$rows" || \
+        ! grep -Fq 'system 3 removedCount 5 removed [1101, 1102, 1103, 1104, 1105] beamHeadCount 110 beamHeadGradeSha256 e4c0fd107782f3bd5bcab379aebca6793a2f9ed2fc881456be1bd0d941518b3e contextualCount 274 contextualNull 0' "$rows"; then
     echo "STEMS epilog contract differs" >&2
     cat "$rows" >&2
     exit 1
