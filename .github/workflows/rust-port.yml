@@ -50,11 +50,11 @@ jobs:
   check:
     name: ${{ matrix.os }} ${{ matrix.shard }}
     runs-on: ${{ matrix.os }}
-    # Roughly triple the expected shard time. The unsharded job used to sit at
-    # 60 and reached it, which is how a passing suite turned into a cancelled
-    # macOS leg; leaving that much headroom keeps a slow runner from reading as
-    # a failure while still killing a genuine hang.
-    timeout-minutes: 30
+    # Keep over twice the observed cold-cache shard time. The unsharded job
+    # used to sit at 60 and reached it, and a cold macOS shard later reached 30;
+    # leaving this headroom keeps a passing suite from reading as a failure
+    # while still killing a genuine hang.
+    timeout-minutes: 45
     strategy:
       # Report every leg. A divergence that appears on one host and not the
       # other is the most interesting result this workflow can produce, and
