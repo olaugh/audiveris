@@ -130,31 +130,33 @@ Java source checked into this repository and may move.
   compatibility mode. Do not silently enforce the javadoc until Java changes
   and a new oracle is frozen.
 
-## Risks under audit
-
-### AV-JAVA-RISK-001: `StemBuilder.sortItems` uses a pair-dependent comparator
+### AV-JAVA-006: `StemBuilder.sortItems` used a pair-dependent comparator
 
 - **Location:**
   `app/src/main/java/org/audiveris/omr/sheet/stem/StemBuilder.java`,
   `sortItems`.
-- **Behavior:** two `HalfLinkerItem`s compare by linker reference-point Y, but
-  every mixed pair compares by line endpoints. This pair-dependent comparator
-  is not transitive and therefore violates the sorting contract.
-- **Live evidence:** the corrected exhaustive Chula beam-origin audit finds 2
+- **Observed behavior:** two `HalfLinkerItem`s compared by linker reference-point
+  Y, but every mixed pair compares by line endpoints. This pair-dependent
+  comparator is not transitive and therefore violates the sorting contract.
+- **Live evidence:** the pre-fix exhaustive Chula beam-origin audit found 2
   strict comparator cycles (including one four-item final list) and 81
   equivalence inconsistencies: 22 in target-only sorts and 59 in final-item
   sorts. Across the full eight-page corpus, the totals are 18 strict cycles
-  and 2,503 equivalence inconsistencies. The oracle retains the exact
-  input/output permutations plus hashes identifying offending triples.
-- **Impact:** the result can depend on the sorting implementation and may fail
-  or change when Java's TimSort implementation changes. A generic stable Rust
-  sort is not a valid compatibility substitute even though most inputs happen
-  to order identically.
-- **Likely repair:** define one context-independent vertical key for every item
-  kind, or otherwise make the comparator a total preorder before sorting.
-- **Rust parity policy:** reproduce the frozen OpenJDK ordering at this boundary
-  and keep the anomaly evidence visible; do not normalize the comparator or
-  silently rely on Rust's standard stable sort.
+  and 2,503 equivalence inconsistencies. A dense real system produced 34 mixed
+  items and made OpenJDK TimSort throw `Comparison method violates its general
+  contract!`, aborting STEMS for the page.
+- **Repair:** Audiveris PR #984 defines one context-independent ordinate key:
+  reference-point Y for each half linker and the directional line endpoint for
+  every other item. The Java regression crosses TimSort's merge threshold with
+  40 adversarial mixed items and checks both directions across 100 shuffles.
+- **Status:** confirmed and resolved in this fork by commit `4d48540c3`. The
+  regenerated eight-page beam/head corpora contain zero strict cycles and zero
+  equivalence inconsistencies.
+- **Rust parity policy:** both native `StemBuilder` mirrors use the same corrected
+  Java key. Their exact differentials are frozen against the regenerated Java
+  corpora; no compatibility fallback or alternate recovery ordering is used.
+
+## Risks under audit
 
 ### AV-JAVA-RISK-002: rejected head stumps remain in the sheet glyph index
 
