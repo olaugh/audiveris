@@ -68,8 +68,8 @@ base_runner="$script_dir/run-stems-head-phase-two-bach-system2-order5.sh"
 base_fixture="$repo_root/rust/oracle/stems-head-phase-two-bach-system2-order5.txt"
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
-if [ "$base_runner_sha" != "d1b668eb65ad174d3cc80030b3cf76a674fe35692f78011fc21e1d18896ed2a0" ] || \
-        [ "$base_fixture_sha" != "9a23db94e8c05f442579a28f223cd1a26cd3e45f4bdffd9ce03159990610a409" ]; then
+if [ "$base_runner_sha" != "cddf028c62bff3c11926f37e8bdf87a926fe5282ddc8e80e94f409a3f5a14acf" ] || \
+        [ "$base_fixture_sha" != "3377df7d16a05f252b7fc99121973f934cd57ab9597cea34aabb3b058493ed9c" ]; then
     echo "Bach system-2 phase-two queue-5 predecessor drifted" >&2
     exit 1
 fi
@@ -97,4 +97,3 @@ out="$repo_root/rust/oracle/stems-head-phase-two-bach-system2-order6.txt"
         "stemsheadphase2bachs2q6summary schema stems-head-phase-two-bach-system2-order6-v1 page BachInvention5.jpg#1 system 2 rows 2 inputSha256 $input_sha stemsRetrieverSourceSha256 $stems_source_sha probeSourceSha256 $probe_sha initSourceSha256 $init_sha runnerSourceSha256 $runner_sha baseBoundary247RunnerSha256 $base_runner_sha baseBoundary247FixtureSha256 $base_fixture_sha emittedBodySha256 $body_sha semanticPassSha256 $body_sha freshRuns 2 freshRunsByteIdentical true nativeScope BachSystem2PhaseTwoOrder6RejectedTopAppend javaEvidence ReturnedAfterSystem2RetryIndex6"
 } > "$out"
 echo "wrote $out"
-

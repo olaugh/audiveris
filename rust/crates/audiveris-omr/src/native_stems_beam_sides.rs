@@ -14549,6 +14549,27 @@ fn advance_native_stems_head_continuation_c_link_at_queue(
     )
 }
 
+fn later_head_c_link_beam_targets(
+    items: &[crate::native_stems_head_builders::NativeStemsHeadBuilderItem],
+    current_index: usize,
+) -> impl Iterator<Item = NativeStemsBeamBLinkerRef> + '_ {
+    items
+        .get(current_index.saturating_add(1)..)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|later| match (later.kind, later.target) {
+            (
+                NativeStemsHeadBuilderItemKind::BeamLinker,
+                Some(NativeStemsHeadBuilderTargetRef::Beam(beam)),
+            ) => Some(beam),
+            _ => None,
+        })
+}
+
+fn head_c_link_beam_lookahead_stops(same_group_ahead: bool) -> bool {
+    !same_group_ahead
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the atomic boundary authenticates each independently owned native authority"
@@ -14689,17 +14710,6 @@ fn advance_native_stems_head_c_link_at_frontier(
             ),
         ));
     }
-    // Java's sibling-beam scan accidentally reads `sb.get(i)` inside its
-    // `for (j = i + 1; ...)` loop.  Whenever another item follows a beam, that
-    // reread sees the current beam in its own group and clears `stop`; only a
-    // beam that is literally the final builder item returns early.  A trailing
-    // glyph therefore reaches the final head-relation recheck on the evolved
-    // composite line (Bach system 2 queue 196 exercises this shape).
-    let beam_stopped = !beam_targets.is_empty()
-        && builder
-            .items
-            .last()
-            .is_some_and(|item| item.kind == NativeStemsHeadBuilderItemKind::BeamLinker);
     if !beam_targets.is_empty() && beam_vlinkers.is_none() {
         return Err(stage(
             "HEADS-CLink-expand",
@@ -14937,6 +14947,7 @@ fn advance_native_stems_head_c_link_at_frontier(
     let mut start_relation_before_expand = None;
     let mut additional_relation_plans = Vec::new();
     let mut beam_relation_plans = Vec::new();
+    let mut beam_stop_item_index = None;
     let mut rejected_chunk_item_index = None;
     let mut gap_stop_item_index = None;
     let mut last_gap: Option<(
@@ -15237,6 +15248,31 @@ fn advance_native_stems_head_c_link_at_frontier(
                 // per-item line rather than projecting every beam from the
                 // final composite line.
                 beam_relation_plans.push((target, stem_line));
+
+                // PR #977 fixes Java's look-ahead to inspect `sb.get(j)`.
+                // Ignore intervening non-beam items, stop at this beam when
+                // there is no later beam in the same group, and otherwise
+                // continue so the later sibling can be linked too.
+                let group_of = |beam: NativeStemsBeamBLinkerRef| {
+                    live_beam_group_ordinal(
+                        &shadow.beam_state.sig,
+                        &shadow.beam_state.bindings,
+                        beam.beam,
+                    )
+                };
+                let current_group = group_of(target)?;
+                let mut same_group_ahead = false;
+                for later in later_head_c_link_beam_targets(&builder.items, item_index) {
+                    if group_of(later)? == current_group {
+                        same_group_ahead = true;
+                        break;
+                    }
+                }
+                let stop = head_c_link_beam_lookahead_stops(same_group_ahead);
+                if stop {
+                    beam_stop_item_index = Some(item_index);
+                    break;
+                }
             }
             NativeStemsHeadBuilderItemKind::Gap => {
                 last_gap = Some((item_index, item));
@@ -15482,6 +15518,7 @@ fn advance_native_stems_head_c_link_at_frontier(
     // loop, so it never reaches the final relation recheck at the bottom of `expand`.
     // Preserve that initial relation while still evolving `stem_line` for BeamStem
     // projection and checked-stem creation.
+    let beam_stopped = beam_stop_item_index.is_some();
     let stopped_before_final_relation = rejected_chunk_item_index.is_some()
         || gap_stop_item_index.is_some()
         || head_separation_stop_item_index.is_some()
@@ -15525,11 +15562,13 @@ fn advance_native_stems_head_c_link_at_frontier(
             ),
         ));
     }
-    let actual_last_index = rejected_chunk_item_index
-        .or(gap_stop_item_index)
-        .or(head_separation_stop_item_index)
-        .map(|index| index.saturating_sub(1))
-        .unwrap_or(expected_last_index);
+    let actual_last_index = beam_stop_item_index.unwrap_or_else(|| {
+        rejected_chunk_item_index
+            .or(gap_stop_item_index)
+            .or(head_separation_stop_item_index)
+            .map(|index| index.saturating_sub(1))
+            .unwrap_or(expected_last_index)
+    });
 
     let matching_selected = selected_components
         .iter()
@@ -17264,6 +17303,41 @@ fn live_group_member_sources(
     Ok(members)
 }
 
+fn live_beam_group_ordinal(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    beam: crate::native_stems_beam_stumps::NativeStemsBeamSource,
+) -> Result<usize, NativeStemsBeamSidesError> {
+    let beam_vertex = bindings.beam_vertices.get(&beam).ok_or_else(|| {
+        stage(
+            "HEADS-CLink-beam-group",
+            "beam target has no live SIG binding",
+        )
+    })?;
+    let groups = sig
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::Containment
+                && edge.target == beam_vertex.0
+        })
+        .filter_map(|edge| {
+            bindings
+                .beam_group_vertices
+                .iter()
+                .find_map(|(ordinal, vertex)| (vertex.0 == edge.source).then_some(*ordinal))
+        })
+        .collect::<Vec<_>>();
+    let [group] = groups.as_slice() else {
+        return Err(stage(
+            "HEADS-CLink-beam-group",
+            "beam target does not resolve to one live BeamGroup",
+        ));
+    };
+    Ok(*group)
+}
+
 fn current_stumps_status(
     scheduler: &NativeStemsBeamSchedulerSystem,
 ) -> Result<NativeStemsBeamSchedulerStumpsStatus, NativeStemsBeamSidesError> {
@@ -17297,6 +17371,65 @@ mod tests {
         native_stems_beam_vlinkers::NativeStemsBeamBLinkerRef,
         stems_step::{NativeStemPoint, NativeStemVerticalSide},
     };
+
+    #[test]
+    fn c_link_beam_lookahead_reads_the_later_item_and_compares_groups() {
+        let beam = |ordinal| NativeStemsBeamBLinkerRef {
+            beam: NativeStemsBeamSource::RawBeam(ordinal),
+            id: 1,
+        };
+        let item = |kind, target| crate::native_stems_head_builders::NativeStemsHeadBuilderItem {
+            kind,
+            glyph: None,
+            target,
+            reference_point: None,
+            head_bounds: None,
+            line: crate::stems_step::NativeStemLine {
+                start: NativeStemPoint { x: 0.0, y: 0.0 },
+                stop: NativeStemPoint { x: 0.0, y: 1.0 },
+            },
+            contribution: 0,
+        };
+        let current = beam(12);
+        let later = beam(15);
+        let items = vec![
+            item(
+                NativeStemsHeadBuilderItemKind::BeamLinker,
+                Some(NativeStemsHeadBuilderTargetRef::Beam(current)),
+            ),
+            item(NativeStemsHeadBuilderItemKind::ChunkGlyph, None),
+            item(
+                NativeStemsHeadBuilderItemKind::BeamLinker,
+                Some(NativeStemsHeadBuilderTargetRef::Beam(later)),
+            ),
+        ];
+
+        assert_eq!(
+            later_head_c_link_beam_targets(&items, 0).collect::<Vec<_>>(),
+            [later]
+        );
+        assert!(!head_c_link_beam_lookahead_stops(true));
+        assert!(head_c_link_beam_lookahead_stops(false));
+        assert!(later_head_c_link_beam_targets(&items, 2).next().is_none());
+
+        let different_then_same = vec![
+            items[0].clone(),
+            item(
+                NativeStemsHeadBuilderItemKind::BeamLinker,
+                Some(NativeStemsHeadBuilderTargetRef::Beam(beam(99))),
+            ),
+            items[2].clone(),
+        ];
+        assert_eq!(
+            later_head_c_link_beam_targets(&different_then_same, 0).collect::<Vec<_>>(),
+            [beam(99), later]
+        );
+        assert!(
+            later_head_c_link_beam_targets(&different_then_same, 0)
+                .into_iter()
+                .any(|candidate| candidate == later)
+        );
+    }
 
     #[test]
     fn prelinked_head_closes_both_sides_of_the_other_head_in_sig_order() {

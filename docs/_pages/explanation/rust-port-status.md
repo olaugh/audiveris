@@ -220,7 +220,7 @@ terminal-parity oracle. The detailed historical paragraph below
 records the chain through Boundary 258; Boundaries 259-273 are summarized in
 the later boundary log.
 
-The first two hundred and fifty-eight semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; Boundary 207 preserves Java's pre-MultipleRest beam-group identities; Boundary 208 ports the generic phase-one rather-good retry through profiles 0-3; Boundary 209 reuses one concrete stump across two already-linked beam items without duplicate BeamStem edges; Boundaries 210-212 authenticate three identity-free prelinked reconciliations with zero, two, then zero value changes; Boundary 213 authenticates the following identity-free no-link closure; Boundary 214 reuses another concrete stem across two already-linked beams; Boundary 215 adds a second head relation with exact Java translated-line rounding; Boundary 216 reconciles one two-head existing stem; Boundary 217 authenticates a four-head zero-change reconciliation; Boundary 218 reconciles another two-head existing stem; Boundary 219 authenticates a right-side three-head zero-change reconciliation; Boundary 220 authenticates a four-head zero-change reconciliation; Boundary 221 authenticates the following three-head zero-change reconciliation; Boundary 222 authenticates a rejected active-glyph LEFT/TOP C-link with no graph or allocator mutation; Boundary 223 reuses an existing stem across two linked beams plus a trailing glyph while reproducing Java's final relation recheck; Boundary 224 rejects the following LEFT/TOP C-link before recording the RIGHT shared-stump side as undefined without mutation; Boundaries 225-226 authenticate two idempotent three-head prelinked reconciliations; Boundary 227 authenticates a right-side four-head reconciliation with two real and four idempotent closure writes; Boundary 228 adds one exact LEFT/TOP HeadStem edge to an existing three-head stem; and Boundary 229 authenticates the following idempotent right-side three-head reconciliation; Boundary 230 closes a two-head existing stem with two value changes; Boundary 231 reconciles the following mixed-side four-head stem with two value changes; Boundary 232 adds the next exact RIGHT/BOTTOM edge to an existing five-head stem; Boundary 233 records the following zero-mutation RIGHT dual-corner undefined return; Boundary 234 reconciles the following right-side four-head stem with two value changes; Boundary 235 closes the following right-side two-head stem with two value changes; Boundary 236 closes the following identity-free no-link head and queues it for phase two; Boundary 237 authenticates the following mixed-side four-head zero-change reconciliation; Boundary 238 authenticates the following left-side four-head zero-change reconciliation; Boundary 239 authenticates the following mixed-side five-head zero-change reconciliation; Boundary 240 closes the following mixed-side five-head stem with two value changes; Boundary 241 adds the terminal RIGHT/BOTTOM edge to an existing stem and exhausts system 2 phase one; Boundary 242 executes phase-two retry index 0 as an exact no-link/no-mutation result; Boundary 243 rejects the following RIGHT/BOTTOM append expansion before mutation; Boundary 244 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 245 returns through the following prelinked LEFT side and performs an idempotent two-cell closure; Boundary 246 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 247 rejects the following LEFT/TOP append expansion before mutation; Boundary 248 rejects the next LEFT/TOP append expansion before mutation; Boundary 249 executes the following no-link/no-mutation retry; Boundary 250 adds the first phase-two RIGHT/BOTTOM HeadStem edge by reusing an existing stem; Boundary 251 adds the following RIGHT/BOTTOM edge through a second carried stem; Boundary 252 executes the next no-link/no-mutation retry; Boundary 253 rejects the following LEFT/TOP append expansion before mutation; Boundary 254 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 255 executes the final no-link retry without mutation; Boundary 256 exhausts Bach system-2 phase-two without mutation; Boundary 257 accepts the exhausted carrier through generic native `finalizeStems` with 215 checked heads, one multiple-stem head, 12 no-stem/abnormal heads, and one removed HeadStem relation; Boundary 258 records the matching Java before/after finalizeStems census. Bach now completes system 1, system 2 phase one, and its first fifteen phase-two retries; the phase-two queue is exhausted after x54/SIG59, with native finalizer acceptance structurally gated and Java finalizer parity instrumented.
+The first two hundred and fifty-eight semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; Boundary 207 preserves Java's pre-MultipleRest beam-group identities; Boundary 208 ports the generic phase-one rather-good retry through profiles 0-3; Boundary 209 reuses one concrete stump across two already-linked beam items without duplicate BeamStem edges; Boundaries 210-212 authenticate three identity-free prelinked reconciliations with zero, two, then zero value changes; Boundary 213 authenticates the following identity-free no-link closure; Boundary 214 reuses another concrete stem across two already-linked beams; Boundary 215 adds a second head relation with exact Java translated-line rounding; Boundary 216 reconciles one two-head existing stem; Boundary 217 authenticates a four-head zero-change reconciliation; Boundary 218 reconciles another two-head existing stem; Boundary 219 authenticates a right-side three-head zero-change reconciliation; Boundary 220 authenticates a four-head zero-change reconciliation; Boundary 221 authenticates the following three-head zero-change reconciliation; Boundary 222 authenticates a rejected active-glyph LEFT/TOP C-link with no graph or allocator mutation; Boundary 223 applies corrected same-group beam look-ahead and stops before the trailing glyph; Boundary 224 rejects the following LEFT/TOP C-link before recording the RIGHT shared-stump side as undefined without mutation; Boundaries 225-226 authenticate two idempotent three-head prelinked reconciliations; Boundary 227 authenticates a right-side four-head reconciliation with two real and four idempotent closure writes; Boundary 228 adds one exact LEFT/TOP HeadStem edge to an existing three-head stem; and Boundary 229 authenticates the following idempotent right-side three-head reconciliation; Boundary 230 closes a two-head existing stem with two value changes; Boundary 231 reconciles the following mixed-side four-head stem with two value changes; Boundary 232 adds the next exact RIGHT/BOTTOM edge to an existing five-head stem; Boundary 233 records the following zero-mutation RIGHT dual-corner undefined return; Boundary 234 reconciles the following right-side four-head stem with two value changes; Boundary 235 closes the following right-side two-head stem with two value changes; Boundary 236 closes the following identity-free no-link head and queues it for phase two; Boundary 237 authenticates the following mixed-side four-head zero-change reconciliation; Boundary 238 authenticates the following left-side four-head zero-change reconciliation; Boundary 239 authenticates the following mixed-side five-head zero-change reconciliation; Boundary 240 closes the following mixed-side five-head stem with two value changes; Boundary 241 adds the terminal RIGHT/BOTTOM edge to an existing stem and exhausts system 2 phase one; Boundary 242 executes phase-two retry index 0 as an exact no-link/no-mutation result; Boundary 243 rejects the following RIGHT/BOTTOM append expansion before mutation; Boundary 244 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 245 returns through the following prelinked LEFT side and performs an idempotent two-cell closure; Boundary 246 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 247 rejects the following LEFT/TOP append expansion before mutation; Boundary 248 rejects the next LEFT/TOP append expansion before mutation; Boundary 249 executes the following no-link/no-mutation retry; Boundary 250 adds the first phase-two RIGHT/BOTTOM HeadStem edge by reusing an existing stem; Boundary 251 adds the following RIGHT/BOTTOM edge through a second carried stem; Boundary 252 executes the next no-link/no-mutation retry; Boundary 253 rejects the following LEFT/TOP append expansion before mutation; Boundary 254 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 255 executes the final no-link retry without mutation; Boundary 256 exhausts Bach system-2 phase-two without mutation; Boundary 257 accepts the exhausted carrier through generic native `finalizeStems` with 215 checked heads, one multiple-stem head, 12 no-stem/abnormal heads, and one removed HeadStem relation; Boundary 258 records the matching Java before/after finalizeStems census. Bach now completes system 1, system 2 phase one, and its first fifteen phase-two retries; the phase-two queue is exhausted after x54/SIG59, with native finalizer acceptance structurally gated and Java finalizer parity instrumented.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1031,7 +1031,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The default eight-page differential matches all 3,609 heads entering the epilog and 3,521 finals. With the qualified `smallHeads=true` switch, HEADS uses Java's exact eight normal/small template classes; Batuque matches the live Java census at 155 normal black, 170 normal void, 221 small black, and 150 small void heads, and all 696 stemmed heads reach 2,784 STEMS corners. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, Carmen, Cucaracha, and Hove** | Two hundred and fifty-seven exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; Boundary 207 carries pre-rest beam groups into Bach's post-rest native SIG; Boundary 208 retries rather-good unlinked heads through Java profiles 0-3; Boundary 209 reuses a concrete multi-beam stump without duplicate edges; Boundaries 210-212 reconcile three structurally authenticated prelinked stems; Boundary 213 closes the following no-link head; Boundary 214 reuses another multi-beam stem; Boundary 215 adds a second head relation with exact line rounding; Boundary 216 reconciles one existing stem; Boundary 217 authenticates the zero-change case; Boundary 218 reconciles another existing stem; Boundary 219 authenticates the right-side zero-change case; Boundary 220 authenticates a four-head zero-change case; Boundary 221 authenticates the following three-head zero-change case; Boundary 222 authenticates a rejected active-glyph C-link without mutation; Boundary 223 reuses an existing multi-beam stem after a trailing glyph forces Java's final relation recheck; Boundary 224 rejects the next LEFT C-link before the RIGHT shared-stump undef return; Boundaries 225-226 reconcile two prelinked three-head stems idempotently; Boundary 227 reconciles a right-side four-head stem with two real and four idempotent closure writes; Boundary 228 adds one exact LEFT/TOP HeadStem edge to an existing three-head stem; and Boundary 229 authenticates the following idempotent right-side three-head reconciliation; Boundary 230 closes a two-head existing stem with two value changes; Boundary 231 reconciles the following mixed-side four-head stem with two value changes; Boundary 232 adds the next exact RIGHT/BOTTOM edge to an existing five-head stem; Boundary 233 records the following zero-mutation RIGHT dual-corner undefined return; Boundary 234 reconciles the following right-side four-head stem with two value changes; Boundary 235 closes the following right-side two-head stem with two value changes; Boundary 236 closes the following identity-free no-link head and queues it for phase two; Boundary 237 authenticates the following mixed-side four-head zero-change reconciliation; Boundary 238 authenticates the following left-side four-head zero-change reconciliation; Boundary 239 authenticates the following mixed-side five-head zero-change reconciliation; Boundary 240 closes the following mixed-side five-head stem with two value changes; Boundary 241 adds the terminal RIGHT/BOTTOM edge to an existing stem and exhausts system 2 phase one; Boundary 242 executes the first phase-two retry without mutation; Boundary 243 rejects the next bottom append expansion before mutation; Boundary 244 preserves the next shared-stump undefined side without mutation; Boundary 245 performs the next prelinked idempotent closure; Boundary 246 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 247 rejects the following LEFT/TOP append expansion before mutation; Boundary 248 rejects the next LEFT/TOP append expansion before mutation; Boundary 249 executes the following no-link/no-mutation retry; Boundary 250 adds the first phase-two RIGHT/BOTTOM HeadStem edge by reusing an existing stem; Boundary 251 adds the following RIGHT/BOTTOM edge through a second carried stem; Boundary 252 executes the next no-link/no-mutation retry; Boundary 253 rejects the following LEFT/TOP append expansion before mutation; Boundary 254 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 255 executes the final no-link retry without mutation; Boundary 256 exhausts Bach system-2 phase-two without mutation; Boundary 257 accepts the exhausted carrier through generic native `finalizeStems` with 215 checked heads, one multiple-stem head, 12 no-stem/abnormal heads, and one removed HeadStem relation. | Continue with generic finalizeStems and transactional page publication after the exhausted Bach phase-two queue. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, Carmen, Cucaracha, and Hove** | Two hundred and fifty-seven exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; Boundary 207 carries pre-rest beam groups into Bach's post-rest native SIG; Boundary 208 retries rather-good unlinked heads through Java profiles 0-3; Boundary 209 reuses a concrete multi-beam stump without duplicate edges; Boundaries 210-212 reconcile three structurally authenticated prelinked stems; Boundary 213 closes the following no-link head; Boundary 214 reuses another multi-beam stem; Boundary 215 adds a second head relation with exact line rounding; Boundary 216 reconciles one existing stem; Boundary 217 authenticates the zero-change case; Boundary 218 reconciles another existing stem; Boundary 219 authenticates the right-side zero-change case; Boundary 220 authenticates a four-head zero-change case; Boundary 221 authenticates the following three-head zero-change case; Boundary 222 authenticates a rejected active-glyph C-link without mutation; Boundary 223 applies corrected same-group beam look-ahead and stops before the trailing glyph; Boundary 224 rejects the next LEFT C-link before the RIGHT shared-stump undef return; Boundaries 225-226 reconcile two prelinked three-head stems idempotently; Boundary 227 reconciles a right-side four-head stem with two real and four idempotent closure writes; Boundary 228 adds one exact LEFT/TOP HeadStem edge to an existing three-head stem; and Boundary 229 authenticates the following idempotent right-side three-head reconciliation; Boundary 230 closes a two-head existing stem with two value changes; Boundary 231 reconciles the following mixed-side four-head stem with two value changes; Boundary 232 adds the next exact RIGHT/BOTTOM edge to an existing five-head stem; Boundary 233 records the following zero-mutation RIGHT dual-corner undefined return; Boundary 234 reconciles the following right-side four-head stem with two value changes; Boundary 235 closes the following right-side two-head stem with two value changes; Boundary 236 closes the following identity-free no-link head and queues it for phase two; Boundary 237 authenticates the following mixed-side four-head zero-change reconciliation; Boundary 238 authenticates the following left-side four-head zero-change reconciliation; Boundary 239 authenticates the following mixed-side five-head zero-change reconciliation; Boundary 240 closes the following mixed-side five-head stem with two value changes; Boundary 241 adds the terminal RIGHT/BOTTOM edge to an existing stem and exhausts system 2 phase one; Boundary 242 executes the first phase-two retry without mutation; Boundary 243 rejects the next bottom append expansion before mutation; Boundary 244 preserves the next shared-stump undefined side without mutation; Boundary 245 performs the next prelinked idempotent closure; Boundary 246 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 247 rejects the following LEFT/TOP append expansion before mutation; Boundary 248 rejects the next LEFT/TOP append expansion before mutation; Boundary 249 executes the following no-link/no-mutation retry; Boundary 250 adds the first phase-two RIGHT/BOTTOM HeadStem edge by reusing an existing stem; Boundary 251 adds the following RIGHT/BOTTOM edge through a second carried stem; Boundary 252 executes the next no-link/no-mutation retry; Boundary 253 rejects the following LEFT/TOP append expansion before mutation; Boundary 254 preserves the following shared-stump RIGHT undefined side without mutation; Boundary 255 executes the final no-link retry without mutation; Boundary 256 exhausts Bach system-2 phase-two without mutation; Boundary 257 accepts the exhausted carrier through generic native `finalizeStems` with 215 checked heads, one multiple-stem head, 12 no-stem/abnormal heads, and one removed HeadStem relation. | Continue with generic finalizeStems and transactional page publication after the exhausted Bach phase-two queue. |
 | 11 | `REDUCTION` | **In progress** | Production terminal STEMS SIGs execute Java's complete `reduceFoundations()` outer fixed point, enabled stem head-end refinement, beam-group consistency, sheet-wide free-stem length measurement, and the final keep/remove sweep over the complete native-owned modeled glyph registry. The native path retains exact anchors, direction, median/skew line selection, deskewed beam ordering, concrete-stem filtering, stable tombstones, and the upper-middle pixel/interline median. | Own the remaining Java-only opaque GlyphIndex entries; stage publication and corpus parity. |
 | 12 | `CUE_BEAMS` | **Native, connected, and published** | Exact default `smallHeads=false` prolog skip and schema-1 ordinary/stream output remain. With the qualified switch enabled, production composes aggregate discovery, morphology, SmallBeam creation, grouping, stem lookup/checks, and terminal BeamStem SIG mutation. The non-empty Chopin differential is exact, the connected graph is deterministic, StageAligner sidecar v5 consumes it, and supplemental hook recovery is independently controlled and explicitly provenanced. | Widen the real-score cue corpus and recovery branches. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -4587,7 +4587,7 @@ base-probe/source/transformed-source SHA-256 values are
 `cc3d82763e50f425ff96c8551f3e7fdcc3bb55d594a904cb4bb02087f278dd2b`,
 `a9207f26b57415d8c54602881316c003319c5593ed8baf4c3af13715c41b3065`,
 `7b467c57b65e57aa052296164129ae8c016d82756c9f804d8e1072747b0a76b2`,
-`f51893627e9e1ddaca77daba9166098cfa6d8cc99ff8d094aa9138c13ad78993`,
+`0936046c3a49003a3217da462b9e98907a6259528a85fb5fffde56050befc5fb`,
 and `76d5028c4756a2cbd01f9f5514639fbea222339755f9deba318749feacfba24a`.
 The strict Boundary-177/178 runner/fixture pins are
 `9196aa6841aba9d234c4a82d21185c4ed1367b0329fcfca9930c14f0c6a15331` /
@@ -4624,7 +4624,7 @@ source/transformed-source hashes are
 `c4a870d654f1a60c4fe8be37f63806b676858d659fc220c08d4432f70c6253e9`,
 `33c4f489a66eefbb11034857f0d2cb991d47fb7582b943358da25817a1e2d60c`,
 `7b467c57b65e57aa052296164129ae8c016d82756c9f804d8e1072747b0a76b2`,
-`f51893627e9e1ddaca77daba9166098cfa6d8cc99ff8d094aa9138c13ad78993`,
+`0936046c3a49003a3217da462b9e98907a6259528a85fb5fffde56050befc5fb`,
 and `b2106f6b3e20eeedb46bf0e6926dc6b760581edcb6d65fd381401596c65c71ad`.
 Boundary 179's direct runner/fixture pins are
 `5f530a9fca946f6ed74877713452b7a64fd66f98810654113a700cd6ee61ced3` /
@@ -5668,30 +5668,33 @@ Boundary 221 is pinned; warmup plus two runs are identical. Focused 1/1, all
 29 sibling tests, formatting, strict Clippy, replay, and diff checks pass.
 Continue at queue196.
 
-## Boundary 223: trailing-glyph multi-beam existing-stem C-link
+## Boundary 223: corrected multi-beam look-ahead C-link
 
 Bach queue196 x111/SIG50/Inter3705 selects LEFT/BOTTOM at profile 0. Its
 four-item builder is head, beam SIG12/b2, beam SIG15/b2, then a trailing glyph.
+Corrected Java stops at the second beam (`lastIndex=2`, `maxIndex=3`) and does
+not select the trailing glyph.
 The candidate raster `1080:765:5:50` resolves to an existing stem, so Java
 retains both BeamStem relations, appends one HeadStem edge, changes SIG edges
 596 to 597 with vertices fixed at 394, closes x115 LEFT/RIGHT, allocates
-nothing, and reaches queue197 x30/SIG95. HeadStem grade/dx bits are
-`3fe78b0e784bc6c4` / `bfc77c64aef254b5`.
+nothing, and reaches queue197 x30/SIG95. The pre-expansion HeadStem grade/dx
+bits are `3feffffffffffebf` / `3d0e1e1e1e1e1e1e`.
 
-The production fix matches Java's accidental sibling-loop indexing: only a
-beam that is the final builder item stops expansion; the following glyph at
-queue196 therefore forces the final relation recheck on the evolved line. The
-oracle uses stable candidate/support content aliases instead of a transient
-fresh-JVM glyph ID. Fixture/runner/transform/init/probe/body hashes are
-`3ecc95849d57978667c0e7da58f3717755ca864ce1de12d1e9c37231210c47f2`,
-`efaada105b573927a755c27fcc2510ba6eb12ffc0904104f2d1c1f117616f52a`,
+Upstream PR #977 is applied in both production paths. The look-ahead reads the
+later item, skips non-beams, continues only to a later beam in the same live
+group, and otherwise stops at the current beam. The oracle uses stable active
+candidate glyph 532 instead of a transient fresh-JVM glyph ID.
+Fixture/runner/transform/init/probe/body hashes are
+`f554081690424fe1ce802d90292230ea37f5c05a0b301451cfb8d6a14be77d5b`,
+`baab66c3077a3204b953af91c68a55653a5ca839079ee8043b5b79efa42f2240`,
 `89513ad31d19efccb33d933f340cf3aed687e1c16b0fdfc7186ebf4478ea3046`,
 `1464cf3e45fc89aa88db3d10fdb16d9b0386e592986f45652bb56b680b11dbbd`,
 `856613241d852da7e300e8793699bc80208c967bac8e7e58e7114ce7fab3739e`,
-and `ae8d5fde3be59f6074a615ab80478c6de1861d47ca1e89aeaae9fae0915a0635`.
-Boundary 222 is pinned; warmup plus two runs are identical. Focused 1/1, all
-29 sibling tests, formatting, strict Clippy, deterministic replay, and diff
-checks pass. Continue at queue197.
+and `e3f5fde5c8fb6543b2a30bc225cfe1753c41ab55c8cb198f8f236ae714a64738`.
+Boundary 222 is pinned; warmup plus two runs are identical. The focused Rust
+look-ahead unit and corrected Bach lifecycle gate pass, along with formatting
+and strict Clippy. The sibling suite is 28/35, exactly matching the untouched
+baseline's seven pre-existing comparator-oracle failures. Continue at queue197.
 
 ## Boundary 224: shared-stump RIGHT undef after rejected LEFT C-link
 
@@ -5707,8 +5710,8 @@ that two-stage result without a production change. The strict regression pins
 the added RIGHT undef and phase-2 unlinked-head entry plus complete graph,
 stem, and allocator equality. Fixture/runner/transform/transformed-probe/init/
 body hashes are
-`b892f0cb13a466a5453dfc77c3fe609f5cf6d8df198a75f8a8ca16280b441dcb`,
-`433ebe809905a7d80fbe1773fe2e293a7c63dc773daefaca350cd5ce7375245b`,
+`e4b180f710d1109512c113ef135b4ec6ef0fb0444bb3121bc348b23b9f6b15df`,
+`9860c21bbc04e361cef011ba1323abc3fc3af4b454d58560f78d66f12daa6090`,
 `787d7201a0bc8398d4fede9a8d5859d7db1ab17353eba910ba3b8b527930bce1`,
 `d40bc67fdfb596f08ac15c03941a7bc415f6884a5a6ebd39f4171fb7e96437d6`,
 `ebb5747c2a5e29c7506c28d47a34ac1f3ae1a912a4e0fe8ed84b45bd255def63`,
@@ -5728,8 +5731,8 @@ Native emits x49 LEFT/RIGHT then x51 LEFT/RIGHT in Java closure order, but all
 four cells were already closed, so `closedValueChanges=0`. The q197 RIGHT
 undef and phase-2 entry remain unchanged. No production source changed.
 Fixture/runner/transform/transformed-probe/init/body hashes are
-`7626e4524b7ea776bcef7fdd5dd61055050960ac0e5faa83fe80ae573f607b62`,
-`cc08ce359dd0ce437240c5282d126d7ec65f32fa66c42bab98ecc20e060a0676`,
+`5fa45656fa374033cc364b624e4026ded85af4582c2f510946d69a81b9a3961e`,
+`57971fa30da83de2d6fcab784b715125dc90d5b533aad860b8560b9abf493693`,
 `4d031e6107719248f4a2b079eeed82c04c349843994c8adcb0b13619838200e7`,
 `96cfc05e41a6521a8944c0c8a8c0502d4f3832c3d69625ccfaac95b67a0faffe`,
 `2f45e7b42922e17b30b999885c9abcf599c588156b6e2ef78a808b45ef45275a`,
@@ -5749,8 +5752,8 @@ Native emits x31 LEFT/RIGHT then x33 LEFT/RIGHT in Java closure order. Every
 cell is already closed, so `closedValueChanges=0`; the q197 RIGHT undef and
 phase-2 entry remain unchanged. No production source changed. Fixture/runner/
 transform/transformed-probe/init/body hashes are
-`991517e192399c3986a2193195e53966d4e9ae12b8ae4696066a955d2e1dc89b`,
-`409d1bcff15a122615785c0116feae796c03417716d84d3a0266b19c5faef427`,
+`6531be3251776a021495d19bc84ecb66d87fb706d4d992dc28023d663aefdb2f`,
+`ee0c3d5f3c80b6044c19d09fa9326c6723a979b746e8e956ad44c9bb102091d4`,
 `5300a6127d4248bd8352fffdb10422d9029842d2675d1df1c18d351982d0b1bb`,
 `1298c9fbb4d955f1d775562554d9871e1601e80d9c117a86917cd822c492db93`,
 `9c8ef2b4162f0abe3b66f4f4889a173771a2d808f96e86f2ea76405b47f0f807`,
@@ -5772,8 +5775,8 @@ order. Only x47's two cells change; the other four writes are idempotent, so
 `closedValueChanges=2`. The q197 RIGHT undef and phase-2 entry remain exact. No
 production source changed. Fixture/runner/transform/transformed-probe/init/body
 hashes are
-`e3821fb3ec68f13b384cbf96d4f94817e21cfd83172e484c01b134097be619b2`,
-`6168f1942b210ba6c36c1f884a12b527128d3adc53e4b7e021a8532e8092b7a0`,
+`98e1def32d0d19d425f5eebeb32c7ef8c1463f28a0fe27f54919f068e361d26e`,
+`75a9b7483b183e07bb2a114b2b13e2b4f72b249faebe88acec3ba3eaeea74281`,
 `b76df6de64f97f1767fe63ef9ed8046b858a37f784d2ef940a4fc9cc89c25d93`,
 `68fc235aec6ffd88e4395fc45120749ad3ce4404b9b38623b75a10e7e6a18057`,
 `69adb3a57b44643c288bbe509228c53dcb6209cd7a56f511f1182bb0caac2a5b`,
@@ -5797,8 +5800,8 @@ both x endpoints twelve representable steps higher, so production applies the
 correction only at x168/SIG171 LEFT/TOP. Native records idempotent x166 L/R
 then x165 L/R closures with zero changed values. Fixture/runner/transform/
 transformed-probe/init/body hashes are
-`189cc717bb41b9e29b8c632c5e2bf6a0ab84b1a7bedc347d28c402218c713735`,
-`3aedc82e8e710db2e58e26973a2cfcc7989599c1601615ab50462a5b71ca75b5`,
+`33db6e057670e46a7ad05894fd13760650e5d21e8878aef247eb5cd6da502f7c`,
+`f790427057a3be6d5eac165c24a5bd814d89cf5cc5c571f60787466f5a5f6e34`,
 `2884aaffb9cfbcc13612e050fe096dd2bed0cc12b8e0ea70edeeee469ae7bbf5`,
 `df81a7d592bc8dc2f7cd694a56978bf8d247f48a24535540712393e65e0edfd9`,
 `908524a670c9c2b87f67ba18f6a8bdb61d3281ce49dc2e745b6b465f39e05db1`,
@@ -5817,8 +5820,8 @@ undef, or unlinked mutation and reaches queue203 x125/SIG25.
 Native emits x60 LEFT/RIGHT then x61 LEFT/RIGHT in incident order. All four
 cells are already closed, so `closedValueChanges=0`. No production source
 changed. Fixture/runner/transform/transformed-probe/init/body hashes are
-`565bc3d90727c2980189bddf657bc8813d69458cf6833a028d152e8694471344`,
-`33701954065dcba38cbaaa6fb65aa178c0b8be256f370f30e200fe32f037aaad`,
+`e1b4008b3b0b355452bc3a305dd05ed462ee216ce7758f2401bf124427c5102b`,
+`7f0d72879002574ca4cdce7fae22f4fb458e8ec181d3b7d2179d8cc9b1873b58`,
 `c47059b123a5dac6769c55ab4c86aff8c296ccbe9fe862a8fd0da2e4ab6f826f`,
 `863ebf6c04841b77e6a00e470593a1360c086ee7a4e4513d894c2d30245af939`,
 `e8f8a41fc2c14a8780d69906199e64dad2ca37e6bd7ad1f808940e0aba504214`,
@@ -5836,8 +5839,8 @@ and 77 system stems, and reaches queue204 x43/SIG193. The generic native
 continuation matches exactly; no production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body hashes are
-`c3e004cc45289ad6267c0544bc9879b9d2403bba9cd11a185406731e1e1634af`,
-`76a14fcfee7b3733efe9126afa809d7a8af86da82d83e578f6b358e2648fdccd`,
+`3b1537b855ae20733d842f6c805ba055ee7c64481feeca380f8c30651e0d0215`,
+`c417e89cdd54917a6ae8d2b5687ad62d7ec54b5df195b98fd22cceafbe382c01`,
 `f61d9c19aa2c26ff1a91e01ff4c1b65ece877eb8a37b69124b7dcde3d48dd073`,
 `0a48c5ccd621bd83f325c68ec8e4a238ac62513f683f3f20ddd6b05ab23d7687`,
 `f24fc7c1be0b4e0ee12c9276ca6dba3a97bb9651a3de88e45f9fb14b0c3549c7`,
@@ -5862,8 +5865,8 @@ allocator, undefined-side, and unlinked-head state remain unchanged; no
 production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`60358cbc2e88771fd810da4b5aa8a7638a2b5d5b99f9152791b08f863fb41061`,
-`e484a236ce93d250882727e950b82bee88cb3cf9539b2448de4c3b3b4e9d89ce`,
+`d3d4f40f096cc0bb0a47a32b9a54d91e46b0bde1faf05a58e2484b8504ac8703`,
+`b163837cc4257da17a39aeeb4ae5943369c406b474dbd0ae1a05119f72883db3`,
 `38fe59a6c06a71bdb2d5b7958376cf128e9ce5cb6c2d5885b0c409e03e39a488`,
 `bd3a16f4e7c6cc57f05d9a6ff2ff51f1101dc9cb950243d15a3b21bd9cccce8b`,
 `fc06f1c28e407d1d03e33565e0143e28cdd68adb25ef8b6af1d399c083ebd4b1`,
@@ -5891,8 +5894,8 @@ x25, x27, and x28 LEFT/RIGHT in incident order; all eight sibling closures are
 idempotent, so `closedCellChanges=0`. No production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`7b9b4ea178041618cab27d29b0cdcd8e175a75328c62a1843906e19efb7e9b3e`,
-`ae770812470954f0f00f2228a0c3b213f7d33ac5dc474fe6124d8f308e29e69b`,
+`563b584e6271fe455dd98b5da2a3f3316ab8343028e19aea11712c4b75a0d8b3`,
+`4c1e27fedd2b6c9a3d6badd13d8b52fbb52fe7dbbd3c6ed68cd115f0c109af2f`,
 `ebd1afa4600b2cdad0105d78cbacd2235dbefa5e7d77d4b20eefa6699f2b674b`,
 `11bced10ebe7d09a718777ac30eca681a03cf9e2c4917e86805f8ac7b279b873`,
 `4e4771086ff5f6ac5aa1a43401a8145ab1f96b0d215468390341dda4fc9dabc9`,
@@ -5916,8 +5919,8 @@ and reproduces the zero-mutation transition. Graph, stem, glyph-index, and
 allocator state remain unchanged; no production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`5f2ecd4cd42c8182b13ac560db4447682fe130b2587ce8a66844c4253bae5bab`,
-`f8a9cf2042a9e19204c4c5305eb7bd95d21f20eb08773d1214284abdce3b9d20`,
+`85cd838100b454a8e4cc5bca06b174bf93e1da83f5d4d9f4ec2bc6889732b85c`,
+`2bdfd696acb39afebae403fb84fe3fd9fceac3d230b07d22af3e57dcc9b2494c`,
 `ef25333e8ea8edf8dd0e16f2fb1cdf526314f905032fc80c6fe8467c69da6fdb`,
 `c13d4a630a99690a34025c48578953dd89fbcd812f0078c650dfded178dc6f23`,
 `84cf5668faf0bb3fa4280d05d558af0fed2046d66160a8275a479a3888f05295`,
@@ -5942,8 +5945,8 @@ allocator, undefined-side, and unlinked-head state remain unchanged; no
 production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`4dfa3e893bb10eb664d90100c780ab5a80df3b7e3e375e102b62b757a2eaa35f`,
-`fafcd20531cbbae5c30a0099dc77d8196cd24611841f0e3e0dd1140206155f89`,
+`fa4a841724272faf3633f5f703114efc2f9021700a07d0cd1105eacad39ce74c`,
+`167b9f622b17073f9312344d7d18e8c7fbac47bf72522ee8481f71fe3540d8fe`,
 `07d6a5bb5aa7fb5f4734057fe7d52b5f65971f475efd7b8babb61142b4c714e7`,
 `da76a5b92ccb38174504b1f2c1468c18b42ec8bdc435c1255adc5cc2ab9a93bd`,
 `36bc15ca3d9d0fbb96ad223902c77cb748eb7c90421590d4e5338674fcf6bed1`,
@@ -5964,8 +5967,8 @@ graph, stem, glyph-index, allocator, undefined-side, and unlinked-head state
 remain unchanged. No production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`ae7f4b373b81e57d77c9f5733adf8d6c16616f84a88d3161dbd5abdc378d16a2`,
-`1563fd789415447e97461124a7182c6b45b7213457a8f965038b49a17c9096be`,
+`0d039237414f7b84a49f7c0adb09f3af8e13f0d8b6b38db0794b1011adb0d998`,
+`ad2501c61062785e95b613a2a009ea131248fe40e7481174257649f989d7dcf7`,
 `02906fc2f4581adfcd2a4610797f455e14ebbd4ab043777888f0fea39de877c0`,
 `60a8b0c38f30c9923cd76f661b2975fc1675e4f61c0f954d9e40788ee4129490`,
 `037118a6c499f39267daa3b7120e9a43cf87ccd289f44422cf00e8cc0e0a3b21`,
@@ -5989,8 +5992,8 @@ alter graph, stem, glyph-index, allocator, or undefined-side authority. No
 production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`357af1a1ad1649226e18b8ff79c0bb566fb92bc1ca1681f2c1a8f9a6f89cf0dd`,
-`5fcaffc155c755823aee5557b09eca4eeb0680e4fca7e0a05b3fc3e036cb96f2`,
+`59f35aa4233c57ca4b9f206e049c8e353c3bf7370755398ad6cd350aad493204`,
+`a00a00c96774fc403c911d5f41867a5981378ca846c73bcf9878d100803197f3`,
 `ccfd555df5789d7e21faf3d1932fe834f394806e5b8cf49afda2c6ddb50fad01`,
 `67a8e749acfdcd2ee88282841cc8c3132ba5c10d47d5feda99cbadc02fbb0d03`,
 `f541f60d413810bde26575cc7e2be70a3929bba5f29d74736fb67a63bc8fbf87`,
@@ -6014,8 +6017,8 @@ stem, glyph-index, allocator, undefined-side, and phase-two unlinked-head state
 remain unchanged. No production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`730c4ff7c291de4495db022e5a6c303dd2b3336f618acdf65390c725e0ac8bbc`,
-`47a2c3977c64ab36cf8c98af00523134bfa00b2371a4c3561004c40cce4d0164`,
+`38bd91508a4ebed40cdb0780d235d4d5254d08afdbc61b4fba81d204a00c904d`,
+`d2e116bfdca58d0bf03ec91ede1eae81a6ee270dc76e665203378413655131a9`,
 `cd111cd8bdd8faa64e64ad63075aa6d5fcd87da0b907c12d2f6574cffcb08c8a`,
 `ed368c380dfaf70f4e8956b682454cd6122f7519a8fc91fe807d53e03591e282`,
 `6f5e8f8e4e93ebbb94c4f7dde8c5634ef457edb2d7561b3011c483d207abd6e8`,
@@ -6039,8 +6042,8 @@ glyph-index, allocator, undefined-side, and phase-two unlinked-head state
 remain unchanged. No production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`c2eb23f0ed638111810c27421e014d262d05c9e2fd9cc53f3ece4f0a607ad980`,
-`1a7c5eb47453b364a32a030250be5b553b869410b631e4bdd5889570c7330ba3`,
+`119364175e2b12de137399a63f170a8e92ec2fdfe6c6ad1f997a6a7914885f9b`,
+`7e4226a8881608d1e3a65f2dec049245ae6b9ca06677c22e08b24efbec692865`,
 `a2b19ed1db88492f5025f2f98c7b2b853eacd9e3066eb56a7b61455bdb9988c2`,
 `70427bf782e02fda439d2693c5e896fcfd6593195d9d4e11aa6c0f389fb9be1f`,
 `3ed3c8fe91351c964d27de2853e40a91b39daa7c5572fe6a4ea3470ef27e4bff`,
@@ -6065,8 +6068,8 @@ undefined-side, and phase-two unlinked-head state remain unchanged. No
 production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`a0d0e6a9702993d60407d31c73c3623b2817fc82e3ca4c9e36938a6e16d238d3`,
-`3a659f67ce2ec2cada33f178ef9dd69ac33d03999615a8d3f3bf463de0be644f`,
+`943421c0ab4dfb6cbe099976027dc3fa59fcf6a2d91488a7b2db09481d9bc6ad`,
+`aa012d790441299d7c92bf1225326dc8c30a7a99f2325aebcb3f2c8533c302b7`,
 `5887d866785ae590359754e43034f78a40b4987cd0608cf65ca4e3c3a9fe7ffb`,
 `00ae57ed40e31c834dfe35c83b60877fca1de6901a1012b1a21f14c746a9c20b`,
 `5e60ccf0f4730296ef246d30e9eb5e445f500f93d38bc964f57e755b7224e931`,
@@ -6091,8 +6094,8 @@ stem, glyph-index, allocator, undefined-side, and phase-two unlinked-head state
 remain unchanged. No production source changed.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`0f302e5e9d8ff1228f825c6f0253fbd9a54e4d9fea5e73c577272969e0897efb`,
-`5fbdf0edf5bf34c098611028ff5710dc914aee8293d38437980894ecd02e3ff9`,
+`c3c1d868bebbe35dcfedfe9c20f9a54394674329d65f75bc564cddadeef2a612`,
+`416e1d08855cb5ccc4b7c54e2d12906a6cf53a826ea923ebefd88f8218932c43`,
 `fe1631185244cbb1d85e40561ec3bd587926633bef6d08556fdb652e36be2bff`,
 `fd98e63eabd0933e936784c105ed79704518cd1730cda2b764286f83302ecd90`,
 `719d52fd6edb5eef72c60bf1f5a82603237d1271c839d82cf1ce0bffe2dadf8f`,
@@ -6124,8 +6127,8 @@ x118/SIG211, and x54/SIG59. No production source changed; the next Bach
 boundary is phase-two retry index 0 at x185/SIG213.
 
 Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
-`9f304da04ee55692abb622dd1b902e4ba7279dacb7d39067b7868194d20c6f09`,
-`9ca821af9bd3e002b81b7a8a7d17bebd8b775de156dd83afa63859ebc32826a4`,
+`8ce4bb110020fbbb4c62aab574fe2aaca8d6aced89f5797c75d9602e8866c54c`,
+`8bd7fee1f76c04ba2d92c3789a2d5b99d5c79d797622980e87f31937c45d7800`,
 `7a215a66feb17f16570e079f493597ade96bed72e4d23cdd35c3684595f2411b`,
 `ce21c73309c01d67275d5750c8cfe99ece9ded032f66eb389cc2e0f19467e8fc`,
 `0c0c68eda7f0a17fddbaf7c4ffa377dd401855d7376162137ab659e295f5e546`,
@@ -6151,8 +6154,8 @@ and only `phase_two_index` advances from 0 to 1. The terminal phase-one state
 and all 15 queue identities remain intact; the next retry is x159/SIG164.
 
 Fixture/runner/body SHA-256 values are
-`e1b1980ea01ce85dc0657f48d2b72f416cf9455ef5af481f59f8a4cfdb44ed5f`,
-`93542ec7969929534eef23ed52da2703972098a5401dafd082a8b39ed4110bbe`,
+`7220313d786c3c917648b6be55abfda26b8b0bfac81a164b98253739fa2b74a1`,
+`98d97209bec4e7fbe3ba8d9d2aae084c3080ce3806352c34bbc7995517c22175`,
 and `65f0b5ab998c5e83b65cd5b40e4d3b52fd1c94b834ed560a5ae70fc9251cee04`.
 The strict Boundary-241 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
@@ -6175,8 +6178,8 @@ Its ordered local closure attempts are idempotent, zero cells change, and only
 phase-one state remain intact; the next retry is x194/SIG78.
 
 Fixture/runner/body SHA-256 values are
-`4a56cd452b491f8b2851daa73d821e4262fcac4786561c3561ae9cf7bb864e24`,
-`e2a637c2355ce175bbbd643cd5e0b8df6d6be1f0b6e96aff5d1e7a3bbb58418c`,
+`98dd81cbf87d17094be2919fae1966e226ee9f4b82942e79fc0dce454a218479`,
+`74bcc8d5f9fb10cd4d6df2a47215e2475e05aa2e327b1ee05d052ec1fe518dfd`,
 and `1a011901f9b9f09635cef126981c9b50c64a1ee6bc6c03a6eb5811d5a35fbcbe`.
 The strict Boundary-242 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. The focused gate, all 29 sibling tests,
@@ -6197,8 +6200,8 @@ cells, preserves every carried undefined side and all 15 queue identities, and
 advances only `phase_two_index` from 2 to 3. The next retry is x163/SIG170.
 
 Fixture/runner/body SHA-256 values are
-`8b952682dfaa9571f1ab314c3f5899eec5210f35450a872003fc0c041a6d527e`,
-`1bc3292182b7e34979d1f1ada9b6bda8841a96374ac8787fbaf66406b14c6633`,
+`44c3bef93611095dfd360c5bb6b041b5bff9380372038e1235d0ee705c302576`,
+`12d22710bf3f5d512646a0aa90b505061b1964eac53a514ff8ee8db81859bcf4`,
 and `8c753e9204d4bcd768fbc3801e38badf75a998541ed5bc280c011f8b5c3168ab`.
 The strict Boundary-243 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. The focused gate, all 29 sibling tests,
@@ -6219,8 +6222,8 @@ cells change, all 15 queued identities remain intact, and only
 `phase_two_index` advances from 3 to 4. The next retry is x160/SIG169.
 
 Fixture/runner/body SHA-256 values are
-`75f638bb12320fae8f61d72fc2138c4cbdcc07986f222cdfb1906108caae9a57`,
-`38e817048be6022fc704b55e69ec8f84009bf83cb017c784e30ef660a7e71c77`,
+`a78fec3de69ebffb97ef4f5755b01ad42143b697eed278cba5696f997fc97d34`,
+`49bc7cb004bd3fba40208f1f8c13d642f96e6f5bb27b5e71928e099c771308d3`,
 and `2f41f2931e132bd05feff04b10815e3b3e322fcae9019e501399f82818d25667`.
 The strict Boundary-244 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
@@ -6241,8 +6244,8 @@ cells, preserves all carried state and all 15 queue identities, and advances
 only `phase_two_index` from 4 to 5. The next retry is x162/SIG168.
 
 Fixture/runner/body SHA-256 values are
-`6ba6a704229a926dd21fbae4e396d4917d48ee2b8149736178aa52aeaa833753`,
-`e03f0c788dd21a61d5629fbb4fc1c1afaf7d8439f567949afb26c09890361823`,
+`1d588ac12c25eb05731b1eee228de1870489738ec03d4af26384b2b624828236`,
+`e5dad67b832770786fb3947821bbf9c51e4488fd3913bba068859b6a8ff9f6ef`,
 and `2c6a549a584f6dec0b9a2611877277d4f951870b0be353a78941af49e22da039`.
 The strict Boundary-245 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
@@ -6262,8 +6265,8 @@ closure attempts are idempotent, zero cells change, and only `phase_two_index`
 advances from 5 to 6. The next retry is x158/SIG88.
 
 Fixture/runner/body SHA-256 values are
-`9a23db94e8c05f442579a28f223cd1a26cd3e45f4bdffd9ce03159990610a409`,
-`d1b668eb65ad174d3cc80030b3cf76a674fe35692f78011fc21e1d18896ed2a0`,
+`3377df7d16a05f252b7fc99121973f934cd57ab9597cea34aabb3b058493ed9c`,
+`cddf028c62bff3c11926f37e8bdf87a926fe5282ddc8e80e94f409a3f5a14acf`,
 and `9456f61c645cb109e3c1bdea7c5f519d6ebad9f01d39f71c6209c39f050c050a`.
 The strict Boundary-246 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
@@ -6283,8 +6286,8 @@ closure attempts are idempotent, zero cells change, and only `phase_two_index`
 advances from 6 to 7. The next retry is x152/SIG90.
 
 Fixture/runner/body SHA-256 values are
-`00d2ae8e477aa06c27d1421ad017a6412c7fe1dfcda06a5ce405182aecbbe95b`,
-`74649eaef4d2cad4be3a4e7ff9975287ecbdc5c1ee0189b4de33a3a90e127fea`,
+`5c6a42a3a73d161b185315a288cb6efa19f6cf26018f693895a5dfd126338205`,
+`026c34ec418cd1fbd8efebd611a99a59d023dc2ce02af4c96434cfd7a0b59d9e`,
 and `7fed672bca672031f9a9bfa6268d1dd5f037bf318190ef75432c9dace0a0c704`.
 The strict Boundary-247 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
@@ -6303,8 +6306,8 @@ advances from 7 to 8. The next retry is x123/SIG14, the first measured phase-two
 graph mutation.
 
 Fixture/runner/body SHA-256 values are
-`d6002f389798e08c11ca81eb17cb411fba2df27090cf3a02e36bbe2bd4ab833b`,
-`9af18b8ff7680a658d667cec9254f9928e73517c12db8dd3ee1c56e96f909965`,
+`d11f10481ce7044ac3cde07d6f8e51d1e8c10ef4eb3d193a771b1189859fbe84`,
+`67ed9a70a31bbec72c3087248ee2d63771d4a8d58a18c66354437c166279a16d`,
 and `b4f2b620aa0abb9e793393c81d2e7fd19ad1929553ad99cf3d37c3618ce6814a`.
 The strict Boundary-248 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
@@ -6327,8 +6330,8 @@ authenticated frontier and leaves reused stem geometry unchanged. The next
 retry is x149/SIG18; six entries remain.
 
 Fixture/runner/retarget-transform/body SHA-256 values are
-`863be30c6bdf8a69c982ffdfa68f6e1a00ff279235a81e5519d52711ba3fcb6f`,
-`a06dd25df8f30d7e204760cfea1aafdeb6d1a106aed9e4279d9902a10391aff0`,
+`cea0d597f1a5a77860f368424383536111d772ed58083f4d1d0331f43281daae`,
+`8c184f77b90aa0b102ca41daa3fb4c910ac0dbf3c8050bb994bbd60b72bc8be8`,
 `bce9262e517c4eeae4d36a6e97da8a055978469ecc59f5868703b799b9d71192`,
 and `70aa6a599cfffcf0a5e3c2c05e69e8eeba3b524978dc2360639bc25faa5b379f`.
 Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling
@@ -6349,8 +6352,8 @@ Java directly: `3fe3c8a4915237cf` / `bfcfa150d80c0969` /
 `3ff62f53e62f53e7`. The next retry is x190/SIG214; five entries remain.
 
 Fixture/runner/retarget-transform/body SHA-256 values are
-`47e858bc78ae05861427772e3709de101bd74fc28237cd764ba1781812ea7400`,
-`d709cf7be61c748cd78cac7255fb6bb9b65f82a345399615e2ed3b8f03b3dc73`,
+`2de3f797787eeb64ecdf4167c92d2f6f2582b57577017146f7268f72f0203f05`,
+`e167db773c00127cb22f4c1982037f1e56b66ee33cdfe6895ad1d2e675c8dff4`,
 `744010081f4982168091e092cf2478dda78a17b40e170250e99af408c107467d`,
 and `42de793ba36a5699f6876859310ee7c89f14784dee2136bdfcf33720287e4a2d`.
 Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling
@@ -6367,8 +6370,8 @@ changes zero cells, and advances only the phase-two cursor 10→11. Next is
 x98/SIG136 with four entries remaining.
 
 Fixture/runner/body SHA-256 values are
-`63f9d4a4282f627135b54c7edca615ca70ee0336b08f5791c2608300fdeeb6e6`,
-`5228935d63cee6acea057146bf52129c6c4225ccaf1426746164662511e700e0`,
+`d7054c473728180fe1677d8a0bc561594c536387e32163874a897f04b1b8efb5`,
+`8f1c053c0ae18ae60a65d3269554eac7e0a2e9b8e570e5ea66a5e2ecdc2386a4`,
 and `bc115c0b4721fbc8a6ed2e1d4e21ba0caa4f3d34005e6707e0e8414af2a66819`.
 Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling
 tests, formatting, strict all-target/all-feature workspace Clippy, and diff
@@ -6385,8 +6388,8 @@ changes zero cells, and advances only the phase-two cursor 11→12. Next is
 x30/SIG95 with three entries remaining.
 
 Fixture/runner/body SHA-256 values are
-`cc81174fe04838a62d78238af0429124b7b5cb72787f046e4019007431e5a6c4`,
-`238ac54a22a55fcb51e2fbf274b25affb85efa99c5d7158671c1b4c9b3f7934d`,
+`bd43c556ceb34074b3e8ca450dde11fe0c43918cf54743ac257a6fbb8bcaa1d5`,
+`1bd125a1ede81c45124910b2457adbeeb5b85b44a88b4bec2d43c59b15dd5208`,
 and `79d837ba5a1eb764a8325c6959f1105be77404d69d515937a27deb029df6aefa`.
 Warmup plus two fresh JVM runs are byte-identical. Focused 1/1 passes in
 9.33s; all 29 sibling tests pass in 160.18s; strict all-target/all-feature
@@ -6402,8 +6405,8 @@ fixed. Generic native retry changes no closure cells and advances only the
 phase-two cursor 12→13. Next is x118/SIG211 with two entries remaining.
 
 Fixture/runner/body SHA-256 values are
-`0826d073b514fd92b69921792f90d08811fe4f786ba4da38ad96685df6fa4b41`,
-`9791651a915d43080094522a9689288a53d149f5cbdced50258e8fdf80216737`,
+`8d6c4b96c25bf85d368c02d03063ae763d1365a35f60759e4cfda91aa3c48901`,
+`7fe3feee566f27d4f3c5cf5f737ab6f2809696a19dfb13d20fda45479bb5987e`,
 and `050912a5132acdccc2925cc3e860ec2f97a225931103bb96f4461a4b74030707`.
 Warmup plus two fresh JVM runs are byte-identical. Focused 1/1 passes in
 11.38s; all 29 sibling tests pass in 176.05s; strict all-target/all-feature
@@ -6419,8 +6422,8 @@ side and returns false without mutation; SIG 394/602, 77 stems, and allocator
 only the phase-two cursor 13→14. Next is x54/SIG59 with one entry remaining.
 
 Fixture/runner/body SHA-256 values are
-`96496f2705872692114655481747336fc3cf93e745cc3233f9bcee05c4ab34c7`,
-`1fcb4e5bea6828394fb3a9c689a21aa01e8a1f86d442f90fd6e5918ed6b19a5a`,
+`ae0058af20fb67d3ee6a4349a012462c0a38578870d6dfc5ad7813c3161698c0`,
+`9b4548be4751f2d3f97c3a09bf5d6de600e9b0d45f6e6ddba0a607b0725316a7`,
 and `c69861db9153f8408c63f82e28658774f3e0bd7164744f1fcb5c6df3c6b1d2de`.
 Warmup plus two fresh JVM runs are byte-identical. Focused 1/1 passes in
 11.23s; all 29 sibling tests pass in 177.59s; strict all-target/all-feature
@@ -6435,8 +6438,8 @@ allocator 6815 stay fixed. Generic native retry records only idempotent local
 closure attempts, advances the phase-two cursor 14→15, and exhausts the queue.
 
 Fixture/runner/body SHA-256 values are
-`f83e26e02df6ba19f58ab48742ee4f53b1341a2064c3d3151d16aa9598b1ae43`,
-`d711efae48f0a8ca434936b7e68ac143cee9593867c63a853c90f28b330d3549`,
+`638cd4dd24378abe889356f1fbc02b9fb054f3f62ca1898eb99d77667c5be3db`,
+`09c220ac162ab0ba22f4d8c8447faae0bb953626e7e6ca308dbd4ef1f9e55f36`,
 and `b17bb9b6bbea9f5771397c8caea30134fad2b7ca412e41b29d8f02776e187f2a`.
 Warmup plus two fresh JVM runs are byte-identical. Focused 1/1 passes in
 11.23s; all 29 sibling tests pass in 167.46s; strict all-target/all-feature

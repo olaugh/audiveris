@@ -12308,7 +12308,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     );
     assert_eq!(
         x14_field("headLinkerSourceSha256"),
-        "f51893627e9e1ddaca77daba9166098cfa6d8cc99ff8d094aa9138c13ad78993"
+        "0936046c3a49003a3217da462b9e98907a6259528a85fb5fffde56050befc5fb"
     );
     assert_eq!(
         x14_field("transformSourceSha256"),
@@ -12439,7 +12439,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     );
     assert_eq!(
         x13_field("headLinkerSourceSha256"),
-        "f51893627e9e1ddaca77daba9166098cfa6d8cc99ff8d094aa9138c13ad78993"
+        "0936046c3a49003a3217da462b9e98907a6259528a85fb5fffde56050befc5fb"
     );
     assert_eq!(
         x13_field("transformSourceSha256"),
@@ -12570,7 +12570,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     );
     assert_eq!(
         x113_field("headLinkerSourceSha256"),
-        "f51893627e9e1ddaca77daba9166098cfa6d8cc99ff8d094aa9138c13ad78993"
+        "0936046c3a49003a3217da462b9e98907a6259528a85fb5fffde56050befc5fb"
     );
     assert_eq!(
         x113_field("transformSourceSha256"),
@@ -20070,7 +20070,7 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
     )
     .expect("Bach system-2 queue-196 existing-stem C-link")
     .expect("Bach system-2 queue-196 returns a C-link transaction");
-    assert_eq!((order196.last_index, order196.max_index), (3, 3));
+    assert_eq!((order196.last_index, order196.max_index), (2, 3));
     assert_eq!(order196.selected_glyph_id, matching_order196_stem.glyph_id);
     assert_eq!(
         order196.create.disposition,
@@ -20102,8 +20102,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
     assert!(order196.linked_b_linkers.is_empty());
     assert!(order196.additional_head_relations.is_empty());
     assert!(order196.relation.accepted);
-    assert_eq!(order196.relation.grade.to_bits(), 0x3fe78b0e784bc6c4);
-    assert_eq!(order196.relation.dx.to_bits(), 0xbfc77c64aef254b5);
+    assert_eq!(order196.relation.grade.to_bits(), 0x3feffffffffffebf);
+    assert_eq!(order196.relation.dx.to_bits(), 0x3d0e1e1e1e1e1e1e);
     assert_eq!(order196.closed_cell_changes, 2);
     assert_eq!(
         order196
@@ -23331,11 +23331,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER196_FIXTURE.as_bytes()),
-        "3ecc95849d57978667c0e7da58f3717755ca864ce1de12d1e9c37231210c47f2"
+        "f554081690424fe1ce802d90292230ea37f5c05a0b301451cfb8d6a14be77d5b"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER196_RUNNER),
-        "efaada105b573927a755c27fcc2510ba6eb12ffc0904104f2d1c1f117616f52a"
+        "baab66c3077a3204b953af91c68a55653a5ca839079ee8043b5b79efa42f2240"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER196_TRANSFORM),
@@ -23348,12 +23348,12 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
     for exact in [
         "headOrder 196 headX 111 headSig 50 headInterId 3705 grade 0x1.709c65e42a4cp-3/3fc709c65e42a4c0",
         "cAlias h:111:LEFT:BOTTOM",
-        "lastIndex 3 maxIndex 3",
+        "lastIndex 2 maxIndex 3",
         "relations 3 relationRows [head:x111:inter3705:LEFT:BOTTOM",
         "beam:sig12:inter2033:b2:state=true:false:BeamStemRelation",
         "beam:sig15:inter2039:b2:state=true:false:BeamStemRelation",
-        "glyphs 2 selected [candidateGlyph:g:1080:765:5:50:6d34ed9b8b82cf520fadb31417176c79bd53f144cb55d19f6bba9244d9318a1e,supportGlyph:g:1082:765:3:50:fc7a2c955b86e3de1a80af2a4ed667671c0701c62c6c4fa725e304d496b7176e]",
-        "candidateIdBefore 0",
+        "glyphs 1 selected [candidateGlyph:g:1080:765:5:50:6d34ed9b8b82cf520fadb31417176c79bd53f144cb55d19f6bba9244d9318a1e]",
+        "candidateIdBefore 532",
         "existingCandidateStem true",
         "allocatorDelta 0 sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 596 sigEdgesAfter 597 systemStemsBefore 77 systemStemsAfter 77",
         "addedVertices [] addedEdges [source=headX111:target=existingCandidateStem:HeadStemRelation",
@@ -23361,7 +23361,7 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "nextHeadOrder 197 nextHeadX 30 nextHeadSig 95 nextHeadInterId 3796",
         "transformSourceSha256 89513ad31d19efccb33d933f340cf3aed687e1c16b0fdfc7186ebf4478ea3046",
         "transformedProbeSha256 856613241d852da7e300e8793699bc80208c967bac8e7e58e7114ce7fab3739e",
-        "emittedBodySha256 ae8d5fde3be59f6074a615ab80478c6de1861d47ca1e89aeaae9fae0915a0635",
+        "emittedBodySha256 e3f5fde5c8fb6543b2a30bc225cfe1753c41ab55c8cb198f8f236ae714a64738",
         "baseOrder195RunnerSha256 b414b501d758861292d774e3ae1f39800770bb9ee8f3b3901bb01ce04b04e876",
         "baseOrder195FixtureSha256 17039789bc695394dc405f42c6c2ac7c01278c69697bc94f67bfc2bdef22a2f0",
         "freshRuns 2 freshRunsByteIdentical true",
@@ -23376,11 +23376,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER197_FIXTURE.as_bytes()),
-        "b892f0cb13a466a5453dfc77c3fe609f5cf6d8df198a75f8a8ca16280b441dcb"
+        "e4b180f710d1109512c113ef135b4ec6ef0fb0444bb3121bc348b23b9f6b15df"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER197_RUNNER),
-        "433ebe809905a7d80fbe1773fe2e293a7c63dc773daefaca350cd5ce7375245b"
+        "9860c21bbc04e361cef011ba1323abc3fc3af4b454d58560f78d66f12daa6090"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER197_TRANSFORM),
@@ -23400,8 +23400,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 787d7201a0bc8398d4fede9a8d5859d7db1ab17353eba910ba3b8b527930bce1",
         "transformedProbeSha256 d40bc67fdfb596f08ac15c03941a7bc415f6884a5a6ebd39f4171fb7e96437d6",
         "emittedBodySha256 977b43c9cb1db94cdc3c86f7b4a83984d84a6b60036a88c1a64ecdbc633e3e96",
-        "baseOrder196RunnerSha256 efaada105b573927a755c27fcc2510ba6eb12ffc0904104f2d1c1f117616f52a",
-        "baseOrder196FixtureSha256 3ecc95849d57978667c0e7da58f3717755ca864ce1de12d1e9c37231210c47f2",
+        "baseOrder196RunnerSha256 baab66c3077a3204b953af91c68a55653a5ca839079ee8043b5b79efa42f2240",
+        "baseOrder196FixtureSha256 f554081690424fe1ce802d90292230ea37f5c05a0b301451cfb8d6a14be77d5b",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneSharedStumpRightDualCornerUndef",
         "javaEvidence ReturnedBeforeHeadOrder198",
@@ -23414,11 +23414,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER198_FIXTURE.as_bytes()),
-        "7626e4524b7ea776bcef7fdd5dd61055050960ac0e5faa83fe80ae573f607b62"
+        "5fa45656fa374033cc364b624e4026ded85af4582c2f510946d69a81b9a3961e"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER198_RUNNER),
-        "cc08ce359dd0ce437240c5282d126d7ec65f32fa66c42bab98ecc20e060a0676"
+        "57971fa30da83de2d6fcab784b715125dc90d5b533aad860b8560b9abf493693"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER198_TRANSFORM),
@@ -23438,8 +23438,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 4d031e6107719248f4a2b079eeed82c04c349843994c8adcb0b13619838200e7",
         "transformedProbeSha256 96cfc05e41a6521a8944c0c8a8c0502d4f3832c3d69625ccfaac95b67a0faffe",
         "emittedBodySha256 6aa6fba2dab9bd3a80ccdf69c8e7377f21fb94c02fccca932eb5253ccf12063a",
-        "baseOrder197RunnerSha256 433ebe809905a7d80fbe1773fe2e293a7c63dc773daefaca350cd5ce7375245b",
-        "baseOrder197FixtureSha256 b892f0cb13a466a5453dfc77c3fe609f5cf6d8df198a75f8a8ca16280b441dcb",
+        "baseOrder197RunnerSha256 9860c21bbc04e361cef011ba1323abc3fc3af4b454d58560f78d66f12daa6090",
+        "baseOrder197FixtureSha256 e4b180f710d1109512c113ef135b4ec6ef0fb0444bb3121bc348b23b9f6b15df",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOnePrelinkedThreeHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder199",
@@ -23452,11 +23452,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER199_FIXTURE.as_bytes()),
-        "991517e192399c3986a2193195e53966d4e9ae12b8ae4696066a955d2e1dc89b"
+        "6531be3251776a021495d19bc84ecb66d87fb706d4d992dc28023d663aefdb2f"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER199_RUNNER),
-        "409d1bcff15a122615785c0116feae796c03417716d84d3a0266b19c5faef427"
+        "ee0c3d5f3c80b6044c19d09fa9326c6723a979b746e8e956ad44c9bb102091d4"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER199_TRANSFORM),
@@ -23476,8 +23476,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 5300a6127d4248bd8352fffdb10422d9029842d2675d1df1c18d351982d0b1bb",
         "transformedProbeSha256 1298c9fbb4d955f1d775562554d9871e1601e80d9c117a86917cd822c492db93",
         "emittedBodySha256 b01470440b19669e5cabaea3bdfd13907d78bd49f4f7b69b409fb5d5705d61ca",
-        "baseOrder198RunnerSha256 cc08ce359dd0ce437240c5282d126d7ec65f32fa66c42bab98ecc20e060a0676",
-        "baseOrder198FixtureSha256 7626e4524b7ea776bcef7fdd5dd61055050960ac0e5faa83fe80ae573f607b62",
+        "baseOrder198RunnerSha256 57971fa30da83de2d6fcab784b715125dc90d5b533aad860b8560b9abf493693",
+        "baseOrder198FixtureSha256 5fa45656fa374033cc364b624e4026ded85af4582c2f510946d69a81b9a3961e",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOnePrelinkedThreeHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder200",
@@ -23490,11 +23490,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER200_FIXTURE.as_bytes()),
-        "e3821fb3ec68f13b384cbf96d4f94817e21cfd83172e484c01b134097be619b2"
+        "98e1def32d0d19d425f5eebeb32c7ef8c1463f28a0fe27f54919f068e361d26e"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER200_RUNNER),
-        "6168f1942b210ba6c36c1f884a12b527128d3adc53e4b7e021a8532e8092b7a0"
+        "75a9b7483b183e07bb2a114b2b13e2b4f72b249faebe88acec3ba3eaeea74281"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER200_TRANSFORM),
@@ -23514,8 +23514,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 b76df6de64f97f1767fe63ef9ed8046b858a37f784d2ef940a4fc9cc89c25d93",
         "transformedProbeSha256 68fc235aec6ffd88e4395fc45120749ad3ce4404b9b38623b75a10e7e6a18057",
         "emittedBodySha256 db32ebe46af5a3729f78ed3e97190dbc6e063f97e38cfe748922379a8c9f64b3",
-        "baseOrder199RunnerSha256 409d1bcff15a122615785c0116feae796c03417716d84d3a0266b19c5faef427",
-        "baseOrder199FixtureSha256 991517e192399c3986a2193195e53966d4e9ae12b8ae4696066a955d2e1dc89b",
+        "baseOrder199RunnerSha256 ee0c3d5f3c80b6044c19d09fa9326c6723a979b746e8e956ad44c9bb102091d4",
+        "baseOrder199FixtureSha256 6531be3251776a021495d19bc84ecb66d87fb706d4d992dc28023d663aefdb2f",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneRightSideFourHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder201",
@@ -23528,11 +23528,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER201_FIXTURE.as_bytes()),
-        "189cc717bb41b9e29b8c632c5e2bf6a0ab84b1a7bedc347d28c402218c713735"
+        "33db6e057670e46a7ad05894fd13760650e5d21e8878aef247eb5cd6da502f7c"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER201_RUNNER),
-        "3aedc82e8e710db2e58e26973a2cfcc7989599c1601615ab50462a5b71ca75b5"
+        "f790427057a3be6d5eac165c24a5bd814d89cf5cc5c571f60787466f5a5f6e34"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER201_TRANSFORM),
@@ -23557,8 +23557,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 2884aaffb9cfbcc13612e050fe096dd2bed0cc12b8e0ea70edeeee469ae7bbf5",
         "transformedProbeSha256 df81a7d592bc8dc2f7cd694a56978bf8d247f48a24535540712393e65e0edfd9",
         "emittedBodySha256 afe144c03bca1574d9fdf6069e62cba5d6b4767498c2aaeeccca7b3426faeda9",
-        "baseOrder200RunnerSha256 6168f1942b210ba6c36c1f884a12b527128d3adc53e4b7e021a8532e8092b7a0",
-        "baseOrder200FixtureSha256 e3821fb3ec68f13b384cbf96d4f94817e21cfd83172e484c01b134097be619b2",
+        "baseOrder200RunnerSha256 75a9b7483b183e07bb2a114b2b13e2b4f72b249faebe88acec3ba3eaeea74281",
+        "baseOrder200FixtureSha256 98e1def32d0d19d425f5eebeb32c7ef8c1463f28a0fe27f54919f068e361d26e",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneExistingStemSingleHeadCLink",
         "javaEvidence ReturnedBeforeHeadOrder202",
@@ -23571,11 +23571,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER202_FIXTURE.as_bytes()),
-        "565bc3d90727c2980189bddf657bc8813d69458cf6833a028d152e8694471344"
+        "e1b4008b3b0b355452bc3a305dd05ed462ee216ce7758f2401bf124427c5102b"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER202_RUNNER),
-        "33701954065dcba38cbaaa6fb65aa178c0b8be256f370f30e200fe32f037aaad"
+        "7f0d72879002574ca4cdce7fae22f4fb458e8ec181d3b7d2179d8cc9b1873b58"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER202_TRANSFORM),
@@ -23595,8 +23595,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 c47059b123a5dac6769c55ab4c86aff8c296ccbe9fe862a8fd0da2e4ab6f826f",
         "transformedProbeSha256 863ebf6c04841b77e6a00e470593a1360c086ee7a4e4513d894c2d30245af939",
         "emittedBodySha256 4d0b5a3381ea5781ea1e8d2c3715305ea59f74fa5c3488ebe1f9b001d557be12",
-        "baseOrder201RunnerSha256 3aedc82e8e710db2e58e26973a2cfcc7989599c1601615ab50462a5b71ca75b5",
-        "baseOrder201FixtureSha256 189cc717bb41b9e29b8c632c5e2bf6a0ab84b1a7bedc347d28c402218c713735",
+        "baseOrder201RunnerSha256 f790427057a3be6d5eac165c24a5bd814d89cf5cc5c571f60787466f5a5f6e34",
+        "baseOrder201FixtureSha256 33db6e057670e46a7ad05894fd13760650e5d21e8878aef247eb5cd6da502f7c",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneRightSideThreeHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder203",
@@ -23609,11 +23609,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER203_FIXTURE.as_bytes()),
-        "c3e004cc45289ad6267c0544bc9879b9d2403bba9cd11a185406731e1e1634af"
+        "3b1537b855ae20733d842f6c805ba055ee7c64481feeca380f8c30651e0d0215"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER203_RUNNER),
-        "76a14fcfee7b3733efe9126afa809d7a8af86da82d83e578f6b358e2648fdccd"
+        "c417e89cdd54917a6ae8d2b5687ad62d7ec54b5df195b98fd22cceafbe382c01"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER203_TRANSFORM),
@@ -23633,8 +23633,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 f61d9c19aa2c26ff1a91e01ff4c1b65ece877eb8a37b69124b7dcde3d48dd073",
         "transformedProbeSha256 0a48c5ccd621bd83f325c68ec8e4a238ac62513f683f3f20ddd6b05ab23d7687",
         "emittedBodySha256 e737eb6697e547add7907bf5e280e01a0318d778648c6d773ca08add140f051b",
-        "baseOrder202RunnerSha256 33701954065dcba38cbaaa6fb65aa178c0b8be256f370f30e200fe32f037aaad",
-        "baseOrder202FixtureSha256 565bc3d90727c2980189bddf657bc8813d69458cf6833a028d152e8694471344",
+        "baseOrder202RunnerSha256 7f0d72879002574ca4cdce7fae22f4fb458e8ec181d3b7d2179d8cc9b1873b58",
+        "baseOrder202FixtureSha256 e1b4008b3b0b355452bc3a305dd05ed462ee216ce7758f2401bf124427c5102b",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneTwoHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder204",
@@ -23647,11 +23647,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER204_FIXTURE.as_bytes()),
-        "60358cbc2e88771fd810da4b5aa8a7638a2b5d5b99f9152791b08f863fb41061"
+        "d3d4f40f096cc0bb0a47a32b9a54d91e46b0bde1faf05a58e2484b8504ac8703"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER204_RUNNER),
-        "e484a236ce93d250882727e950b82bee88cb3cf9539b2448de4c3b3b4e9d89ce"
+        "b163837cc4257da17a39aeeb4ae5943369c406b474dbd0ae1a05119f72883db3"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER204_TRANSFORM),
@@ -23671,8 +23671,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 38fe59a6c06a71bdb2d5b7958376cf128e9ce5cb6c2d5885b0c409e03e39a488",
         "transformedProbeSha256 bd3a16f4e7c6cc57f05d9a6ff2ff51f1101dc9cb950243d15a3b21bd9cccce8b",
         "emittedBodySha256 0313b036f49da20e345e7a51e941380dfb602337fdca44f78b12925117d1df63",
-        "baseOrder203RunnerSha256 76a14fcfee7b3733efe9126afa809d7a8af86da82d83e578f6b358e2648fdccd",
-        "baseOrder203FixtureSha256 c3e004cc45289ad6267c0544bc9879b9d2403bba9cd11a185406731e1e1634af",
+        "baseOrder203RunnerSha256 c417e89cdd54917a6ae8d2b5687ad62d7ec54b5df195b98fd22cceafbe382c01",
+        "baseOrder203FixtureSha256 3b1537b855ae20733d842f6c805ba055ee7c64481feeca380f8c30651e0d0215",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneMixedSideFourHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder205",
@@ -23685,11 +23685,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER205_FIXTURE.as_bytes()),
-        "7b9b4ea178041618cab27d29b0cdcd8e175a75328c62a1843906e19efb7e9b3e"
+        "563b584e6271fe455dd98b5da2a3f3316ab8343028e19aea11712c4b75a0d8b3"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER205_RUNNER),
-        "ae770812470954f0f00f2228a0c3b213f7d33ac5dc474fe6124d8f308e29e69b"
+        "4c1e27fedd2b6c9a3d6badd13d8b52fbb52fe7dbbd3c6ed68cd115f0c109af2f"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER205_TRANSFORM),
@@ -23714,8 +23714,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 ebd1afa4600b2cdad0105d78cbacd2235dbefa5e7d77d4b20eefa6699f2b674b",
         "transformedProbeSha256 11bced10ebe7d09a718777ac30eca681a03cf9e2c4917e86805f8ac7b279b873",
         "emittedBodySha256 119cf927f600d12753d3d25221fa0a194566b50ee1346c3370236796905bd52c",
-        "baseOrder204RunnerSha256 e484a236ce93d250882727e950b82bee88cb3cf9539b2448de4c3b3b4e9d89ce",
-        "baseOrder204FixtureSha256 60358cbc2e88771fd810da4b5aa8a7638a2b5d5b99f9152791b08f863fb41061",
+        "baseOrder204RunnerSha256 b163837cc4257da17a39aeeb4ae5943369c406b474dbd0ae1a05119f72883db3",
+        "baseOrder204FixtureSha256 d3d4f40f096cc0bb0a47a32b9a54d91e46b0bde1faf05a58e2484b8504ac8703",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneExistingStemTwoItemCLink",
         "javaEvidence ReturnedBeforeHeadOrder206",
@@ -23728,11 +23728,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER206_FIXTURE.as_bytes()),
-        "5f2ecd4cd42c8182b13ac560db4447682fe130b2587ce8a66844c4253bae5bab"
+        "85cd838100b454a8e4cc5bca06b174bf93e1da83f5d4d9f4ec2bc6889732b85c"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER206_RUNNER),
-        "f8a9cf2042a9e19204c4c5305eb7bd95d21f20eb08773d1214284abdce3b9d20"
+        "2bdfd696acb39afebae403fb84fe3fd9fceac3d230b07d22af3e57dcc9b2494c"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER206_TRANSFORM),
@@ -23752,8 +23752,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 ef25333e8ea8edf8dd0e16f2fb1cdf526314f905032fc80c6fe8467c69da6fdb",
         "transformedProbeSha256 c13d4a630a99690a34025c48578953dd89fbcd812f0078c650dfded178dc6f23",
         "emittedBodySha256 30ddb79cc6964ef0b2c7c60b05d799205106a8e9c15ff01a7878dea22c39fc89",
-        "baseOrder205RunnerSha256 ae770812470954f0f00f2228a0c3b213f7d33ac5dc474fe6124d8f308e29e69b",
-        "baseOrder205FixtureSha256 7b9b4ea178041618cab27d29b0cdcd8e175a75328c62a1843906e19efb7e9b3e",
+        "baseOrder205RunnerSha256 4c1e27fedd2b6c9a3d6badd13d8b52fbb52fe7dbbd3c6ed68cd115f0c109af2f",
+        "baseOrder205FixtureSha256 563b584e6271fe455dd98b5da2a3f3316ab8343028e19aea11712c4b75a0d8b3",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneRightDualCornerUndefinedReturn",
         "javaEvidence ReturnedBeforeHeadOrder207",
@@ -23766,11 +23766,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER207_FIXTURE.as_bytes()),
-        "4dfa3e893bb10eb664d90100c780ab5a80df3b7e3e375e102b62b757a2eaa35f"
+        "fa4a841724272faf3633f5f703114efc2f9021700a07d0cd1105eacad39ce74c"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER207_RUNNER),
-        "fafcd20531cbbae5c30a0099dc77d8196cd24611841f0e3e0dd1140206155f89"
+        "167b9f622b17073f9312344d7d18e8c7fbac47bf72522ee8481f71fe3540d8fe"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER207_TRANSFORM),
@@ -23790,8 +23790,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 07d6a5bb5aa7fb5f4734057fe7d52b5f65971f475efd7b8babb61142b4c714e7",
         "transformedProbeSha256 da76a5b92ccb38174504b1f2c1468c18b42ec8bdc435c1255adc5cc2ab9a93bd",
         "emittedBodySha256 6c08109e7a0453ed32e740bebf746cf47f00500d74fe4eff1c6fc2aa3d72e5a2",
-        "baseOrder206RunnerSha256 f8a9cf2042a9e19204c4c5305eb7bd95d21f20eb08773d1214284abdce3b9d20",
-        "baseOrder206FixtureSha256 5f2ecd4cd42c8182b13ac560db4447682fe130b2587ce8a66844c4253bae5bab",
+        "baseOrder206RunnerSha256 2bdfd696acb39afebae403fb84fe3fd9fceac3d230b07d22af3e57dcc9b2494c",
+        "baseOrder206FixtureSha256 85cd838100b454a8e4cc5bca06b174bf93e1da83f5d4d9f4ec2bc6889732b85c",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneRightSideFourHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder208",
@@ -23804,11 +23804,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER208_FIXTURE.as_bytes()),
-        "ae7f4b373b81e57d77c9f5733adf8d6c16616f84a88d3161dbd5abdc378d16a2"
+        "0d039237414f7b84a49f7c0adb09f3af8e13f0d8b6b38db0794b1011adb0d998"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER208_RUNNER),
-        "1563fd789415447e97461124a7182c6b45b7213457a8f965038b49a17c9096be"
+        "ad2501c61062785e95b613a2a009ea131248fe40e7481174257649f989d7dcf7"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER208_TRANSFORM),
@@ -23828,8 +23828,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 02906fc2f4581adfcd2a4610797f455e14ebbd4ab043777888f0fea39de877c0",
         "transformedProbeSha256 60a8b0c38f30c9923cd76f661b2975fc1675e4f61c0f954d9e40788ee4129490",
         "emittedBodySha256 57663a09e8f6c347c231fcead84ee6c0f26201eb6afc37be100fc7fe0524e8c8",
-        "baseOrder207RunnerSha256 fafcd20531cbbae5c30a0099dc77d8196cd24611841f0e3e0dd1140206155f89",
-        "baseOrder207FixtureSha256 4dfa3e893bb10eb664d90100c780ab5a80df3b7e3e375e102b62b757a2eaa35f",
+        "baseOrder207RunnerSha256 167b9f622b17073f9312344d7d18e8c7fbac47bf72522ee8481f71fe3540d8fe",
+        "baseOrder207FixtureSha256 fa4a841724272faf3633f5f703114efc2f9021700a07d0cd1105eacad39ce74c",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneRightSideTwoHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder209",
@@ -23842,11 +23842,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER209_FIXTURE.as_bytes()),
-        "357af1a1ad1649226e18b8ff79c0bb566fb92bc1ca1681f2c1a8f9a6f89cf0dd"
+        "59f35aa4233c57ca4b9f206e049c8e353c3bf7370755398ad6cd350aad493204"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER209_RUNNER),
-        "5fcaffc155c755823aee5557b09eca4eeb0680e4fca7e0a05b3fc3e036cb96f2"
+        "a00a00c96774fc403c911d5f41867a5981378ca846c73bcf9878d100803197f3"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER209_TRANSFORM),
@@ -23866,8 +23866,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 ccfd555df5789d7e21faf3d1932fe834f394806e5b8cf49afda2c6ddb50fad01",
         "transformedProbeSha256 67a8e749acfdcd2ee88282841cc8c3132ba5c10d47d5feda99cbadc02fbb0d03",
         "emittedBodySha256 dc5f7b6b123bdb093ffba90247c2f2b1e10d569cd8325ddd7479fe158ec04480",
-        "baseOrder208RunnerSha256 1563fd789415447e97461124a7182c6b45b7213457a8f965038b49a17c9096be",
-        "baseOrder208FixtureSha256 ae7f4b373b81e57d77c9f5733adf8d6c16616f84a88d3161dbd5abdc378d16a2",
+        "baseOrder208RunnerSha256 ad2501c61062785e95b613a2a009ea131248fe40e7481174257649f989d7dcf7",
+        "baseOrder208FixtureSha256 0d039237414f7b84a49f7c0adb09f3af8e13f0d8b6b38db0794b1011adb0d998",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneNoLinkClosure",
         "javaEvidence ReturnedBeforeHeadOrder210",
@@ -23880,11 +23880,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER210_FIXTURE.as_bytes()),
-        "730c4ff7c291de4495db022e5a6c303dd2b3336f618acdf65390c725e0ac8bbc"
+        "38bd91508a4ebed40cdb0780d235d4d5254d08afdbc61b4fba81d204a00c904d"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER210_RUNNER),
-        "47a2c3977c64ab36cf8c98af00523134bfa00b2371a4c3561004c40cce4d0164"
+        "d2e116bfdca58d0bf03ec91ede1eae81a6ee270dc76e665203378413655131a9"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER210_TRANSFORM),
@@ -23904,8 +23904,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 cd111cd8bdd8faa64e64ad63075aa6d5fcd87da0b907c12d2f6574cffcb08c8a",
         "transformedProbeSha256 ed368c380dfaf70f4e8956b682454cd6122f7519a8fc91fe807d53e03591e282",
         "emittedBodySha256 32576390ea4b2afa337100726af18a22ebb144dbbef31c04853c9a226de71d85",
-        "baseOrder209RunnerSha256 5fcaffc155c755823aee5557b09eca4eeb0680e4fca7e0a05b3fc3e036cb96f2",
-        "baseOrder209FixtureSha256 357af1a1ad1649226e18b8ff79c0bb566fb92bc1ca1681f2c1a8f9a6f89cf0dd",
+        "baseOrder209RunnerSha256 a00a00c96774fc403c911d5f41867a5981378ca846c73bcf9878d100803197f3",
+        "baseOrder209FixtureSha256 59f35aa4233c57ca4b9f206e049c8e353c3bf7370755398ad6cd350aad493204",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneMixedSideZeroChangeReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder211",
@@ -23918,11 +23918,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER211_FIXTURE.as_bytes()),
-        "c2eb23f0ed638111810c27421e014d262d05c9e2fd9cc53f3ece4f0a607ad980"
+        "119364175e2b12de137399a63f170a8e92ec2fdfe6c6ad1f997a6a7914885f9b"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER211_RUNNER),
-        "1a7c5eb47453b364a32a030250be5b553b869410b631e4bdd5889570c7330ba3"
+        "7e4226a8881608d1e3a65f2dec049245ae6b9ca06677c22e08b24efbec692865"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER211_TRANSFORM),
@@ -23942,8 +23942,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 a2b19ed1db88492f5025f2f98c7b2b853eacd9e3066eb56a7b61455bdb9988c2",
         "transformedProbeSha256 70427bf782e02fda439d2693c5e896fcfd6593195d9d4e11aa6c0f389fb9be1f",
         "emittedBodySha256 e7624ca0f407f7232461023508cd92a024c9011d7790322f29e041309fc1818d",
-        "baseOrder210RunnerSha256 47a2c3977c64ab36cf8c98af00523134bfa00b2371a4c3561004c40cce4d0164",
-        "baseOrder210FixtureSha256 730c4ff7c291de4495db022e5a6c303dd2b3336f618acdf65390c725e0ac8bbc",
+        "baseOrder210RunnerSha256 d2e116bfdca58d0bf03ec91ede1eae81a6ee270dc76e665203378413655131a9",
+        "baseOrder210FixtureSha256 38bd91508a4ebed40cdb0780d235d4d5254d08afdbc61b4fba81d204a00c904d",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneLeftSideFourHeadZeroChangeReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder212",
@@ -23956,11 +23956,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER212_FIXTURE.as_bytes()),
-        "a0d0e6a9702993d60407d31c73c3623b2817fc82e3ca4c9e36938a6e16d238d3"
+        "943421c0ab4dfb6cbe099976027dc3fa59fcf6a2d91488a7b2db09481d9bc6ad"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER212_RUNNER),
-        "3a659f67ce2ec2cada33f178ef9dd69ac33d03999615a8d3f3bf463de0be644f"
+        "aa012d790441299d7c92bf1225326dc8c30a7a99f2325aebcb3f2c8533c302b7"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER212_TRANSFORM),
@@ -23980,8 +23980,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 5887d866785ae590359754e43034f78a40b4987cd0608cf65ca4e3c3a9fe7ffb",
         "transformedProbeSha256 00ae57ed40e31c834dfe35c83b60877fca1de6901a1012b1a21f14c746a9c20b",
         "emittedBodySha256 9e6b68441f42219cc5830ab795869c8e17d7cf017c2237c6e6bd5b1eea762701",
-        "baseOrder211RunnerSha256 1a7c5eb47453b364a32a030250be5b553b869410b631e4bdd5889570c7330ba3",
-        "baseOrder211FixtureSha256 c2eb23f0ed638111810c27421e014d262d05c9e2fd9cc53f3ece4f0a607ad980",
+        "baseOrder211RunnerSha256 7e4226a8881608d1e3a65f2dec049245ae6b9ca06677c22e08b24efbec692865",
+        "baseOrder211FixtureSha256 119364175e2b12de137399a63f170a8e92ec2fdfe6c6ad1f997a6a7914885f9b",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneMixedSideFiveHeadZeroChangeReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder213",
@@ -23994,11 +23994,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER213_FIXTURE.as_bytes()),
-        "0f302e5e9d8ff1228f825c6f0253fbd9a54e4d9fea5e73c577272969e0897efb"
+        "c3c1d868bebbe35dcfedfe9c20f9a54394674329d65f75bc564cddadeef2a612"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER213_RUNNER),
-        "5fbdf0edf5bf34c098611028ff5710dc914aee8293d38437980894ecd02e3ff9"
+        "416e1d08855cb5ccc4b7c54e2d12906a6cf53a826ea923ebefd88f8218932c43"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER213_TRANSFORM),
@@ -24018,8 +24018,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 fe1631185244cbb1d85e40561ec3bd587926633bef6d08556fdb652e36be2bff",
         "transformedProbeSha256 fd98e63eabd0933e936784c105ed79704518cd1730cda2b764286f83302ecd90",
         "emittedBodySha256 7eb825ec724715e99a978d774ada4d18b888ccf0f1c8a00d8ca16bb74ae39593",
-        "baseOrder212RunnerSha256 3a659f67ce2ec2cada33f178ef9dd69ac33d03999615a8d3f3bf463de0be644f",
-        "baseOrder212FixtureSha256 a0d0e6a9702993d60407d31c73c3623b2817fc82e3ca4c9e36938a6e16d238d3",
+        "baseOrder212RunnerSha256 aa012d790441299d7c92bf1225326dc8c30a7a99f2325aebcb3f2c8533c302b7",
+        "baseOrder212FixtureSha256 943421c0ab4dfb6cbe099976027dc3fa59fcf6a2d91488a7b2db09481d9bc6ad",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneMixedSideFiveHeadReconciliation",
         "javaEvidence ReturnedBeforeHeadOrder214",
@@ -24032,11 +24032,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER214_FIXTURE.as_bytes()),
-        "9f304da04ee55692abb622dd1b902e4ba7279dacb7d39067b7868194d20c6f09"
+        "8ce4bb110020fbbb4c62aab574fe2aaca8d6aced89f5797c75d9602e8866c54c"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER214_RUNNER),
-        "9ca821af9bd3e002b81b7a8a7d17bebd8b775de156dd83afa63859ebc32826a4"
+        "8bd7fee1f76c04ba2d92c3789a2d5b99d5c79d797622980e87f31937c45d7800"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER214_TRANSFORM),
@@ -24061,8 +24061,8 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "transformSourceSha256 7a215a66feb17f16570e079f493597ade96bed72e4d23cdd35c3684595f2411b",
         "transformedProbeSha256 ce21c73309c01d67275d5750c8cfe99ece9ded032f66eb389cc2e0f19467e8fc",
         "emittedBodySha256 6e3559ae0636e4a13a2eed11ef32b73af1e5d73e19360896a6e08c53a561d65d",
-        "baseOrder213RunnerSha256 5fbdf0edf5bf34c098611028ff5710dc914aee8293d38437980894ecd02e3ff9",
-        "baseOrder213FixtureSha256 0f302e5e9d8ff1228f825c6f0253fbd9a54e4d9fea5e73c577272969e0897efb",
+        "baseOrder213RunnerSha256 416e1d08855cb5ccc4b7c54e2d12906a6cf53a826ea923ebefd88f8218932c43",
+        "baseOrder213FixtureSha256 c3c1d868bebbe35dcfedfe9c20f9a54394674329d65f75bc564cddadeef2a612",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope FullLifecycleBachSystem2PhaseOneTerminalExistingStemCLink",
         "javaEvidence ReturnedAfterPhaseOneQueueExhausted",
@@ -24075,20 +24075,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER0_FIXTURE.as_bytes()),
-        "e1b1980ea01ce85dc0657f48d2b72f416cf9455ef5af481f59f8a4cfdb44ed5f"
+        "7220313d786c3c917648b6be55abfda26b8b0bfac81a164b98253739fa2b74a1"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER0_RUNNER),
-        "93542ec7969929534eef23ed52da2703972098a5401dafd082a8b39ed4110bbe"
+        "98d97209bec4e7fbe3ba8d9d2aae084c3080ce3806352c34bbc7995517c22175"
     );
     for exact in [
         "system 2 heads 215 queueSize 15 queue [x185:sig213:id4034,x159:sig164:id3939,x194:sig78:id3761,x163:sig170:id3951,x160:sig169:id3949,x162:sig168:id3947,x158:sig88:id3781,x152:sig90:id3784,x123:sig14:id3633,x149:sig18:id3641,x190:sig214:id4036,x98:sig136:id3878,x30:sig95:id3796,x118:sig211:id4031,x54:sig59:id3723] sigVertices 394 sigEdges 600 systemStems 77 allocator 6815",
         "queueIndex 0 headX 185 headSig 213 headInterId 4034 grade 3fd750d808ef0bd0 append true",
         "decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=false:branch=Neither] returned false",
         "undefs [] sideChanges [] sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 93542ec7969929534eef23ed52da2703972098a5401dafd082a8b39ed4110bbe",
-        "baseBoundary241RunnerSha256 9ca821af9bd3e002b81b7a8a7d17bebd8b775de156dd83afa63859ebc32826a4",
-        "baseBoundary241FixtureSha256 9f304da04ee55692abb622dd1b902e4ba7279dacb7d39067b7868194d20c6f09",
+        "runnerSourceSha256 98d97209bec4e7fbe3ba8d9d2aae084c3080ce3806352c34bbc7995517c22175",
+        "baseBoundary241RunnerSha256 8bd7fee1f76c04ba2d92c3789a2d5b99d5c79d797622980e87f31937c45d7800",
+        "baseBoundary241FixtureSha256 8ce4bb110020fbbb4c62aab574fe2aaca8d6aced89f5797c75d9602e8866c54c",
         "emittedBodySha256 65f0b5ab998c5e83b65cd5b40e4d3b52fd1c94b834ed560a5ae70fc9251cee04",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder0NoLinkRetry",
@@ -24102,19 +24102,19 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER1_FIXTURE.as_bytes()),
-        "4a56cd452b491f8b2851daa73d821e4262fcac4786561c3561ae9cf7bb864e24"
+        "98dd81cbf87d17094be2919fae1966e226ee9f4b82942e79fc0dce454a218479"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER1_RUNNER),
-        "e2a637c2355ce175bbbd643cd5e0b8df6d6be1f0b6e96aff5d1e7a3bbb58418c"
+        "74bcc8d5f9fb10cd4d6df2a47215e2475e05aa2e327b1ee05d052ec1fe518dfd"
     );
     for exact in [
         "queueIndex 1 headX 159 headSig 164 headInterId 3939 grade 3fd6e98b920d30d7 append true",
         "decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=true:branch=BottomOnly] returned false",
         "undefs [] sideChanges [] sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 e2a637c2355ce175bbbd643cd5e0b8df6d6be1f0b6e96aff5d1e7a3bbb58418c",
-        "baseBoundary242RunnerSha256 93542ec7969929534eef23ed52da2703972098a5401dafd082a8b39ed4110bbe",
-        "baseBoundary242FixtureSha256 e1b1980ea01ce85dc0657f48d2b72f416cf9455ef5af481f59f8a4cfdb44ed5f",
+        "runnerSourceSha256 74bcc8d5f9fb10cd4d6df2a47215e2475e05aa2e327b1ee05d052ec1fe518dfd",
+        "baseBoundary242RunnerSha256 98d97209bec4e7fbe3ba8d9d2aae084c3080ce3806352c34bbc7995517c22175",
+        "baseBoundary242FixtureSha256 7220313d786c3c917648b6be55abfda26b8b0bfac81a164b98253739fa2b74a1",
         "emittedBodySha256 1a011901f9b9f09635cef126981c9b50c64a1ee6bc6c03a6eb5811d5a35fbcbe",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder1RejectedBottomAppend",
@@ -24128,20 +24128,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER2_FIXTURE.as_bytes()),
-        "8b952682dfaa9571f1ab314c3f5899eec5210f35450a872003fc0c041a6d527e"
+        "44c3bef93611095dfd360c5bb6b041b5bff9380372038e1235d0ee705c302576"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER2_RUNNER),
-        "1bc3292182b7e34979d1f1ada9b6bda8841a96374ac8787fbaf66406b14c6633"
+        "12d22710bf3f5d512646a0aa90b505061b1964eac53a514ff8ee8db81859bcf4"
     );
     for exact in [
         "queueIndex 2 headX 194 headSig 78 headInterId 3761 grade 3fd5c5715c5715c5 append true",
         "sidesBefore [LEFT:false:false,RIGHT:false:false] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=true:branch=Both] returned false",
         "sidesAfter [LEFT:false:false,RIGHT:false:false] undefs [RIGHT] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 1bc3292182b7e34979d1f1ada9b6bda8841a96374ac8787fbaf66406b14c6633",
-        "baseBoundary243RunnerSha256 e2a637c2355ce175bbbd643cd5e0b8df6d6be1f0b6e96aff5d1e7a3bbb58418c",
-        "baseBoundary243FixtureSha256 4a56cd452b491f8b2851daa73d821e4262fcac4786561c3561ae9cf7bb864e24",
+        "runnerSourceSha256 12d22710bf3f5d512646a0aa90b505061b1964eac53a514ff8ee8db81859bcf4",
+        "baseBoundary243RunnerSha256 74bcc8d5f9fb10cd4d6df2a47215e2475e05aa2e327b1ee05d052ec1fe518dfd",
+        "baseBoundary243FixtureSha256 98dd81cbf87d17094be2919fae1966e226ee9f4b82942e79fc0dce454a218479",
         "emittedBodySha256 8c753e9204d4bcd768fbc3801e38badf75a998541ed5bc280c011f8b5c3168ab",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder2SharedStumpUndefined",
@@ -24155,20 +24155,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER3_FIXTURE.as_bytes()),
-        "75f638bb12320fae8f61d72fc2138c4cbdcc07986f222cdfb1906108caae9a57"
+        "a78fec3de69ebffb97ef4f5755b01ad42143b697eed278cba5696f997fc97d34"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER3_RUNNER),
-        "38e817048be6022fc704b55e69ec8f84009bf83cb017c784e30ef660a7e71c77"
+        "49bc7cb004bd3fba40208f1f8c13d642f96e6f5bb27b5e71928e099c771308d3"
     );
     for exact in [
         "queueIndex 3 headX 163 headSig 170 headInterId 3951 grade 3fd2894c99225f13 append true",
         "sidesBefore [LEFT:true:true,RIGHT:false:true] decisions [LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither] returned true",
         "sidesAfter [LEFT:true:true,RIGHT:false:true] undefs [LEFT] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 38e817048be6022fc704b55e69ec8f84009bf83cb017c784e30ef660a7e71c77",
-        "baseBoundary244RunnerSha256 1bc3292182b7e34979d1f1ada9b6bda8841a96374ac8787fbaf66406b14c6633",
-        "baseBoundary244FixtureSha256 8b952682dfaa9571f1ab314c3f5899eec5210f35450a872003fc0c041a6d527e",
+        "runnerSourceSha256 49bc7cb004bd3fba40208f1f8c13d642f96e6f5bb27b5e71928e099c771308d3",
+        "baseBoundary244RunnerSha256 12d22710bf3f5d512646a0aa90b505061b1964eac53a514ff8ee8db81859bcf4",
+        "baseBoundary244FixtureSha256 44c3bef93611095dfd360c5bb6b041b5bff9380372038e1235d0ee705c302576",
         "emittedBodySha256 2f41f2931e132bd05feff04b10815e3b3e322fcae9019e501399f82818d25667",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder3PrelinkedClosure",
@@ -24182,20 +24182,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER4_FIXTURE.as_bytes()),
-        "6ba6a704229a926dd21fbae4e396d4917d48ee2b8149736178aa52aeaa833753"
+        "1d588ac12c25eb05731b1eee228de1870489738ec03d4af26384b2b624828236"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER4_RUNNER),
-        "e03f0c788dd21a61d5629fbb4fc1c1afaf7d8439f567949afb26c09890361823"
+        "e5dad67b832770786fb3947821bbf9c51e4488fd3913bba068859b6a8ff9f6ef"
     );
     for exact in [
         "queueIndex 4 headX 160 headSig 169 headInterId 3949 grade 3fd16b9e057b88cd append true",
         "sidesBefore [LEFT:false:false,RIGHT:false:false] decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=true:bottom=true:branch=Both] returned false",
         "sidesAfter [LEFT:false:false,RIGHT:false:false] undefs [RIGHT] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 e03f0c788dd21a61d5629fbb4fc1c1afaf7d8439f567949afb26c09890361823",
-        "baseBoundary245RunnerSha256 38e817048be6022fc704b55e69ec8f84009bf83cb017c784e30ef660a7e71c77",
-        "baseBoundary245FixtureSha256 75f638bb12320fae8f61d72fc2138c4cbdcc07986f222cdfb1906108caae9a57",
+        "runnerSourceSha256 e5dad67b832770786fb3947821bbf9c51e4488fd3913bba068859b6a8ff9f6ef",
+        "baseBoundary245RunnerSha256 49bc7cb004bd3fba40208f1f8c13d642f96e6f5bb27b5e71928e099c771308d3",
+        "baseBoundary245FixtureSha256 a78fec3de69ebffb97ef4f5755b01ad42143b697eed278cba5696f997fc97d34",
         "emittedBodySha256 2c6a549a584f6dec0b9a2611877277d4f951870b0be353a78941af49e22da039",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder4SharedStumpUndefined",
@@ -24209,20 +24209,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER5_FIXTURE.as_bytes()),
-        "9a23db94e8c05f442579a28f223cd1a26cd3e45f4bdffd9ce03159990610a409"
+        "3377df7d16a05f252b7fc99121973f934cd57ab9597cea34aabb3b058493ed9c"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER5_RUNNER),
-        "d1b668eb65ad174d3cc80030b3cf76a674fe35692f78011fc21e1d18896ed2a0"
+        "cddf028c62bff3c11926f37e8bdf87a926fe5282ddc8e80e94f409a3f5a14acf"
     );
     for exact in [
         "queueIndex 5 headX 162 headSig 168 headInterId 3947 grade 3fcc27b9ce0db120 append true",
         "sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=false:branch=Neither] returned false",
         "sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 d1b668eb65ad174d3cc80030b3cf76a674fe35692f78011fc21e1d18896ed2a0",
-        "baseBoundary246RunnerSha256 e03f0c788dd21a61d5629fbb4fc1c1afaf7d8439f567949afb26c09890361823",
-        "baseBoundary246FixtureSha256 6ba6a704229a926dd21fbae4e396d4917d48ee2b8149736178aa52aeaa833753",
+        "runnerSourceSha256 cddf028c62bff3c11926f37e8bdf87a926fe5282ddc8e80e94f409a3f5a14acf",
+        "baseBoundary246RunnerSha256 e5dad67b832770786fb3947821bbf9c51e4488fd3913bba068859b6a8ff9f6ef",
+        "baseBoundary246FixtureSha256 1d588ac12c25eb05731b1eee228de1870489738ec03d4af26384b2b624828236",
         "emittedBodySha256 9456f61c645cb109e3c1bdea7c5f519d6ebad9f01d39f71c6209c39f050c050a",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder5RejectedTopAppend",
@@ -24236,20 +24236,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER6_FIXTURE.as_bytes()),
-        "00d2ae8e477aa06c27d1421ad017a6412c7fe1dfcda06a5ce405182aecbbe95b"
+        "5c6a42a3a73d161b185315a288cb6efa19f6cf26018f693895a5dfd126338205"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER6_RUNNER),
-        "74649eaef4d2cad4be3a4e7ff9975287ecbdc5c1ee0189b4de33a3a90e127fea"
+        "026c34ec418cd1fbd8efebd611a99a59d023dc2ce02af4c96434cfd7a0b59d9e"
     );
     for exact in [
         "queueIndex 6 headX 158 headSig 88 headInterId 3781 grade 3fcb19e24d689740 append true",
         "sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=false:branch=Neither] returned false",
         "sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 74649eaef4d2cad4be3a4e7ff9975287ecbdc5c1ee0189b4de33a3a90e127fea",
-        "baseBoundary247RunnerSha256 d1b668eb65ad174d3cc80030b3cf76a674fe35692f78011fc21e1d18896ed2a0",
-        "baseBoundary247FixtureSha256 9a23db94e8c05f442579a28f223cd1a26cd3e45f4bdffd9ce03159990610a409",
+        "runnerSourceSha256 026c34ec418cd1fbd8efebd611a99a59d023dc2ce02af4c96434cfd7a0b59d9e",
+        "baseBoundary247RunnerSha256 cddf028c62bff3c11926f37e8bdf87a926fe5282ddc8e80e94f409a3f5a14acf",
+        "baseBoundary247FixtureSha256 3377df7d16a05f252b7fc99121973f934cd57ab9597cea34aabb3b058493ed9c",
         "emittedBodySha256 7fed672bca672031f9a9bfa6268d1dd5f037bf318190ef75432c9dace0a0c704",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder6RejectedTopAppend",
@@ -24263,20 +24263,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER7_FIXTURE.as_bytes()),
-        "d6002f389798e08c11ca81eb17cb411fba2df27090cf3a02e36bbe2bd4ab833b"
+        "d11f10481ce7044ac3cde07d6f8e51d1e8c10ef4eb3d193a771b1189859fbe84"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER7_RUNNER),
-        "9af18b8ff7680a658d667cec9254f9928e73517c12db8dd3ee1c56e96f909965"
+        "67ed9a70a31bbec72c3087248ee2d63771d4a8d58a18c66354437c166279a16d"
     );
     for exact in [
         "queueIndex 7 headX 152 headSig 90 headInterId 3784 grade 3fca79cfd0ad367a append true",
         "sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=false:branch=Neither] returned false",
         "sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 9af18b8ff7680a658d667cec9254f9928e73517c12db8dd3ee1c56e96f909965",
-        "baseBoundary248RunnerSha256 74649eaef4d2cad4be3a4e7ff9975287ecbdc5c1ee0189b4de33a3a90e127fea",
-        "baseBoundary248FixtureSha256 00d2ae8e477aa06c27d1421ad017a6412c7fe1dfcda06a5ce405182aecbbe95b",
+        "runnerSourceSha256 67ed9a70a31bbec72c3087248ee2d63771d4a8d58a18c66354437c166279a16d",
+        "baseBoundary248RunnerSha256 026c34ec418cd1fbd8efebd611a99a59d023dc2ce02af4c96434cfd7a0b59d9e",
+        "baseBoundary248FixtureSha256 5c6a42a3a73d161b185315a288cb6efa19f6cf26018f693895a5dfd126338205",
         "emittedBodySha256 b4f2b620aa0abb9e793393c81d2e7fd19ad1929553ad99cf3d37c3618ce6814a",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder7NoLinkRetry",
@@ -24290,11 +24290,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER8_FIXTURE.as_bytes()),
-        "863be30c6bdf8a69c982ffdfa68f6e1a00ff279235a81e5519d52711ba3fcb6f"
+        "cea0d597f1a5a77860f368424383536111d772ed58083f4d1d0331f43281daae"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER8_RUNNER),
-        "a06dd25df8f30d7e204760cfea1aafdeb6d1a106aed9e4279d9902a10391aff0"
+        "8c184f77b90aa0b102ca41daa3fb4c910ac0dbf3c8050bb994bbd60b72bc8be8"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER8_TRANSFORM),
@@ -24311,12 +24311,12 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "sourceHeadId 3655 sourceCorner BL sourceSide LEFT relationGrade 3fe928ae67544cce stem id6750",
         "reusedExisting true applied grade3fe452a9b8a231bc:dxbfce8c8a19648d2d:dy0",
         "verticesBefore 394 verticesAfter 394 edgesBefore 600 edgesAfter 601 allocatorBefore 6815 allocatorAfter 6815 terminal ReturnedHeadCLinkTransaction",
-        "runnerSourceSha256 a06dd25df8f30d7e204760cfea1aafdeb6d1a106aed9e4279d9902a10391aff0",
-        "baseBoundary249RunnerSha256 9af18b8ff7680a658d667cec9254f9928e73517c12db8dd3ee1c56e96f909965",
-        "baseBoundary249FixtureSha256 d6002f389798e08c11ca81eb17cb411fba2df27090cf3a02e36bbe2bd4ab833b",
+        "runnerSourceSha256 8c184f77b90aa0b102ca41daa3fb4c910ac0dbf3c8050bb994bbd60b72bc8be8",
+        "baseBoundary249RunnerSha256 67ed9a70a31bbec72c3087248ee2d63771d4a8d58a18c66354437c166279a16d",
+        "baseBoundary249FixtureSha256 d11f10481ce7044ac3cde07d6f8e51d1e8c10ef4eb3d193a771b1189859fbe84",
         "baseTransformSourceSha256 69258e54539f10d7771718a8660b2e012db286c4cfdc7285876831da64f77c92",
         "retargetTransformSourceSha256 bce9262e517c4eeae4d36a6e97da8a055978469ecc59f5868703b799b9d71192",
-        "transformedHeadLinkerSourceSha256 b50d79b1bcfa813db6722436a5a2dee157f4e61a3f34a1de0c349d5c81c53c87",
+        "transformedHeadLinkerSourceSha256 e5b935ef65f6c0bb07ac906edb54f04d8a29dee746863a046c9f2c513a1425b5",
         "initSourceSha256 b7c2b721836f8238295dfe0ec01b5add5b1b181a82876fa3420c255a205213b8",
         "emittedBodySha256 70aa6a599cfffcf0a5e3c2c05e69e8eeba3b524978dc2360639bc25faa5b379f",
         "freshRuns 2 freshRunsByteIdentical true",
@@ -24331,11 +24331,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER9_FIXTURE.as_bytes()),
-        "47e858bc78ae05861427772e3709de101bd74fc28237cd764ba1781812ea7400"
+        "2de3f797787eeb64ecdf4167c92d2f6f2582b57577017146f7268f72f0203f05"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER9_RUNNER),
-        "d709cf7be61c748cd78cac7255fb6bb9b65f82a345399615e2ed3b8f03b3dc73"
+        "e167db773c00127cb22f4c1982037f1e56b66ee33cdfe6895ad1d2e675c8dff4"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER9_TRANSFORM),
@@ -24352,11 +24352,11 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         "sourceHeadId 3663 sourceCorner BL sourceSide LEFT relationGrade 3fe995c4c99d2d45 stem id6786",
         "reusedExisting true applied grade3fe3c8a4915237cf:dxbfcfa150d80c0969:dy0",
         "verticesBefore 394 verticesAfter 394 edgesBefore 601 edgesAfter 602 allocatorBefore 6815 allocatorAfter 6815 terminal ReturnedHeadCLinkTransaction",
-        "runnerSourceSha256 d709cf7be61c748cd78cac7255fb6bb9b65f82a345399615e2ed3b8f03b3dc73",
-        "baseBoundary250RunnerSha256 a06dd25df8f30d7e204760cfea1aafdeb6d1a106aed9e4279d9902a10391aff0",
-        "baseBoundary250FixtureSha256 863be30c6bdf8a69c982ffdfa68f6e1a00ff279235a81e5519d52711ba3fcb6f",
+        "runnerSourceSha256 e167db773c00127cb22f4c1982037f1e56b66ee33cdfe6895ad1d2e675c8dff4",
+        "baseBoundary250RunnerSha256 8c184f77b90aa0b102ca41daa3fb4c910ac0dbf3c8050bb994bbd60b72bc8be8",
+        "baseBoundary250FixtureSha256 cea0d597f1a5a77860f368424383536111d772ed58083f4d1d0331f43281daae",
         "retargetTransformSourceSha256 744010081f4982168091e092cf2478dda78a17b40e170250e99af408c107467d",
-        "transformedHeadLinkerSourceSha256 487623352896344eb7a5416909081ce20e741f931d2e0a6e237adb6fc4b6f049",
+        "transformedHeadLinkerSourceSha256 f5c6b185663a5132608beed4915146bb026ae2e7e0ab22e9439725c1f66dfbf2",
         "emittedBodySha256 42de793ba36a5699f6876859310ee7c89f14784dee2136bdfcf33720287e4a2d",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder9RightReusedStemAppend",
@@ -24370,20 +24370,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER10_FIXTURE.as_bytes()),
-        "63f9d4a4282f627135b54c7edca615ca70ee0336b08f5791c2608300fdeeb6e6"
+        "d7054c473728180fe1677d8a0bc561594c536387e32163874a897f04b1b8efb5"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER10_RUNNER),
-        "5228935d63cee6acea057146bf52129c6c4225ccaf1426746164662511e700e0"
+        "8f1c053c0ae18ae60a65d3269554eac7e0a2e9b8e570e5ea66a5e2ecdc2386a4"
     );
     for exact in [
         "queueIndex 10 headX 190 headSig 214 headInterId 4036 grade 3fc857b6c55b3c0d append true",
         "sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=false:branch=Neither] returned false",
         "sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 602 sigEdgesAfter 602 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 5228935d63cee6acea057146bf52129c6c4225ccaf1426746164662511e700e0",
-        "baseBoundary251RunnerSha256 d709cf7be61c748cd78cac7255fb6bb9b65f82a345399615e2ed3b8f03b3dc73",
-        "baseBoundary251FixtureSha256 47e858bc78ae05861427772e3709de101bd74fc28237cd764ba1781812ea7400",
+        "runnerSourceSha256 8f1c053c0ae18ae60a65d3269554eac7e0a2e9b8e570e5ea66a5e2ecdc2386a4",
+        "baseBoundary251RunnerSha256 e167db773c00127cb22f4c1982037f1e56b66ee33cdfe6895ad1d2e675c8dff4",
+        "baseBoundary251FixtureSha256 2de3f797787eeb64ecdf4167c92d2f6f2582b57577017146f7268f72f0203f05",
         "emittedBodySha256 bc115c0b4721fbc8a6ed2e1d4e21ba0caa4f3d34005e6707e0e8414af2a66819",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder10NoLinkRetry",
@@ -24397,20 +24397,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER11_FIXTURE.as_bytes()),
-        "cc81174fe04838a62d78238af0429124b7b5cb72787f046e4019007431e5a6c4"
+        "bd43c556ceb34074b3e8ca450dde11fe0c43918cf54743ac257a6fbb8bcaa1d5"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER11_RUNNER),
-        "238ac54a22a55fcb51e2fbf274b25affb85efa99c5d7158671c1b4c9b3f7934d"
+        "1bd125a1ede81c45124910b2457adbeeb5b85b44a88b4bec2d43c59b15dd5208"
     );
     for exact in [
         "queueIndex 11 headX 98 headSig 136 headInterId 3878 grade 3fc70b377918303a append true",
         "sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=false:branch=Neither] returned false",
         "sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 602 sigEdgesAfter 602 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 238ac54a22a55fcb51e2fbf274b25affb85efa99c5d7158671c1b4c9b3f7934d",
-        "baseBoundary252RunnerSha256 5228935d63cee6acea057146bf52129c6c4225ccaf1426746164662511e700e0",
-        "baseBoundary252FixtureSha256 63f9d4a4282f627135b54c7edca615ca70ee0336b08f5791c2608300fdeeb6e6",
+        "runnerSourceSha256 1bd125a1ede81c45124910b2457adbeeb5b85b44a88b4bec2d43c59b15dd5208",
+        "baseBoundary252RunnerSha256 8f1c053c0ae18ae60a65d3269554eac7e0a2e9b8e570e5ea66a5e2ecdc2386a4",
+        "baseBoundary252FixtureSha256 d7054c473728180fe1677d8a0bc561594c536387e32163874a897f04b1b8efb5",
         "emittedBodySha256 79d837ba5a1eb764a8325c6959f1105be77404d69d515937a27deb029df6aefa",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder11RejectedLeftTop",
@@ -24424,20 +24424,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER12_FIXTURE.as_bytes()),
-        "0826d073b514fd92b69921792f90d08811fe4f786ba4da38ad96685df6fa4b41"
+        "8d6c4b96c25bf85d368c02d03063ae763d1365a35f60759e4cfda91aa3c48901"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER12_RUNNER),
-        "9791651a915d43080094522a9689288a53d149f5cbdced50258e8fdf80216737"
+        "7fe3feee566f27d4f3c5cf5f737ab6f2809696a19dfb13d20fda45479bb5987e"
     );
     for exact in [
         "queueIndex 12 headX 30 headSig 95 headInterId 3796 grade 3fc6fcdd84b3b8f4 append true",
         "sidesBefore [LEFT:false:false,RIGHT:false:false] decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=true:bottom=true:branch=Both] returned false",
         "sidesAfter [LEFT:false:false,RIGHT:false:false] undefs [RIGHT] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 602 sigEdgesAfter 602 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 9791651a915d43080094522a9689288a53d149f5cbdced50258e8fdf80216737",
-        "baseBoundary253RunnerSha256 238ac54a22a55fcb51e2fbf274b25affb85efa99c5d7158671c1b4c9b3f7934d",
-        "baseBoundary253FixtureSha256 cc81174fe04838a62d78238af0429124b7b5cb72787f046e4019007431e5a6c4",
+        "runnerSourceSha256 7fe3feee566f27d4f3c5cf5f737ab6f2809696a19dfb13d20fda45479bb5987e",
+        "baseBoundary253RunnerSha256 1bd125a1ede81c45124910b2457adbeeb5b85b44a88b4bec2d43c59b15dd5208",
+        "baseBoundary253FixtureSha256 bd43c556ceb34074b3e8ca450dde11fe0c43918cf54743ac257a6fbb8bcaa1d5",
         "emittedBodySha256 050912a5132acdccc2925cc3e860ec2f97a225931103bb96f4461a4b74030707",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder12RejectedLeftTop",
@@ -24451,20 +24451,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER13_FIXTURE.as_bytes()),
-        "96496f2705872692114655481747336fc3cf93e745cc3233f9bcee05c4ab34c7"
+        "ae0058af20fb67d3ee6a4349a012462c0a38578870d6dfc5ad7813c3161698c0"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER13_RUNNER),
-        "1fcb4e5bea6828394fb3a9c689a21aa01e8a1f86d442f90fd6e5918ed6b19a5a"
+        "9b4548be4751f2d3f97c3a09bf5d6de600e9b0d45f6e6ddba0a607b0725316a7"
     );
     for exact in [
         "queueIndex 13 headX 118 headSig 211 headInterId 4031 grade 3fc5dd788e12e5a4 append true",
         "sidesBefore [LEFT:false:false,RIGHT:false:false] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=true:branch=Both] returned false",
         "sidesAfter [LEFT:false:false,RIGHT:false:false] undefs [RIGHT] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 602 sigEdgesAfter 602 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 1fcb4e5bea6828394fb3a9c689a21aa01e8a1f86d442f90fd6e5918ed6b19a5a",
-        "baseBoundary254RunnerSha256 9791651a915d43080094522a9689288a53d149f5cbdced50258e8fdf80216737",
-        "baseBoundary254FixtureSha256 0826d073b514fd92b69921792f90d08811fe4f786ba4da38ad96685df6fa4b41",
+        "runnerSourceSha256 9b4548be4751f2d3f97c3a09bf5d6de600e9b0d45f6e6ddba0a607b0725316a7",
+        "baseBoundary254RunnerSha256 7fe3feee566f27d4f3c5cf5f737ab6f2809696a19dfb13d20fda45479bb5987e",
+        "baseBoundary254FixtureSha256 8d6c4b96c25bf85d368c02d03063ae763d1365a35f60759e4cfda91aa3c48901",
         "emittedBodySha256 c69861db9153f8408c63f82e28658774f3e0bd7164744f1fcb5c6df3c6b1d2de",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder13RejectedRightBoth",
@@ -24478,20 +24478,20 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
 
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER14_FIXTURE.as_bytes()),
-        "f83e26e02df6ba19f58ab48742ee4f53b1341a2064c3d3151d16aa9598b1ae43"
+        "638cd4dd24378abe889356f1fbc02b9fb054f3f62ca1898eb99d77667c5be3db"
     );
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER14_RUNNER),
-        "d711efae48f0a8ca434936b7e68ac143cee9593867c63a853c90f28b330d3549"
+        "09c220ac162ab0ba22f4d8c8447faae0bb953626e7e6ca308dbd4ef1f9e55f36"
     );
     for exact in [
         "queueIndex 14 headX 54 headSig 59 headInterId 3723 grade 3fc57085228ee157 append true",
         "sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=false:branch=Neither] returned false",
         "sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges []",
         "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 602 sigEdgesAfter 602 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
-        "runnerSourceSha256 d711efae48f0a8ca434936b7e68ac143cee9593867c63a853c90f28b330d3549",
-        "baseBoundary255RunnerSha256 1fcb4e5bea6828394fb3a9c689a21aa01e8a1f86d442f90fd6e5918ed6b19a5a",
-        "baseBoundary255FixtureSha256 96496f2705872692114655481747336fc3cf93e745cc3233f9bcee05c4ab34c7",
+        "runnerSourceSha256 09c220ac162ab0ba22f4d8c8447faae0bb953626e7e6ca308dbd4ef1f9e55f36",
+        "baseBoundary255RunnerSha256 9b4548be4751f2d3f97c3a09bf5d6de600e9b0d45f6e6ddba0a607b0725316a7",
+        "baseBoundary255FixtureSha256 ae0058af20fb67d3ee6a4349a012462c0a38578870d6dfc5ad7813c3161698c0",
         "emittedBodySha256 b17bb9b6bbea9f5771397c8caea30134fad2b7ca412e41b29d8f02776e187f2a",
         "freshRuns 2 freshRunsByteIdentical true",
         "nativeScope BachSystem2PhaseTwoOrder14NoLinkRetry",

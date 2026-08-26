@@ -77,8 +77,8 @@ fi
 if [ "$(grep -c '^stemsheadbachs2q196frontier ' "$rows_one")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadbachs2q196result ' "$rows_one")" -ne 1 ] || \
         ! grep -q 'headOrder 196 headX 111 headSig 50 headInterId 3705 .*stemProfile 0 cAlias h:111:LEFT:BOTTOM ' "$rows_one" || \
-        ! grep -q 'lastIndex 3 maxIndex 3 .*relations 3 .*glyphs 2 selected \[candidateGlyph:g:1080:765:5:50:6d34ed9b8b82cf520fadb31417176c79bd53f144cb55d19f6bba9244d9318a1e,supportGlyph:g:1082:765:3:50:fc7a2c955b86e3de1a80af2a4ed667671c0701c62c6c4fa725e304d496b7176e\]' "$rows_one" || \
-        ! grep -q 'candidateIdBefore 0 .*existingCandidateStem true .*existingBeamRelations \[beam:sig12:inter2033:b2:BeamStemRelation.*beam:sig15:inter2039:b2:BeamStemRelation' "$rows_one" || \
+        ! grep -q 'lastIndex 2 maxIndex 3 .*relations 3 .*glyphs 1 selected \[candidateGlyph:g:1080:765:5:50:6d34ed9b8b82cf520fadb31417176c79bd53f144cb55d19f6bba9244d9318a1e\]' "$rows_one" || \
+        ! grep -q 'candidateIdBefore 532 .*existingCandidateStem true .*existingBeamRelations \[beam:sig12:inter2033:b2:BeamStemRelation.*beam:sig15:inter2039:b2:BeamStemRelation' "$rows_one" || \
         ! grep -q '^stemsheadbachs2q196result .*headOrder 196 returned true undefs \[\] allocatorDelta 0 sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 596 sigEdgesAfter 597 systemStemsBefore 77 systemStemsAfter 77 addedVertices \[\] addedEdges \[source=headX111:target=existingCandidateStem:HeadStemRelation' "$rows_one" || \
         ! grep -q 'addedSystemStems \[\].*nextHeadOrder 197 nextHeadX 30 nextHeadSig 95 nextHeadInterId 3796 terminal ReturnedMultiBeamCLinkTransaction$' "$rows_one"; then
     echo "Bach system-2 queue-196 contract differs" >&2

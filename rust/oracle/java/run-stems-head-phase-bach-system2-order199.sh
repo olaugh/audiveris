@@ -44,8 +44,8 @@ base_probe_sha=$(shasum -a 256 "$base_probe" | awk '{print $1}')
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
 if [ "$base_probe_sha" != "05c2ff1c14f4f2284ffb80560c82fce4b66c5d41f8debc21e2f5d91fe910a7bb" ] || \
-        [ "$base_runner_sha" != "cc08ce359dd0ce437240c5282d126d7ec65f32fa66c42bab98ecc20e060a0676" ] || \
-        [ "$base_fixture_sha" != "7626e4524b7ea776bcef7fdd5dd61055050960ac0e5faa83fe80ae573f607b62" ]; then
+        [ "$base_runner_sha" != "57971fa30da83de2d6fcab784b715125dc90d5b533aad860b8560b9abf493693" ] || \
+        [ "$base_fixture_sha" != "5fa45656fa374033cc364b624e4026ded85af4582c2f510946d69a81b9a3961e" ]; then
     echo "strict Bach system-2 queue-198 predecessor pins differ" >&2
     exit 1
 fi

@@ -68,8 +68,8 @@ base_runner="$script_dir/run-stems-head-phase-two-bach-system2-order4.sh"
 base_fixture="$repo_root/rust/oracle/stems-head-phase-two-bach-system2-order4.txt"
 base_runner_sha=$(shasum -a 256 "$base_runner" | awk '{print $1}')
 base_fixture_sha=$(shasum -a 256 "$base_fixture" | awk '{print $1}')
-if [ "$base_runner_sha" != "e03f0c788dd21a61d5629fbb4fc1c1afaf7d8439f567949afb26c09890361823" ] || \
-        [ "$base_fixture_sha" != "6ba6a704229a926dd21fbae4e396d4917d48ee2b8149736178aa52aeaa833753" ]; then
+if [ "$base_runner_sha" != "e5dad67b832770786fb3947821bbf9c51e4488fd3913bba068859b6a8ff9f6ef" ] || \
+        [ "$base_fixture_sha" != "1d588ac12c25eb05731b1eee228de1870489738ec03d4af26384b2b624828236" ]; then
     echo "Bach system-2 phase-two queue-4 predecessor drifted" >&2
     exit 1
 fi

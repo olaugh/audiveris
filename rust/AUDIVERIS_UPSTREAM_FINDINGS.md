@@ -47,12 +47,12 @@ Java source checked into this repository and may move.
   test.
 - **Rust parity policy:** reproduce the actual degenerate VLinker line.
 
-### AV-JAVA-003: `CLinker.expand` looks up `i` inside its `j` look-ahead loop
+### AV-JAVA-003: `CLinker.expand` looked up `i` inside its `j` look-ahead loop (resolved)
 
 - **Location:**
   `app/src/main/java/org/audiveris/omr/sheet/stem/HeadLinker.java`, lines
   1182–1201, in `CLinker.expand`.
-- **Observed behavior:** after encountering a beam item at index `i`, the code
+- **Former behavior:** after encountering a beam item at index `i`, the code
   loops over `j = i + 1 .. maxIndex` to look for another reachable beam, but
   assigns `ev2 = sb.get(i)` instead of `sb.get(j)`. If any later item exists,
   the first loop iteration therefore re-reads the current beam, finds the same
@@ -66,12 +66,16 @@ Java source checked into this repository and may move.
   group A followed only by a non-beam item. The intended look-ahead finds no
   later beam and stops at the beam; the current code rechecks the group-A beam
   itself and continues.
-- **Likely repair:** change `sb.get(i)` to `sb.get(j)` and freeze a linking test
-  covering both “no later beam” and “later same-group beam” cases.
-- **Rust parity policy:** the completed beam-origin expansion boundary does not
-  execute this separate head-origin `CLinker.expand`; a later head-linking oracle
-  must quantify corpus impact before deciding whether compatibility mode
-  preserves the typo or follows an upstream fix.
+- **Resolution:** upstream PR #977 changes `sb.get(i)` to `sb.get(j)`. The local
+  Java tree carries that exact fix, and Rust now performs the same total
+  look-ahead over later items.
+- **Regression evidence:** the pure Rust gate covers both “no later beam” and
+  “later same-group beam” cases. The corrected full-lifecycle Bach system-2
+  queue-196 oracle proves that two same-group beams are retained but the
+  trailing support glyph is excluded (`lastIndex=2`, `maxIndex=3`), with
+  warmup plus two fresh Java runs byte-identical.
+- **Rust parity policy:** follow corrected upstream Java; do not retain a
+  compatibility mode for the typo.
 
 ### AV-JAVA-004: downward beam expansion mutates its stored theoretical line
 
