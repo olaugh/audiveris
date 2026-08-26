@@ -130,92 +130,100 @@ fn active_cue_aggregate_corpus_matches_java() {
                 .all(|system| system.aggregates.is_empty()),
             "{page}"
         );
-        let processing = plan_native_cue_aggregate_processing(&grid, &reduction, &recognition)
-            .expect("native cue process plans");
-        assert!(
-            processing
-                .systems
-                .iter()
-                .all(|system| system.plans.is_empty()),
-            "{page}"
-        );
-        let spots =
-            extract_native_cue_spots(&grid, &processing).expect("native cue spot extraction");
-        assert!(spots.aggregates.is_empty(), "{page}");
-        let checks =
-            check_native_cue_beam_spots(&grid, &spots, reduction.stems.reduction_interline)
-                .expect("native cue beam checks");
-        assert!(checks.aggregates.is_empty(), "{page}");
-        let mutations = materialize_native_cue_beam_mutations(&grid, &reduction, &spots, &checks)
-            .expect("native cue beam mutations");
-        assert!(mutations.registered_spots.is_empty(), "{page}");
-        assert!(
-            mutations.systems.iter().all(|system| {
-                system.beams.is_empty()
-                    && system.sig_after.vertices.len() == system.sig_before_vertex_count
-            }),
-            "{page}"
-        );
-        let grouping =
-            group_native_cue_beams(&mutations, &checks, reduction.stems.reduction_interline)
-                .expect("native cue beam grouping");
-        assert!(
-            grouping.systems.iter().all(|system| {
-                system.aggregates.is_empty()
-                    && system.sig_after.vertices.len() == system.sig_before_grouping_vertex_count
-                    && system.sig_after.edges
-                        == mutations
-                            .systems
-                            .iter()
-                            .find(|mutation| mutation.system_id == system.system_id)
-                            .expect("aligned mutation system")
-                            .sig_after
-                            .edges
-            }),
-            "{page}"
-        );
-        let link_plans = plan_native_cue_beam_stem_links(
-            &reduction,
-            &recognition,
-            &processing,
-            &mutations,
-            &grouping,
-        )
-        .expect("native cue beam-stem lookup");
-        assert!(
-            link_plans
-                .systems
-                .iter()
-                .all(|system| system.plans.is_empty()),
-            "{page}"
-        );
-        let relation_checks =
-            check_native_cue_beam_stem_links(&reduction, &mutations, &grouping, &link_plans)
-                .expect("native cue BeamStem checks");
-        assert!(relation_checks.checks.is_empty(), "{page}");
-        let relation_mutations = apply_native_cue_beam_stem_relations(
-            &mutations,
-            &grouping,
-            &link_plans,
-            &relation_checks,
-            reduction.stems.sheet_skew_slope,
-            reduction.stems.reduction_interline,
-        )
-        .expect("native cue BeamStem mutations");
-        assert!(
-            relation_mutations.systems.iter().all(|system| {
-                system.mutations.is_empty()
-                    && system.sig_after.edges.len() == system.sig_before_relation_count
-                    && system.sig_after
-                        == grouping
-                            .systems
-                            .iter()
-                            .find(|grouped| grouped.system_id == system.system_id)
-                            .expect("aligned grouping system")
-                            .sig_after
-            }),
-            "{page}"
-        );
+        // Every stage owns page-sized SIG snapshots. Bound the manual
+        // lifecycle's drop scope before constructing the composed results so
+        // the corpus gate also fits GitHub's smaller Linux runners.
+        let relation_mutations = {
+            let processing = plan_native_cue_aggregate_processing(&grid, &reduction, &recognition)
+                .expect("native cue process plans");
+            assert!(
+                processing
+                    .systems
+                    .iter()
+                    .all(|system| system.plans.is_empty()),
+                "{page}"
+            );
+            let spots =
+                extract_native_cue_spots(&grid, &processing).expect("native cue spot extraction");
+            assert!(spots.aggregates.is_empty(), "{page}");
+            let checks =
+                check_native_cue_beam_spots(&grid, &spots, reduction.stems.reduction_interline)
+                    .expect("native cue beam checks");
+            assert!(checks.aggregates.is_empty(), "{page}");
+            let mutations =
+                materialize_native_cue_beam_mutations(&grid, &reduction, &spots, &checks)
+                    .expect("native cue beam mutations");
+            assert!(mutations.registered_spots.is_empty(), "{page}");
+            assert!(
+                mutations.systems.iter().all(|system| {
+                    system.beams.is_empty()
+                        && system.sig_after.vertices.len() == system.sig_before_vertex_count
+                }),
+                "{page}"
+            );
+            let grouping =
+                group_native_cue_beams(&mutations, &checks, reduction.stems.reduction_interline)
+                    .expect("native cue beam grouping");
+            assert!(
+                grouping.systems.iter().all(|system| {
+                    system.aggregates.is_empty()
+                        && system.sig_after.vertices.len()
+                            == system.sig_before_grouping_vertex_count
+                        && system.sig_after.edges
+                            == mutations
+                                .systems
+                                .iter()
+                                .find(|mutation| mutation.system_id == system.system_id)
+                                .expect("aligned mutation system")
+                                .sig_after
+                                .edges
+                }),
+                "{page}"
+            );
+            let link_plans = plan_native_cue_beam_stem_links(
+                &reduction,
+                &recognition,
+                &processing,
+                &mutations,
+                &grouping,
+            )
+            .expect("native cue beam-stem lookup");
+            assert!(
+                link_plans
+                    .systems
+                    .iter()
+                    .all(|system| system.plans.is_empty()),
+                "{page}"
+            );
+            let relation_checks =
+                check_native_cue_beam_stem_links(&reduction, &mutations, &grouping, &link_plans)
+                    .expect("native cue BeamStem checks");
+            assert!(relation_checks.checks.is_empty(), "{page}");
+            let relation_mutations = apply_native_cue_beam_stem_relations(
+                &mutations,
+                &grouping,
+                &link_plans,
+                &relation_checks,
+                reduction.stems.sheet_skew_slope,
+                reduction.stems.reduction_interline,
+            )
+            .expect("native cue BeamStem mutations");
+            assert!(
+                relation_mutations.systems.iter().all(|system| {
+                    system.mutations.is_empty()
+                        && system.sig_after.edges.len() == system.sig_before_relation_count
+                        && system.sig_after
+                            == grouping
+                                .systems
+                                .iter()
+                                .find(|grouped| grouped.system_id == system.system_id)
+                                .expect("aligned grouping system")
+                                .sig_after
+                }),
+                "{page}"
+            );
+            relation_mutations
+        };
 
         let completed = recognize_native_cue_beams_with_options(
             &grid,
@@ -234,6 +242,8 @@ fn active_cue_aggregate_corpus_matches_java() {
             relation_mutations,
             "terminal relation application must be the published SIG"
         );
+        drop(relation_mutations);
+        drop(recognition);
         let repeated = recognize_native_cue_beams_with_options(
             &grid,
             reduction.clone(),
@@ -245,6 +255,7 @@ fn active_cue_aggregate_corpus_matches_java() {
             completed, repeated,
             "{page} active lifecycle is deterministic"
         );
+        drop(repeated);
 
         let disabled = recognize_native_cue_beams_with_options(
             &grid,
@@ -258,6 +269,7 @@ fn active_cue_aggregate_corpus_matches_java() {
         .expect("disabled ordinary CUE_BEAMS");
         assert!(disabled.active.is_none(), "{page}");
         assert!(disabled.supplemental_hook_recovery_enabled, "{page}");
+        drop(disabled);
 
         let recovery_enabled = recognize_native_cue_beams_with_options(
             &grid,
@@ -273,6 +285,8 @@ fn active_cue_aggregate_corpus_matches_java() {
             completed.active, recovery_enabled.active,
             "{page} recovery control must not perturb ordinary cue recognition"
         );
+        drop(recovery_enabled);
+        drop(completed);
     }
 }
 
