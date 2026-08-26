@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use std::path::PathBuf;
+use std::{path::PathBuf, process::Command};
 
 use audiveris_omr::{
     beam_inters::BeamKind,
@@ -25,6 +25,17 @@ use audiveris_omr::{
 
 const ORACLE: &str = include_str!("../../../oracle/cue-aggregates.txt");
 const CHOPIN_CUE_ORACLE: &str = include_str!("../../../oracle/cue-beams-chopin-page23-system4.txt");
+const CUE_AGGREGATE_PAGE_ENV: &str = "AUDIVERIS_CUE_AGGREGATE_TEST_PAGE";
+const CUE_AGGREGATE_CORPUS: [&str; 8] = [
+    "data/examples/chula.png",
+    "data/examples/allegretto.png",
+    "data/examples/batuque.png",
+    "data/examples/carmen.png",
+    "data/examples/cucaracha.png",
+    "data/examples/hove.png",
+    "data/examples/zizi.png",
+    "data/examples/BachInvention5.jpg",
+];
 
 #[test]
 fn chopin_cue_fixture_exposes_terminal_active_evidence() {
@@ -105,189 +116,202 @@ fn chopin_cue_fixture_exposes_terminal_active_evidence() {
 
 #[test]
 fn active_cue_aggregate_corpus_matches_java() {
-    for path in [
-        "data/examples/chula.png",
-        "data/examples/allegretto.png",
-        "data/examples/batuque.png",
-        "data/examples/carmen.png",
-        "data/examples/cucaracha.png",
-        "data/examples/hove.png",
-        "data/examples/zizi.png",
-        "data/examples/BachInvention5.jpg",
-    ] {
-        let (grid, reduction, recognition) = recognize_page(path);
-        let page = format!(
-            "{}#1",
-            PathBuf::from(path).file_name().unwrap().to_string_lossy()
-        );
-        let rows = canonical_native_rows(&page, &recognition);
-        let expected = canonical_java_rows(&page);
-        assert_eq!(rows, expected, "{page}");
+    let test_binary = std::env::current_exe().expect("current cue aggregate test binary");
+    for path in CUE_AGGREGATE_CORPUS {
+        let status = Command::new(&test_binary)
+            .args(["--exact", "active_cue_aggregate_corpus_page", "--nocapture"])
+            .env(CUE_AGGREGATE_PAGE_ENV, path)
+            .status()
+            .unwrap_or_else(|error| panic!("run isolated cue aggregate page {path}: {error}"));
         assert!(
-            recognition
+            status.success(),
+            "isolated cue aggregate page failed: {path}"
+        );
+    }
+}
+
+#[test]
+fn active_cue_aggregate_corpus_page() {
+    let Some(path) = std::env::var_os(CUE_AGGREGATE_PAGE_ENV) else {
+        return;
+    };
+    let path = path
+        .to_str()
+        .expect("cue aggregate test page path is UTF-8");
+    assert_cue_aggregate_page(path);
+}
+
+fn assert_cue_aggregate_page(path: &str) {
+    let (grid, reduction, recognition) = recognize_page(path);
+    let page = format!(
+        "{}#1",
+        PathBuf::from(path).file_name().unwrap().to_string_lossy()
+    );
+    let rows = canonical_native_rows(&page, &recognition);
+    let expected = canonical_java_rows(&page);
+    assert_eq!(rows, expected, "{page}");
+    assert!(
+        recognition
+            .systems
+            .iter()
+            .all(|system| system.aggregates.is_empty()),
+        "{page}"
+    );
+    // Every stage owns page-sized SIG snapshots. Bound the manual
+    // lifecycle's drop scope before constructing the composed results so
+    // the corpus gate also fits GitHub's smaller Linux runners.
+    let relation_mutations = {
+        let processing = plan_native_cue_aggregate_processing(&grid, &reduction, &recognition)
+            .expect("native cue process plans");
+        assert!(
+            processing
                 .systems
                 .iter()
-                .all(|system| system.aggregates.is_empty()),
+                .all(|system| system.plans.is_empty()),
             "{page}"
         );
-        // Every stage owns page-sized SIG snapshots. Bound the manual
-        // lifecycle's drop scope before constructing the composed results so
-        // the corpus gate also fits GitHub's smaller Linux runners.
-        let relation_mutations = {
-            let processing = plan_native_cue_aggregate_processing(&grid, &reduction, &recognition)
-                .expect("native cue process plans");
-            assert!(
-                processing
-                    .systems
-                    .iter()
-                    .all(|system| system.plans.is_empty()),
-                "{page}"
-            );
-            let spots =
-                extract_native_cue_spots(&grid, &processing).expect("native cue spot extraction");
-            assert!(spots.aggregates.is_empty(), "{page}");
-            let checks =
-                check_native_cue_beam_spots(&grid, &spots, reduction.stems.reduction_interline)
-                    .expect("native cue beam checks");
-            assert!(checks.aggregates.is_empty(), "{page}");
-            let mutations =
-                materialize_native_cue_beam_mutations(&grid, &reduction, &spots, &checks)
-                    .expect("native cue beam mutations");
-            assert!(mutations.registered_spots.is_empty(), "{page}");
-            assert!(
-                mutations.systems.iter().all(|system| {
-                    system.beams.is_empty()
-                        && system.sig_after.vertices.len() == system.sig_before_vertex_count
-                }),
-                "{page}"
-            );
-            let grouping =
-                group_native_cue_beams(&mutations, &checks, reduction.stems.reduction_interline)
-                    .expect("native cue beam grouping");
-            assert!(
-                grouping.systems.iter().all(|system| {
-                    system.aggregates.is_empty()
-                        && system.sig_after.vertices.len()
-                            == system.sig_before_grouping_vertex_count
-                        && system.sig_after.edges
-                            == mutations
-                                .systems
-                                .iter()
-                                .find(|mutation| mutation.system_id == system.system_id)
-                                .expect("aligned mutation system")
-                                .sig_after
-                                .edges
-                }),
-                "{page}"
-            );
-            let link_plans = plan_native_cue_beam_stem_links(
-                &reduction,
-                &recognition,
-                &processing,
-                &mutations,
-                &grouping,
-            )
-            .expect("native cue beam-stem lookup");
-            assert!(
-                link_plans
-                    .systems
-                    .iter()
-                    .all(|system| system.plans.is_empty()),
-                "{page}"
-            );
-            let relation_checks =
-                check_native_cue_beam_stem_links(&reduction, &mutations, &grouping, &link_plans)
-                    .expect("native cue BeamStem checks");
-            assert!(relation_checks.checks.is_empty(), "{page}");
-            let relation_mutations = apply_native_cue_beam_stem_relations(
-                &mutations,
-                &grouping,
-                &link_plans,
-                &relation_checks,
-                reduction.stems.sheet_skew_slope,
-                reduction.stems.reduction_interline,
-            )
-            .expect("native cue BeamStem mutations");
-            assert!(
-                relation_mutations.systems.iter().all(|system| {
-                    system.mutations.is_empty()
-                        && system.sig_after.edges.len() == system.sig_before_relation_count
-                        && system.sig_after
-                            == grouping
-                                .systems
-                                .iter()
-                                .find(|grouped| grouped.system_id == system.system_id)
-                                .expect("aligned grouping system")
-                                .sig_after
-                }),
-                "{page}"
-            );
-            relation_mutations
-        };
-
-        let completed = recognize_native_cue_beams_with_options(
-            &grid,
-            reduction.clone(),
-            true,
-            NativeCueBeamsOptions::default(),
-        )
-        .expect("composed native CUE_BEAMS");
-        assert_eq!(completed.skip_reason, None, "{page}");
-        assert_eq!(
-            completed
-                .active
-                .as_deref()
-                .expect("active CUE_BEAMS")
-                .stem_relations,
-            relation_mutations,
-            "terminal relation application must be the published SIG"
+        let spots =
+            extract_native_cue_spots(&grid, &processing).expect("native cue spot extraction");
+        assert!(spots.aggregates.is_empty(), "{page}");
+        let checks =
+            check_native_cue_beam_spots(&grid, &spots, reduction.stems.reduction_interline)
+                .expect("native cue beam checks");
+        assert!(checks.aggregates.is_empty(), "{page}");
+        let mutations = materialize_native_cue_beam_mutations(&grid, &reduction, &spots, &checks)
+            .expect("native cue beam mutations");
+        assert!(mutations.registered_spots.is_empty(), "{page}");
+        assert!(
+            mutations.systems.iter().all(|system| {
+                system.beams.is_empty()
+                    && system.sig_after.vertices.len() == system.sig_before_vertex_count
+            }),
+            "{page}"
         );
-        drop(relation_mutations);
-        drop(recognition);
-        let repeated = recognize_native_cue_beams_with_options(
-            &grid,
-            reduction.clone(),
-            true,
-            NativeCueBeamsOptions::default(),
-        )
-        .expect("repeat composed native CUE_BEAMS");
-        assert_eq!(
-            completed, repeated,
-            "{page} active lifecycle is deterministic"
+        let grouping =
+            group_native_cue_beams(&mutations, &checks, reduction.stems.reduction_interline)
+                .expect("native cue beam grouping");
+        assert!(
+            grouping.systems.iter().all(|system| {
+                system.aggregates.is_empty()
+                    && system.sig_after.vertices.len() == system.sig_before_grouping_vertex_count
+                    && system.sig_after.edges
+                        == mutations
+                            .systems
+                            .iter()
+                            .find(|mutation| mutation.system_id == system.system_id)
+                            .expect("aligned mutation system")
+                            .sig_after
+                            .edges
+            }),
+            "{page}"
         );
-        drop(repeated);
-
-        let disabled = recognize_native_cue_beams_with_options(
-            &grid,
-            reduction.clone(),
-            true,
-            NativeCueBeamsOptions {
-                enabled: false,
-                supplemental_hook_recovery: true,
-            },
+        let link_plans = plan_native_cue_beam_stem_links(
+            &reduction,
+            &recognition,
+            &processing,
+            &mutations,
+            &grouping,
         )
-        .expect("disabled ordinary CUE_BEAMS");
-        assert!(disabled.active.is_none(), "{page}");
-        assert!(disabled.supplemental_hook_recovery_enabled, "{page}");
-        drop(disabled);
-
-        let recovery_enabled = recognize_native_cue_beams_with_options(
-            &grid,
-            reduction,
-            true,
-            NativeCueBeamsOptions {
-                enabled: true,
-                supplemental_hook_recovery: true,
-            },
-        )
-        .expect("independently enabled supplemental recovery");
-        assert_eq!(
-            completed.active, recovery_enabled.active,
-            "{page} recovery control must not perturb ordinary cue recognition"
+        .expect("native cue beam-stem lookup");
+        assert!(
+            link_plans
+                .systems
+                .iter()
+                .all(|system| system.plans.is_empty()),
+            "{page}"
         );
-        drop(recovery_enabled);
-        drop(completed);
-    }
+        let relation_checks =
+            check_native_cue_beam_stem_links(&reduction, &mutations, &grouping, &link_plans)
+                .expect("native cue BeamStem checks");
+        assert!(relation_checks.checks.is_empty(), "{page}");
+        let relation_mutations = apply_native_cue_beam_stem_relations(
+            &mutations,
+            &grouping,
+            &link_plans,
+            &relation_checks,
+            reduction.stems.sheet_skew_slope,
+            reduction.stems.reduction_interline,
+        )
+        .expect("native cue BeamStem mutations");
+        assert!(
+            relation_mutations.systems.iter().all(|system| {
+                system.mutations.is_empty()
+                    && system.sig_after.edges.len() == system.sig_before_relation_count
+                    && system.sig_after
+                        == grouping
+                            .systems
+                            .iter()
+                            .find(|grouped| grouped.system_id == system.system_id)
+                            .expect("aligned grouping system")
+                            .sig_after
+            }),
+            "{page}"
+        );
+        relation_mutations
+    };
+
+    let completed = recognize_native_cue_beams_with_options(
+        &grid,
+        reduction.clone(),
+        true,
+        NativeCueBeamsOptions::default(),
+    )
+    .expect("composed native CUE_BEAMS");
+    assert_eq!(completed.skip_reason, None, "{page}");
+    assert_eq!(
+        completed
+            .active
+            .as_deref()
+            .expect("active CUE_BEAMS")
+            .stem_relations,
+        relation_mutations,
+        "terminal relation application must be the published SIG"
+    );
+    drop(relation_mutations);
+    drop(recognition);
+    let repeated = recognize_native_cue_beams_with_options(
+        &grid,
+        reduction.clone(),
+        true,
+        NativeCueBeamsOptions::default(),
+    )
+    .expect("repeat composed native CUE_BEAMS");
+    assert_eq!(
+        completed, repeated,
+        "{page} active lifecycle is deterministic"
+    );
+    drop(repeated);
+
+    let disabled = recognize_native_cue_beams_with_options(
+        &grid,
+        reduction.clone(),
+        true,
+        NativeCueBeamsOptions {
+            enabled: false,
+            supplemental_hook_recovery: true,
+        },
+    )
+    .expect("disabled ordinary CUE_BEAMS");
+    assert!(disabled.active.is_none(), "{page}");
+    assert!(disabled.supplemental_hook_recovery_enabled, "{page}");
+    drop(disabled);
+
+    let recovery_enabled = recognize_native_cue_beams_with_options(
+        &grid,
+        reduction,
+        true,
+        NativeCueBeamsOptions {
+            enabled: true,
+            supplemental_hook_recovery: true,
+        },
+    )
+    .expect("independently enabled supplemental recovery");
+    assert_eq!(
+        completed.active, recovery_enabled.active,
+        "{page} recovery control must not perturb ordinary cue recognition"
+    );
+    drop(recovery_enabled);
+    drop(completed);
 }
 
 fn recognize_page(
