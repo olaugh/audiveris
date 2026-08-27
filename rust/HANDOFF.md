@@ -12452,3 +12452,35 @@ with five explicit diagnostics ignored; formatting, strict all-target and
 all-feature workspace Clippy, and diff checks are clean. Weak HEADS candidate
 pruning remains a separate quality/performance task, not a STEMS completion
 blocker for these three pages.
+
+## Boundary 312: HEADS C-links retain transaction-owned glyphs
+
+The remaining dense Chopin failure was a narrower continuation of Boundary
+311's registry work. At system 4, queue 63, x318/SIG310, an unrelated earlier
+compound had been registered and rejected by `StemChecker`. Its transaction
+entry correctly remained weak, but the later HEADS C-link's exhaustive lookup
+did not perform the production modeled registry's ownership promotion that
+beam-origin frontier preparation already performs. The lookup therefore
+returned `AwaitingCompleteGlyphRegistry` even though Rust carried the exact
+bounds, weight, RunTable, identity, allocator, and union size.
+
+`NativeStemsGlyphRegistryAuthority::exhaustive_native_content_scan` now accepts
+the mutable transaction state. The production modeled-registry implementation
+first retains every exact transaction entry, then performs the complete scan.
+The default snapshot implementation remains fail-closed, so this does not turn
+opaque hashes or incomplete external evidence into absence authority. A
+focused regression starts from one modeled entry plus one rejected weak
+compound, scans for a third unrelated candidate, and requires an exact
+two-entry absent result while promoting the rejected canonical for subsequent
+reuse.
+
+Exact reproduction: source
+`stage-omr-data/data/real-datasets/chopin-nocturnes-joseffy/pdf-page-11.png`
+has SHA-256
+`978e0445de8a01d60533aaadcde382b06329d96c9f2ae57f0cd485437eebf8a1`.
+ImageMagick `-resize 157.902439%` produces a `2416x3126` PNG with SHA-256
+`c050aac4ac8799b710ba8c2664a548b0e96c87ed98c44bd4a290e33666ea7893`.
+The patched release CLI completes the whole page and emits terminal STEMS JSON
+instead of HEADS fallback. Verification is 770/770 library tests with two
+intentional ignores, 5/5 exact createStem Java differential, 3/3 carried-state
+differential, and 10/10 native SIG baseline with five diagnostic ignores.

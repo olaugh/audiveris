@@ -7280,3 +7280,18 @@ The Batuque integration, 770 library tests (two ignored), 10 native SIG
 baseline tests (five diagnostic ignores), formatting, strict workspace Clippy,
 and diff checks pass. Weak HEADS candidate pruning is still a separate
 quality/performance follow-up rather than one of these STEMS blockers.
+
+## Boundary 312: dense Chopin HEADS registry continuity
+
+HEADS C-links now retain exact transaction-created glyphs through the
+production modeled registry before proving a later compound absent. This
+closes the remaining dense Chopin page-11 failure where an earlier
+checker-rejected weak compound caused system 4 queue 63 to report
+`AwaitingCompleteGlyphRegistry`. Incomplete snapshot authorities remain
+fail-closed; only the native registry that owns full RunTables can make this
+promotion.
+
+The exact `157.902439%` StageAligner diagnostic now completes terminal STEMS
+JSON instead of falling back to HEADS. A deterministic weak-compound regression,
+the exact Java createStem and carried-state differentials, the native SIG
+baseline, and the full Rust library suite are green.

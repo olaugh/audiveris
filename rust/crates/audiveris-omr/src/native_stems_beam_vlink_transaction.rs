@@ -201,7 +201,7 @@ pub trait NativeStemsGlyphRegistryAuthority {
     fn exhaustive_native_content_scan(
         &self,
         _content: &NativeStemsBeamFixedGlyphContent,
-        _state: &NativeStemsBeamVLinkTransactionState,
+        _state: &mut NativeStemsBeamVLinkTransactionState,
     ) -> Result<NativeStemsBeamExhaustiveGlyphEqualsScan, NativeStemsBeamVLinkTransactionError>
     {
         Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry)
@@ -759,9 +759,15 @@ impl NativeStemsGlyphRegistryAuthority for NativeStemsModeledGlyphRegistry {
     fn exhaustive_native_content_scan(
         &self,
         content: &NativeStemsBeamFixedGlyphContent,
-        state: &NativeStemsBeamVLinkTransactionState,
+        state: &mut NativeStemsBeamVLinkTransactionState,
     ) -> Result<NativeStemsBeamExhaustiveGlyphEqualsScan, NativeStemsBeamVLinkTransactionError>
     {
+        // Head-origin transactions share the same production-owned registry
+        // as beam-origin transactions.  A checker-rejected compound can be
+        // weak-only in Java, but its exact native content remains owned here;
+        // promote those carried entries before using the registry to prove an
+        // unrelated candidate absent.
+        self.retain_transaction_entries(state)?;
         self.exhaustive_scan(content, state)
     }
 }
@@ -4406,7 +4412,12 @@ mod tests {
             prepare_registration(&rejected, None, &state),
             Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry)
         ));
-        registry.retain_transaction_entries(&mut state).unwrap();
+        let unrelated = content(6, 1, 1, 1, &[(0, 0)]);
+        let scan = registry
+            .exhaustive_native_content_scan(&unrelated, &mut state)
+            .unwrap();
+        assert_eq!(scan.baseline_union_size, 2);
+        assert_eq!(scan.lookup, NativeStemsBeamExhaustiveGlyphLookup::Absent);
         assert!(state.glyph_index.known_canonical_glyphs[0].strongly_retained);
         assert!(prepare_registration(&rejected, None, &state).is_ok());
         assert_eq!(
