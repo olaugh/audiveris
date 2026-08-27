@@ -580,6 +580,17 @@ pub struct NativeStemsBeamVLinkBaseApplyKey {
     pub plan: NativeStemsBeamPlanRef,
 }
 
+/// Exact graph effect committed by the preceding B14 transaction.
+///
+/// Rollover needs this provenance because a valid duplicate BeamStem
+/// suppression appends no compact relation. The referenced live relation and
+/// the portion checked by the fresh draft remain mandatory evidence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeStemsBeamVLinkBaseApplyCommit {
+    pub disposition: NativeStemsBeamVLinkBaseApplyDisposition,
+    pub beam_portion: NativeBeamPortion,
+}
+
 /// Mutable state for exactly one base-relation transaction.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsBeamVLinkBaseApplyState {
@@ -589,6 +600,7 @@ pub struct NativeStemsBeamVLinkBaseApplyState {
     pub sheet_edit: NativeStemsBeamSheetEditState,
     pub certificate: Option<NativeStemsBeamVLinkBaseApplyCertificate>,
     pub committed: Option<NativeStemsBeamVLinkBaseApplyKey>,
+    pub committed_apply: Option<NativeStemsBeamVLinkBaseApplyCommit>,
 }
 
 /// Construct the first B14 compact state from the production-owned SIG.
@@ -820,6 +832,7 @@ pub fn initialize_native_stems_beam_vlink_base_apply_state_from_native_sig(
         sheet_edit,
         certificate: Some(certificate),
         committed: None,
+        committed_apply: None,
     })
 }
 
@@ -969,6 +982,7 @@ pub fn initialize_native_stems_beam_rejected_first_base_state_from_native_sig(
         sheet_edit,
         certificate: None,
         committed: None,
+        committed_apply: None,
     })
 }
 
@@ -1271,6 +1285,7 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         sheet_edit: prior.sheet_edit,
         certificate: Some(certificate),
         committed: None,
+        committed_apply: None,
     })
 }
 
@@ -1285,13 +1300,29 @@ fn validate_native_rollover_predecessor(
             phase: "native rollover predecessor commit",
         });
     };
+    let Some(committed_apply) = prior.committed_apply else {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor apply provenance",
+        });
+    };
+    let expected_relation_appends = match committed_apply.disposition {
+        NativeStemsBeamVLinkBaseApplyDisposition::Added { .. } => 1,
+        NativeStemsBeamVLinkBaseApplyDisposition::SuppressedExistingBeamStem { .. } => 0,
+        NativeStemsBeamVLinkBaseApplyDisposition::SuppressedSourceRemoved
+        | NativeStemsBeamVLinkBaseApplyDisposition::SuppressedTargetRemoved => {
+            return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rollover predecessor removed-endpoint suppression",
+            });
+        }
+    };
     let vertex_appends = prior.sig.appended_vertices.len();
     if prior.certificate.is_some()
         || committed.system_id != sig.system_id
         || prior.sig.system_id != sig.system_id
-        || prior.sig.appended_relations.len() != 1
+        || prior.sig.appended_relations.len() != expected_relation_appends
         || prior.inter_index.appended_entries.len() != vertex_appends
         || vertex_appends > 1
+        || (expected_relation_appends == 0 && vertex_appends != 0)
         || prior.sig.baseline_vertex_count.checked_add(vertex_appends) != Some(sig.vertices.len())
         || prior
             .inter_index
@@ -1301,7 +1332,7 @@ fn validate_native_rollover_predecessor(
         || prior
             .sig
             .baseline_relation_count
-            .checked_add(1)
+            .checked_add(expected_relation_appends)
             .is_none_or(|minimum| minimum > sig.edges.len())
     {
         return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
@@ -1334,44 +1365,79 @@ fn validate_native_rollover_predecessor(
         });
     }
 
-    let compact = prior.sig.appended_relations[0];
     let expected_stem_vertex = prior.sig.stem.sig_vertex_identity.ok_or(
         NativeStemsBeamVLinkBaseApplyError::InvalidState {
             phase: "native rollover predecessor stem vertex",
         },
     )?;
-    let NativeStemsBeamSigRelationKind::BeamStem {
-        beam_portion: expected_portion,
-    } = compact.kind
-    else {
-        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
-            phase: "native rollover predecessor relation kind",
-        });
-    };
-    let live = sig.edges.get(compact.graph_relation_identity).ok_or(
-        NativeStemsBeamVLinkBaseApplyError::InvalidState {
-            phase: "native rollover predecessor live relation",
-        },
-    )?;
-    if compact.graph_relation_identity != prior.sig.baseline_relation_count
-        || compact.relation_object_identity
-            != NativeStemsBeamRelationObjectIdentity::FreshDraft(committed.plan.plan_ordinal)
-        || compact.source_vertex_identity != beam_vertex.0
-        || compact.target_vertex_identity != expected_stem_vertex
-        || live.ordinal != compact.graph_relation_identity
-        || !live.active
-        || live.source != beam_vertex.0
-        || live.target != expected_stem_vertex
-        || live.kind != NativeSigRelationKind::BeamStem
-        || live.origin
-            != (crate::native_sig::NativeSigRelationOrigin::BeamVBaseDraft {
-                plan_ordinal: committed.plan.plan_ordinal,
-            })
-        || live.beam_portion != expected_portion
-    {
-        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
-            phase: "native rollover predecessor relation",
-        });
+    match committed_apply.disposition {
+        NativeStemsBeamVLinkBaseApplyDisposition::Added {
+            graph_relation_identity,
+        } => {
+            let compact = prior.sig.appended_relations[0];
+            let NativeStemsBeamSigRelationKind::BeamStem {
+                beam_portion: expected_portion,
+            } = compact.kind
+            else {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor relation kind",
+                });
+            };
+            let live = sig.edges.get(compact.graph_relation_identity).ok_or(
+                NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor live relation",
+                },
+            )?;
+            if graph_relation_identity != compact.graph_relation_identity
+                || expected_portion != Some(committed_apply.beam_portion)
+                || compact.graph_relation_identity != prior.sig.baseline_relation_count
+                || compact.relation_object_identity
+                    != NativeStemsBeamRelationObjectIdentity::FreshDraft(
+                        committed.plan.plan_ordinal,
+                    )
+                || compact.source_vertex_identity != beam_vertex.0
+                || compact.target_vertex_identity != expected_stem_vertex
+                || live.ordinal != compact.graph_relation_identity
+                || !live.active
+                || live.source != beam_vertex.0
+                || live.target != expected_stem_vertex
+                || live.kind != NativeSigRelationKind::BeamStem
+                || live.origin
+                    != (crate::native_sig::NativeSigRelationOrigin::BeamVBaseDraft {
+                        plan_ordinal: committed.plan.plan_ordinal,
+                    })
+                || live.beam_portion != expected_portion
+            {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor relation",
+                });
+            }
+        }
+        NativeStemsBeamVLinkBaseApplyDisposition::SuppressedExistingBeamStem {
+            graph_relation_identity,
+        } => {
+            let live = sig.edges.get(graph_relation_identity).ok_or(
+                NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor suppressed live relation",
+                },
+            )?;
+            if graph_relation_identity >= prior.sig.baseline_relation_count
+                || live.ordinal != graph_relation_identity
+                || !live.active
+                || live.source != beam_vertex.0
+                || live.target != expected_stem_vertex
+                || live.kind != NativeSigRelationKind::BeamStem
+                || live.beam_portion != Some(committed_apply.beam_portion)
+            {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor suppressed relation",
+                });
+            }
+        }
+        NativeStemsBeamVLinkBaseApplyDisposition::SuppressedSourceRemoved
+        | NativeStemsBeamVLinkBaseApplyDisposition::SuppressedTargetRemoved => {
+            unreachable!("removed-endpoint suppression rejected above")
+        }
     }
 
     let known = transaction_state
@@ -3662,6 +3728,10 @@ fn commit(
             .push(NativeStemsBeamVLinkBaseApplyOperation::StandardSigListenerEdgeCallbackCompleted);
     }
     state.committed = Some(prepared.key);
+    state.committed_apply = Some(NativeStemsBeamVLinkBaseApplyCommit {
+        disposition: prepared.apply_disposition,
+        beam_portion: prepared.relation.beam_portion,
+    });
     state.certificate = None;
 
     let stem_after = current_stem_payload(state, &prepared.stem_before);
@@ -4590,6 +4660,7 @@ mod tests {
             },
             certificate: Some(certificate),
             committed: None,
+            committed_apply: None,
         }
     }
 
@@ -4663,6 +4734,187 @@ mod tests {
             raw_right_found: false,
             source_removed: state.sig.beam.removed,
             target_removed_read: (!state.sig.beam.removed).then_some(state.sig.stem.removed),
+        }
+    }
+
+    fn rollover_vertex(ordinal: usize, kind: NativeSigInterKind) -> NativeSigVertex {
+        NativeSigVertex {
+            ordinal,
+            active: true,
+            removed: false,
+            frozen: false,
+            kind,
+            shape: None,
+            grade: 1.0,
+            contextual_grade: None,
+            bounds: NativeSigBounds {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            abnormal: false,
+            beam_geometry: None,
+        }
+    }
+
+    fn suppressed_rollover_fixture() -> (
+        NativeStemsBeamVLinkBaseApplyState,
+        NativeStemsBeamVLinkTransactionState,
+        NativeSigSystem,
+        NativeSigSystemBindings,
+    ) {
+        let source = NativeStemsBeamSource::RawBeam(0);
+        let mut prior = state(source, Some(EXISTING_STEM_INTER_ID), false, false);
+        prior.inter_index.baseline_entry_count = BASELINE_VERTEX_COUNT;
+        let prepared = prepared(
+            &prior,
+            NativeStemsBeamVLinkBaseApplyDisposition::SuppressedExistingBeamStem {
+                graph_relation_identity: 1,
+            },
+            false,
+        );
+        commit(prepared, &mut prior);
+
+        let sig = NativeSigSystem {
+            system_id: SYSTEM_ID,
+            vertices: vec![
+                rollover_vertex(BEAM_VERTEX, NativeSigInterKind::Beam),
+                rollover_vertex(EXISTING_STEM_VERTEX, NativeSigInterKind::Stem),
+                rollover_vertex(2, NativeSigInterKind::BeamGroup),
+            ],
+            edges: vec![
+                NativeSigEdge {
+                    ordinal: 0,
+                    active: false,
+                    source: BEAM_VERTEX,
+                    target: 2,
+                    kind: NativeSigRelationKind::Containment,
+                    origin: crate::native_sig::NativeSigRelationOrigin::BaselineGraph,
+                    support: None,
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: None,
+                },
+                NativeSigEdge {
+                    ordinal: 1,
+                    active: true,
+                    source: BEAM_VERTEX,
+                    target: EXISTING_STEM_VERTEX,
+                    kind: NativeSigRelationKind::BeamStem,
+                    origin: crate::native_sig::NativeSigRelationOrigin::BeamVBaseDraft {
+                        plan_ordinal: 5,
+                    },
+                    support: None,
+                    beam_portion: Some(NativeBeamPortion::Left),
+                    stem_extension: None,
+                    head_stem: None,
+                },
+            ],
+        };
+        let bindings = NativeSigSystemBindings {
+            system_id: SYSTEM_ID,
+            beam_vertices: std::collections::BTreeMap::from([(
+                source,
+                NativeSigVertexId(BEAM_VERTEX),
+            )]),
+            beam_group_vertices: std::collections::BTreeMap::new(),
+            stem_vertices: std::collections::BTreeMap::from([(
+                0,
+                NativeSigVertexId(EXISTING_STEM_VERTEX),
+            )]),
+            head_vertices: std::collections::BTreeMap::new(),
+            ledger_vertices: std::collections::BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: std::collections::BTreeMap::new(),
+        };
+        let transaction_state = prior.transaction_state.clone();
+        (prior, transaction_state, sig, bindings)
+    }
+
+    #[test]
+    fn rollover_authenticates_a_suppressed_existing_beam_stem_without_appends() {
+        let (prior, transaction_state, sig, bindings) = suppressed_rollover_fixture();
+        assert!(prior.sig.appended_vertices.is_empty());
+        assert!(prior.inter_index.appended_entries.is_empty());
+        assert!(prior.sig.appended_relations.is_empty());
+        assert_eq!(
+            prior.committed_apply,
+            Some(NativeStemsBeamVLinkBaseApplyCommit {
+                disposition: NativeStemsBeamVLinkBaseApplyDisposition::SuppressedExistingBeamStem {
+                    graph_relation_identity: 1,
+                },
+                beam_portion: NativeBeamPortion::Left,
+            })
+        );
+        let result =
+            validate_native_rollover_predecessor(&prior, &transaction_state, &sig, &bindings);
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn rollover_rejects_tampered_suppressed_relation_and_preserves_inputs() {
+        let (prior, transaction_state, sig, bindings) = suppressed_rollover_fixture();
+        let mut cases = Vec::new();
+
+        let mut wrong_identity = prior.clone();
+        wrong_identity.committed_apply = Some(NativeStemsBeamVLinkBaseApplyCommit {
+            disposition: NativeStemsBeamVLinkBaseApplyDisposition::SuppressedExistingBeamStem {
+                graph_relation_identity: 0,
+            },
+            beam_portion: NativeBeamPortion::Left,
+        });
+        cases.push((wrong_identity, sig.clone()));
+
+        for mutate in [
+            |edge: &mut NativeSigEdge| edge.active = false,
+            |edge: &mut NativeSigEdge| edge.source = 2,
+            |edge: &mut NativeSigEdge| edge.target = 2,
+            |edge: &mut NativeSigEdge| edge.kind = NativeSigRelationKind::BeamRest,
+            |edge: &mut NativeSigEdge| edge.beam_portion = Some(NativeBeamPortion::Right),
+        ] {
+            let mut corrupt = sig.clone();
+            mutate(&mut corrupt.edges[1]);
+            cases.push((prior.clone(), corrupt));
+        }
+
+        for (prior_case, sig_case) in cases {
+            let prior_before = prior_case.clone();
+            let sig_before = sig_case.clone();
+            assert!(matches!(
+                validate_native_rollover_predecessor(
+                    &prior_case,
+                    &transaction_state,
+                    &sig_case,
+                    &bindings,
+                ),
+                Err(NativeStemsBeamVLinkBaseApplyError::InvalidState { .. })
+            ));
+            assert_eq!(prior_case, prior_before);
+            assert_eq!(sig_case, sig_before);
+        }
+    }
+
+    #[test]
+    fn rollover_never_accepts_removed_endpoint_suppression_as_zero_append() {
+        let (prior, transaction_state, sig, bindings) = suppressed_rollover_fixture();
+        for disposition in [
+            NativeStemsBeamVLinkBaseApplyDisposition::SuppressedSourceRemoved,
+            NativeStemsBeamVLinkBaseApplyDisposition::SuppressedTargetRemoved,
+        ] {
+            let mut corrupt = prior.clone();
+            corrupt.committed_apply = Some(NativeStemsBeamVLinkBaseApplyCommit {
+                disposition,
+                beam_portion: NativeBeamPortion::Left,
+            });
+            assert!(matches!(
+                validate_native_rollover_predecessor(&corrupt, &transaction_state, &sig, &bindings,),
+                Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor removed-endpoint suppression"
+                })
+            ));
         }
     }
 

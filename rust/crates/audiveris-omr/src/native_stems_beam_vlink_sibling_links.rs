@@ -642,11 +642,15 @@ pub fn apply_native_stems_beam_vlink_sibling_transaction_to_native_sig(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if reachability_system
+    let live_reachability_sources = reachability_system
         .groups_in_source_order
         .get(base_beam.group_ordinal)
-        != Some(&group_sources)
-    {
+        .ok_or(NativeStemsBeamVLinkSiblingLinksError::PredecessorMismatch)?
+        .iter()
+        .copied()
+        .filter(|source| bindings.beam_vertices.contains_key(source))
+        .collect::<Vec<_>>();
+    if live_reachability_sources != group_sources {
         return Err(NativeStemsBeamVLinkSiblingLinksError::PredecessorMismatch);
     }
 
@@ -964,14 +968,19 @@ fn validate_native_reachability_siblings(
         .filter(|member| member.selected)
         .collect::<Vec<_>>();
     selected.sort_by_key(|member| member.sorted_ordinal);
-    if inspection.siblings.len() != selected.len()
-        || inspection
-            .siblings
-            .iter()
-            .zip(selected)
-            .any(|(prior, now)| {
-                prior.beam != now.source || !point_bits_equal(prior.cross, now.cross)
-            })
+    let live_sources = members
+        .iter()
+        .map(|member| member.source)
+        .collect::<Vec<_>>();
+    let expected_siblings = inspection
+        .siblings
+        .iter()
+        .filter(|sibling| live_sources.contains(&sibling.beam))
+        .collect::<Vec<_>>();
+    if expected_siblings.len() != selected.len()
+        || expected_siblings.iter().zip(selected).any(|(prior, now)| {
+            prior.beam != now.source || !point_bits_equal(prior.cross, now.cross)
+        })
     {
         return Err(NativeStemsBeamVLinkSiblingLinksError::PredecessorMismatch);
     }

@@ -7295,3 +7295,24 @@ The exact `157.902439%` StageAligner diagnostic now completes terminal STEMS
 JSON instead of falling back to HEADS. A deterministic weak-compound regression,
 the exact Java createStem and carried-state differentials, the native SIG
 baseline, and the full Rust library suite are green.
+
+## Boundary 313: duplicate-suppressed B14 rollover reaches terminal Chopin STEMS
+
+Rust now distinguishes an appended B14 BeamStem from Java's valid suppression
+of a duplicate edge. The committed state carries the disposition and beam
+portion, and a zero-append predecessor is accepted only when its exact existing
+active BeamStem relation is authenticated against the live SIG. Removed
+endpoints and all tampered identities, endpoints, kinds, activity states, and
+portions still fail closed without mutation.
+
+The complete dense-page path also rebuilds STUMPS from the live SIG beam set,
+matching Java's `systemBeams`, and filters B16's pre-arbitration group evidence
+to surviving members. This prevents a beam already removed by HEADS from
+re-entering the stump loop or its sibling-group comparison.
+
+The old StageAligner CLI reproduces the reported system 1 transaction 17 crash
+on unresized Chopin `pdf-page-06.png` (SHA-256
+`38c4bcc74221550b362e8bda2f3eae1c2d5bef1e0680014db289481b036881cc`).
+A release build with this change and the separately developed arbitrary-size
+head-template prerequisite completes terminal STEMS JSON on that exact image.
+The full library and frozen B14-B17 differential chain remain green.

@@ -45,11 +45,12 @@ use audiveris_omr::{
         NativeStemsBeamSigVertexAppend, NativeStemsBeamSigVertexLookup,
         NativeStemsBeamStemIncidentRelation, NativeStemsBeamStemIncidentScan,
         NativeStemsBeamStemIncidentScanState, NativeStemsBeamVLinkBaseApplyCertificate,
-        NativeStemsBeamVLinkBaseApplyDisposition, NativeStemsBeamVLinkBaseApplyKey,
-        NativeStemsBeamVLinkBaseApplyOperation, NativeStemsBeamVLinkBaseApplyOutcome,
-        NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBeamAbnormalTrace,
-        NativeStemsBeamVLinkBeamRuntimeState, NativeStemsBeamVLinkStemRuntimeState,
-        NativeStemsBeamVLinkVertexAction, apply_native_stems_beam_vlink_base_transaction,
+        NativeStemsBeamVLinkBaseApplyCommit, NativeStemsBeamVLinkBaseApplyDisposition,
+        NativeStemsBeamVLinkBaseApplyKey, NativeStemsBeamVLinkBaseApplyOperation,
+        NativeStemsBeamVLinkBaseApplyOutcome, NativeStemsBeamVLinkBaseApplyState,
+        NativeStemsBeamVLinkBeamAbnormalTrace, NativeStemsBeamVLinkBeamRuntimeState,
+        NativeStemsBeamVLinkStemRuntimeState, NativeStemsBeamVLinkVertexAction,
+        apply_native_stems_beam_vlink_base_transaction,
     },
     native_stems_beam_vlink_reuse_check::{
         NativeStemsBeamHeadStemLookupEvidence, NativeStemsBeamRelationParameters,
@@ -1917,6 +1918,7 @@ fn build_real_base_state(
         sheet_edit: compact.sheet_edit,
         certificate: Some(compact.certificate),
         committed: None,
+        committed_apply: None,
     })
 }
 
@@ -2023,6 +2025,7 @@ fn independently_derive_production_state_after(
     key: NativeStemsBeamVLinkBaseApplyKey,
 ) -> Result<NativeStemsBeamVLinkBaseApplyState, String> {
     let vertex = one_row(rows, RowKind::VertexTrace)?;
+    let decision = one_row(rows, RowKind::ApplyDecision)?;
     let edge = one_row(rows, RowKind::EdgeStruct)?;
     let result = one_row(rows, RowKind::Result)?;
     let frontier = one_row(rows, RowKind::Frontier)?;
@@ -2135,6 +2138,30 @@ fn independently_derive_production_state_after(
     };
     expected.certificate = None;
     expected.committed = Some(key);
+    expected.committed_apply = Some(NativeStemsBeamVLinkBaseApplyCommit {
+        disposition: match decision.value("action")? {
+            "Add" => NativeStemsBeamVLinkBaseApplyDisposition::Added {
+                graph_relation_identity: parse_sig_edge_alias(
+                    edge.value("graphRelationIdentity")?,
+                )?,
+            },
+            "SuppressSourceRemoved" => {
+                NativeStemsBeamVLinkBaseApplyDisposition::SuppressedSourceRemoved
+            }
+            "SuppressTargetRemoved" => {
+                NativeStemsBeamVLinkBaseApplyDisposition::SuppressedTargetRemoved
+            }
+            "SuppressExistingRelation" => {
+                NativeStemsBeamVLinkBaseApplyDisposition::SuppressedExistingBeamStem {
+                    graph_relation_identity: parse_sig_edge_alias(
+                        decision.value("firstMatchIdentity")?,
+                    )?,
+                }
+            }
+            value => return Err(format!("unsupported production action {value}")),
+        },
+        beam_portion: parse_native_portion(frontier.value("portion")?)?,
+    });
     Ok(expected)
 }
 

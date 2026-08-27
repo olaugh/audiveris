@@ -6839,3 +6839,32 @@ now reaches terminal release-mode STEMS JSON instead of failing at system 4,
 queue 63, x318/SIG310. The 5/5 createStem Java differential, 3/3 carried-state
 differential, 10/10 native SIG baseline, and all 770 library tests pass (two
 ignored diagnostics).
+
+## Boundary 313: authenticate duplicate-suppressed B14 rollover
+
+A committed B14 transaction now retains its exact apply disposition and beam
+portion. Rollover still requires one appended relation after `Added`, but it
+also accepts Java's legitimate zero-append
+`SuppressedExistingBeamStem` result when the recorded pre-existing edge is an
+active BeamStem with the exact identity, system, endpoints, and portion in the
+live native SIG. Removed-source/removed-target suppressions remain invalid
+rollover predecessors. Focused mutation tests corrupt the identity, activity,
+source, target, relation kind, and portion independently and prove read-only
+rollback on every rejection.
+
+The dense Chopin path also exposed two earlier-vs-live topology joins after
+that barrier. Java rebuilds its STUMPS worklist from live SIG beams, so Rust now
+omits HEADS-arbitrated sources that have no live binding while rejecting any
+bound non-beam vertex. B16 likewise compares and replays only surviving group
+members rather than stale pre-arbitration reachability entries. Ordinary
+eight-page B14-B17 Java fixtures remain exact.
+
+The reported source `pdf-page-06.png` has SHA-256
+`38c4bcc74221550b362e8bda2f3eae1c2d5bef1e0680014db289481b036881cc`.
+The old StageAligner binary (SHA-256
+`901150543d448217b2e4a1f0c12283c97894702bbb1db5c40d3b294253674e0f`)
+reproduces system 1 transaction 17's `native rollover predecessor shape`
+failure. A release build containing this boundary plus the separate
+arbitrary-size head-template prerequisite completes the original image and
+emits 3,959,754 bytes of terminal STEMS JSON. All 774 library tests pass (two
+ignored diagnostics), as do the 11 B14, 5 B15, 35 B16, and 15 B17 exact gates.

@@ -139,7 +139,7 @@ const BOUNDARY_FIFTEEN_MANIFEST_SHA256: &str =
 const BOUNDARY_FIFTEEN_GATE_PATH: &str =
     "rust/crates/audiveris-omr/tests/native_stems_beam_vlink_b_linker_flag.rs";
 const BOUNDARY_FIFTEEN_GATE_SHA256: &str =
-    "587f6f3a78c1f1cc3249c47954ee491fe7b9ac29c86e56565ee9075eca0f0989";
+    "4b7c94f0644cf97a9d3a69eea274ce1b56f6a93ae4260ca71a12397cd0258848";
 const BOUNDARY_FIFTEEN_FIXTURE_PATH: &str = "rust/oracle/stems-beam-vlink-b-linker-flag-chula.txt";
 const BOUNDARY_FIFTEEN_FIXTURE_SHA256: &str =
     "afc01b47298dc2b86253cde6512e7311533df51aa0ca35f25b98e1f72b886658";

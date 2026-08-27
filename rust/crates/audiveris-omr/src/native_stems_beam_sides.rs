@@ -17390,6 +17390,26 @@ pub fn continue_native_stems_beam_sides_carrier_into_stumps(
         shadow.b_cells.clone(),
         shadow.s_cells.clone(),
     );
+    let NativeStemsBeamSchedulerStatus::SidesExhausted {
+        retained_for_stumps,
+        final_local_worklist,
+    } = &shadow.scheduler.status
+    else {
+        return Err(stage(
+            "STUMPS-live-worklist",
+            "scheduler is not at the SIDES terminal",
+        ));
+    };
+    let live_worklist = live_stumps_worklist(
+        retained_for_stumps,
+        final_local_worklist,
+        &shadow.sig,
+        &shadow.bindings,
+    )?;
+    shadow.scheduler.status = NativeStemsBeamSchedulerStatus::SidesExhausted {
+        retained_for_stumps: live_worklist.clone(),
+        final_local_worklist: live_worklist,
+    };
     let continuation = continue_native_stems_beam_scheduler_into_stumps(
         &shadow.scheduler,
         context.stumps,
@@ -17415,6 +17435,52 @@ pub fn continue_native_stems_beam_sides_carrier_into_stumps(
     }
     *carrier = shadow;
     Ok(continuation)
+}
+
+/// Reconstruct Java's `systemBeams` authority at the SIDES/STUMPS boundary.
+///
+/// `StemsRetriever.linkStems` obtains that list from the live SIG, so a beam
+/// removed by HEADS arbitration cannot enter its later stump loop. The
+/// immutable Rust scheduler is materialized earlier and can still carry such
+/// a source. Only a missing binding is omitted here; a present binding must
+/// authenticate a live beam-kind vertex or the transition fails closed.
+fn live_stumps_worklist(
+    retained_for_stumps: &[crate::native_stems_beam_stumps::NativeStemsBeamSource],
+    final_local_worklist: &[crate::native_stems_beam_stumps::NativeStemsBeamSource],
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+) -> Result<Vec<crate::native_stems_beam_stumps::NativeStemsBeamSource>, NativeStemsBeamSidesError>
+{
+    if retained_for_stumps != final_local_worklist {
+        return Err(stage(
+            "STUMPS-live-worklist",
+            "retained and final SIDES worklists differ",
+        ));
+    }
+    retained_for_stumps
+        .iter()
+        .copied()
+        .filter_map(|source| {
+            bindings.beam_vertices.get(&source).copied().map(|vertex| {
+                sig.vertex(vertex.0)
+                    .filter(|item| {
+                        matches!(
+                            item.kind,
+                            NativeSigInterKind::Beam
+                                | NativeSigInterKind::BeamHook
+                                | NativeSigInterKind::SmallBeam
+                        )
+                    })
+                    .map(|_| source)
+                    .ok_or_else(|| {
+                        stage(
+                            "STUMPS-live-worklist",
+                            "bound scheduler beam is not a live beam SIG vertex",
+                        )
+                    })
+            })
+        })
+        .collect()
 }
 
 fn linked_b_cells_match(
@@ -18017,6 +18083,60 @@ mod tests {
         );
         bindings.beam_vertices.remove(&hook);
         assert!(live_group_member_sources(&sig, &bindings, NativeSigVertexId(0)).is_err());
+    }
+
+    #[test]
+    fn stumps_worklist_uses_the_live_sig_beam_set() {
+        use std::collections::BTreeMap;
+
+        use crate::native_sig::NativeSigVertex;
+
+        let removed = NativeStemsBeamSource::RawBeam(5);
+        let live = NativeStemsBeamSource::RawBeam(6);
+        let vertex = NativeSigVertex {
+            ordinal: 0,
+            active: true,
+            removed: false,
+            frozen: false,
+            kind: NativeSigInterKind::Beam,
+            shape: None,
+            grade: 1.0,
+            contextual_grade: None,
+            bounds: NativeSigBounds {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            abnormal: false,
+            beam_geometry: None,
+        };
+        let sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![vertex],
+            edges: Vec::new(),
+        };
+        let mut bindings = NativeSigSystemBindings {
+            system_id: 1,
+            beam_vertices: BTreeMap::from([(live, NativeSigVertexId(0))]),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: BTreeMap::new(),
+        };
+        let carried = vec![removed, live];
+        assert_eq!(
+            live_stumps_worklist(&carried, &carried, &sig, &bindings).expect("live SIG worklist"),
+            [live]
+        );
+
+        bindings.beam_vertices.insert(live, NativeSigVertexId(1));
+        assert!(live_stumps_worklist(&carried, &carried, &sig, &bindings).is_err());
+        assert!(live_stumps_worklist(&carried, &[live], &sig, &bindings).is_err());
     }
 
     #[test]

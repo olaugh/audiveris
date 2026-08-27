@@ -12484,3 +12484,28 @@ The patched release CLI completes the whole page and emits terminal STEMS JSON
 instead of HEADS fallback. Verification is 770/770 library tests with two
 intentional ignores, 5/5 exact createStem Java differential, 3/3 carried-state
 differential, and 10/10 native SIG baseline with five diagnostic ignores.
+
+## Boundary 313: dense Chopin B14/STUMPS continuity
+
+The Op. 9 No. 1 page-one crash at system 1 transaction 17 was a valid duplicate
+BeamStem suppression, not a malformed predecessor. Plan 338 reused active edge
+1033 (created by plan 320, CENTER) and therefore appended no vertex, index
+entry, or relation. B14 now carries the apply disposition plus portion into its
+committed state and authenticates that exact existing live edge during the
+next rollover. Zero-append is still rejected for removed endpoints and for any
+identity, endpoint, kind, activity, portion, or baseline-boundary mismatch.
+
+Once that barrier cleared, the same page showed that the immutable scheduler
+still named a beam removed by HEADS arbitration and that B16 retained its stale
+group member. Java's `systemBeams` is sourced from the live SIG before STUMPS.
+The Rust continuation now intersects the carried worklist with live beam
+bindings, and B16 filters its pre-arbitration reachability to the same surviving
+members. A present corrupt binding remains fatal.
+
+Exact source SHA-256 is
+`38c4bcc74221550b362e8bda2f3eae1c2d5bef1e0680014db289481b036881cc`.
+The reported old bundled CLI reproduces the original B14 failure. The patched
+release, tested atop the separate arbitrary-size template prerequisite,
+completes the unresized image and writes 3,959,754 bytes of terminal STEMS JSON.
+Verification: 774/774 library tests with two intentional ignores; B14 11/11;
+B15 5/5; B16 35/35; B17 15/15.
