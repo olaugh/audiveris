@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use std::{path::PathBuf, process::Command};
+use std::{
+    fmt::{self, Debug, Write as _},
+    path::PathBuf,
+    process::Command,
+};
 
 use audiveris_omr::{
     beam_inters::BeamKind,
@@ -36,6 +40,39 @@ const CUE_AGGREGATE_CORPUS: [&str; 8] = [
     "data/examples/zizi.png",
     "data/examples/BachInvention5.jpg",
 ];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DebugFingerprint {
+    fnv1a128: u128,
+    byte_len: u64,
+}
+
+struct DebugFingerprintWriter {
+    fingerprint: DebugFingerprint,
+}
+
+impl fmt::Write for DebugFingerprintWriter {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        const FNV_PRIME_128: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+        for byte in text.bytes() {
+            self.fingerprint.fnv1a128 ^= u128::from(byte);
+            self.fingerprint.fnv1a128 = self.fingerprint.fnv1a128.wrapping_mul(FNV_PRIME_128);
+            self.fingerprint.byte_len += 1;
+        }
+        Ok(())
+    }
+}
+
+fn debug_fingerprint(value: &impl Debug) -> DebugFingerprint {
+    let mut writer = DebugFingerprintWriter {
+        fingerprint: DebugFingerprint {
+            fnv1a128: 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d,
+            byte_len: 0,
+        },
+    };
+    write!(&mut writer, "{value:?}").expect("fingerprinting Debug output cannot fail");
+    writer.fingerprint
+}
 
 #[test]
 fn chopin_cue_fixture_exposes_terminal_active_evidence() {
@@ -252,7 +289,7 @@ fn assert_cue_aggregate_page(path: &str) {
 
     let completed = recognize_native_cue_beams_with_options(
         &grid,
-        reduction.clone(),
+        reduction,
         true,
         NativeCueBeamsOptions::default(),
     )
@@ -269,22 +306,48 @@ fn assert_cue_aggregate_page(path: &str) {
     );
     drop(relation_mutations);
     drop(recognition);
+
+    // Comparing the two page-sized results directly retains both full active
+    // SIG histories at once. Stream every derived Debug field through a
+    // 128-bit fingerprint so the baseline can be dropped before its replay.
+    let completed_active_fingerprint = debug_fingerprint(&completed.active);
+    let completed_gate = (
+        completed.skip_reason,
+        completed.small_heads_enabled,
+        completed.detected_small_beam_height,
+        completed.ordinary_enabled,
+        completed.supplemental_hook_recovery_enabled,
+    );
+    let baseline_reduction = completed.reduction.clone();
+    drop(completed);
     let repeated = recognize_native_cue_beams_with_options(
         &grid,
-        reduction.clone(),
+        baseline_reduction.clone(),
         true,
         NativeCueBeamsOptions::default(),
     )
     .expect("repeat composed native CUE_BEAMS");
     assert_eq!(
-        completed, repeated,
+        completed_gate,
+        (
+            repeated.skip_reason,
+            repeated.small_heads_enabled,
+            repeated.detected_small_beam_height,
+            repeated.ordinary_enabled,
+            repeated.supplemental_hook_recovery_enabled,
+        ),
+        "{page} CUE_BEAMS gate is deterministic"
+    );
+    assert_eq!(
+        completed_active_fingerprint,
+        debug_fingerprint(&repeated.active),
         "{page} active lifecycle is deterministic"
     );
     drop(repeated);
 
     let disabled = recognize_native_cue_beams_with_options(
         &grid,
-        reduction.clone(),
+        baseline_reduction.clone(),
         true,
         NativeCueBeamsOptions {
             enabled: false,
@@ -298,7 +361,7 @@ fn assert_cue_aggregate_page(path: &str) {
 
     let recovery_enabled = recognize_native_cue_beams_with_options(
         &grid,
-        reduction,
+        baseline_reduction,
         true,
         NativeCueBeamsOptions {
             enabled: true,
@@ -307,11 +370,11 @@ fn assert_cue_aggregate_page(path: &str) {
     )
     .expect("independently enabled supplemental recovery");
     assert_eq!(
-        completed.active, recovery_enabled.active,
+        completed_active_fingerprint,
+        debug_fingerprint(&recovery_enabled.active),
         "{page} recovery control must not perturb ordinary cue recognition"
     );
     drop(recovery_enabled);
-    drop(completed);
 }
 
 fn recognize_page(
