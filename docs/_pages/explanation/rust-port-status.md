@@ -7330,7 +7330,9 @@ rejected without a center-point fallback or silent member loss.
 The exact 96% StageAligner candidate for Chopin Op. 9 No. 1 page 1 now crosses
 the former `S1A6: missing head corner` failure, resolves all three members,
 publishes the cue beam/group, and completes with terminal cue BeamStem
-relations. A disabled-cue fingerprint check proves ordinary STEMS and BEAMS
-remain unchanged. The exact production page, eight-page Java cue differential,
-778-test library suite (two intentional ignores), CLI protocol suite,
-formatting, and strict Clippy gates are green.
+relations. CI runs a lossless first-two-system crop that retains and asserts
+the same creation/live ordinal split without the full page's runner memory
+cost. A disabled-cue fingerprint proves ordinary STEMS and BEAMS remain
+unchanged. The full-page diagnostic, cropped regression, eight-page Java cue
+differential, 778-test library suite (two intentional ignores), CLI protocol
+suite, formatting, and strict Clippy gates are green.

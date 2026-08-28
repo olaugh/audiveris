@@ -194,15 +194,23 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
     assert!(disabled.active.is_none());
     assert_eq!(ordinary_fingerprint, debug_fingerprint(&disabled.reduction));
 
-    // NativeCueBeamMutationError renders the zero-based aggregate ordinal 5
-    // as S1A6.  This is the exact StageAligner 96% candidate that used to
-    // abort while looking up the first member's head corner.
+    // These are lossless pixels from the exact StageAligner 96% page. On the
+    // full page this x869/y169 aggregate has zero-based ordinal 5 and renders
+    // as S1A6. Cropping away later systems makes the corpus gate CI-safe and
+    // removes one earlier aggregate, but retains the head/SIG identity split.
     let s1a6 = aggregates.systems[0]
         .aggregates
         .iter()
-        .find(|aggregate| aggregate.ordinal == 5)
+        .find(|aggregate| {
+            aggregate.bounds.x == 869
+                && aggregate.bounds.y == 79
+                && aggregate.bounds.width == 15
+                && aggregate.bounds.height == 54
+        })
         .expect("Chopin S1A6 aggregate");
+    assert_eq!(s1a6.ordinal, 4);
     assert_eq!(s1a6.members.len(), 3);
+    let s1a6_ordinal = s1a6.ordinal;
 
     let completed = recognize_native_cue_beams_with_options(
         &grid,
@@ -215,6 +223,38 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
     )
     .expect("Chopin Op. 9 No. 1 page 1 CUE_BEAMS");
     let active = completed.active.as_deref().expect("active CUE_BEAMS");
+    let final_s1 = completed
+        .reduction
+        .stems
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("final S1 STEMS state");
+    let bindings = &final_s1.transaction.state_after.beam_state.bindings;
+    let corners = completed
+        .reduction
+        .stems
+        .components
+        .head_corners
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("S1 head corners");
+    assert!(
+        s1a6.members.iter().any(|(head_vertex, _)| {
+            let Some((reference, _)) = bindings
+                .head_vertices
+                .iter()
+                .find(|(_, vertex)| **vertex == *head_vertex)
+            else {
+                return false;
+            };
+            corners.heads_in_sig_order.iter().any(|head| {
+                head.reference == *reference && head.system_creation_ordinal != head_vertex.0
+            })
+        }),
+        "the cropped S1A6 evidence must retain the creation/live ordinal split"
+    );
     let s1_mutations = active
         .mutations
         .systems
@@ -224,7 +264,7 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
     let s1a6_beam = s1_mutations
         .beams
         .iter()
-        .find(|beam| beam.aggregate_ordinal == 5)
+        .find(|beam| beam.aggregate_ordinal == s1a6_ordinal)
         .expect("S1A6 cue beam");
     let s1_grouping = active
         .grouping
@@ -235,7 +275,7 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
     let s1a6_group = s1_grouping
         .aggregates
         .iter()
-        .find(|aggregate| aggregate.aggregate_ordinal == 5)
+        .find(|aggregate| aggregate.aggregate_ordinal == s1a6_ordinal)
         .expect("S1A6 cue beam group");
     assert_eq!(s1a6_group.group_sig_ordinals.len(), 1);
     let group_vertex = s1a6_group.group_sig_ordinals[0].0;
@@ -259,7 +299,7 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
         s1_lookup
             .plans
             .iter()
-            .filter(|plan| plan.aggregate_ordinal == 5)
+            .filter(|plan| plan.aggregate_ordinal == s1a6_ordinal)
             .count(),
         3,
         "every S1A6 head must resolve through its stable binding"

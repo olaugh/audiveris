@@ -6881,15 +6881,20 @@ shape/bounds, and the corner record must independently match those same
 properties. Missing, ambiguous, redirected, removed, or otherwise tampered
 bindings fail closed; there is no head-center fallback and no skipped member.
 
-The exact StageAligner 96% candidate for Chopin Op. 9 No. 1 page 1 is frozen
-as `chopin-nocturne-op9-no1-page1-stage-aligner-96.png` (1469x1901, SHA-256
-`c70ca57d4e060b9befa0ce8bcf6bd8b439502f6d7da9ea7cb465fc9f9ee62102`).
-Its former `S1A6: missing head corner` failure now reaches terminal CUE_BEAMS:
-all three aggregate members resolve through stable bindings, the cue beam and
-group containment are published, and the page publishes cue BeamStem
-relations. The production-sized regression also fingerprints REDUCTION before
-and after disabled CUE_BEAMS to prove ordinary STEMS/BEAMS are unchanged. The
-exact page passes in 980.70 seconds; the eight-page frozen Java cue differential
-passes in 198.14 seconds; the library suite reports 776 passed and two
-intentional ignores; and all five CLI protocol tests, formatting, and strict
-workspace Clippy pass.
+The exact StageAligner 96% candidate for Chopin Op. 9 No. 1 page 1 is
+`1469x1901` with SHA-256
+`c70ca57d4e060b9befa0ce8bcf6bd8b439502f6d7da9ea7cb465fc9f9ee62102`.
+Its former `S1A6: missing head corner` failure now reaches terminal CUE_BEAMS.
+The checked-in regression is a lossless `1469x620` crop of its first two
+systems (SHA-256
+`753ecce93da11d7204c72613e2712f86d6bf1997261557d3e835feb03a762c9f`),
+which retains the affected three-member aggregate, explicitly proves the
+creation/live ordinal split, publishes its cue beam/group containment, and
+reaches a terminal cue BeamStem relation without exhausting a CI runner.
+
+The crop regression also fingerprints REDUCTION before and after disabled
+CUE_BEAMS to prove ordinary STEMS/BEAMS are unchanged. It passes in 198.23
+seconds; the full page passes locally in 980.70 seconds; the eight-page frozen
+Java cue differential passes in 198.14 seconds; the library suite reports 776
+passed and two intentional ignores; and all five CLI protocol tests,
+formatting, and strict workspace Clippy pass.

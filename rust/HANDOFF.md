@@ -12527,12 +12527,16 @@ reference; and its shape/bounds match the live head. Focused tamper tests cover
 missing, stale, redirected, ambiguous, and mismatched authority. Rust neither
 substitutes the head center nor silently drops the member.
 
-The checked-in 1469x1901 StageAligner 96% page candidate has SHA-256
-`c70ca57d4e060b9befa0ce8bcf6bd8b439502f6d7da9ea7cb465fc9f9ee62102`.
-The full integration test crosses the old `S1A6` boundary, resolves its three
-head members, publishes its cue beam/group containment, and reaches terminal
-page-wide cue BeamStem relations. Disabled CUE_BEAMS retains an exact debug
-fingerprint of the incoming ordinary REDUCTION/STEMS/BEAMS state. Verification
-is 776 passed library tests plus two intentional ignores, 8/8 frozen Java cue
-pages, 5/5 CLI protocol tests, the exact production page, formatting, and
-strict workspace/all-target/all-feature Clippy.
+The exact 1469x1901 StageAligner 96% page candidate has SHA-256
+`c70ca57d4e060b9befa0ce8bcf6bd8b439502f6d7da9ea7cb465fc9f9ee62102` and
+passes locally. CI uses a lossless 1469x620 first-two-system crop with SHA-256
+`753ecce93da11d7204c72613e2712f86d6bf1997261557d3e835feb03a762c9f`.
+The crop retains the affected three-head geometry and asserts the actual
+creation/live ordinal split before publishing its cue beam/group containment
+and a terminal cue BeamStem relation. Disabled CUE_BEAMS retains an exact
+debug fingerprint of the incoming ordinary REDUCTION/STEMS/BEAMS state.
+
+Verification is 776 passed library tests plus two intentional ignores, 8/8
+frozen Java cue pages, 5/5 CLI protocol tests, the 198.23-second crop and
+980.70-second full-page diagnostics, formatting, and strict
+workspace/all-target/all-feature Clippy.
