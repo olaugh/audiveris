@@ -71,6 +71,7 @@ use crate::native_stem_seeds::{
 };
 use crate::native_stems::{NativeStemsHeadPhase1DriveEvent, NativeStemsRecognition};
 use crate::native_stems_beam_sides::NativeStemsHeadPhase1Carrier;
+use crate::native_stems_beam_stumps::NativeStemsBeamSource;
 use crate::native_stems_beam_vlink_head_links::NativeStemsBeamHeadLinkHeadRef;
 use crate::native_stems_beam_vlink_transaction::{
     NativeStemsBeamKnownSystemStem, NativeStemsBeamStemGrade,
@@ -526,7 +527,7 @@ fn recognition_json(
         stems_product(&mut json, stems);
     }
     if let Some(reduction) = reduction {
-        reduction_product(&mut json, reduction);
+        reduction_product(&mut json, reduction, beams, heads);
     }
     if let Some(cue_beams) = cue_beams {
         cue_beams_product(&mut json, cue_beams);
@@ -2001,7 +2002,12 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
     json.close('}');
 }
 
-fn reduction_product(json: &mut Json, reduction: &NativeReductionRecognition) {
+fn reduction_product(
+    json: &mut Json,
+    reduction: &NativeReductionRecognition,
+    beams: Option<&NativeBeamRecognition>,
+    heads: Option<&NativeHeadsEpilogRecognition>,
+) {
     let foundation_epoch_count = reduction
         .foundations
         .iter()
@@ -2092,7 +2098,55 @@ fn reduction_product(json: &mut Json, reduction: &NativeReductionRecognition) {
     );
     json.field_integer("removed_active_glyph_count", cleanup.removed.len() as i64);
     json.field_integer("active_glyph_count_after", cleanup.active_after as i64);
+    if let Some(beams) = beams {
+        let candidate_count = beams.raw_beams.len() + beams.hooks.len();
+        let survivor_count = beam_lifecycle(beams, heads, reduction)
+            .filter(|entry| entry.reason == "survived")
+            .count();
+        json.field_integer("beam_candidate_count", candidate_count as i64);
+        json.field_integer("reduced_beam_count", survivor_count as i64);
+        json.field_integer(
+            "rejected_beam_candidate_count",
+            candidate_count.saturating_sub(survivor_count) as i64,
+        );
+    }
     json.close('}');
+
+    if let Some(beams) = beams {
+        json.key("beam_lifecycle");
+        json.open('[');
+        for entry in beam_lifecycle(beams, heads, reduction) {
+            json.open('{');
+            json.field_integer("system", entry.system_id as i64);
+            json.field_string("source", entry.source_kind);
+            json.field_integer("source_ordinal", entry.source_ordinal as i64);
+            json.field_string("kind", entry.beam.kind.shape());
+            let bounds = beam_bounds(entry.beam.item);
+            json.key("bounds");
+            json.open('{');
+            json.field_integer("x", i64::from(bounds.x));
+            json.field_integer("y", i64::from(bounds.y));
+            json.field_integer("width", i64::from(bounds.width));
+            json.field_integer("height", i64::from(bounds.height));
+            json.close('}');
+            json.key("sig_ordinal");
+            match entry.vertex {
+                Some(vertex) => json.integer(vertex.0 as i64),
+                None => json.null(),
+            }
+            json.field_string(
+                "status",
+                if entry.reason == "survived" {
+                    "survived"
+                } else {
+                    "rejected"
+                },
+            );
+            json.field_string("reason", entry.reason);
+            json.close('}');
+        }
+        json.close(']');
+    }
 
     json.key("systems");
     json.open('[');
@@ -2137,6 +2191,176 @@ fn reduction_product(json: &mut Json, reduction: &NativeReductionRecognition) {
     }
     json.close(']');
     json.close('}');
+}
+
+#[derive(Clone, Copy)]
+struct BeamLifecycleEntry<'a> {
+    system_id: usize,
+    source_kind: &'static str,
+    source_ordinal: usize,
+    beam: &'a RawBeam,
+    vertex: Option<NativeSigVertexId>,
+    reason: &'static str,
+}
+
+fn beam_lifecycle<'a>(
+    beams: &'a NativeBeamRecognition,
+    heads: Option<&NativeHeadsEpilogRecognition>,
+    reduction: &NativeReductionRecognition,
+) -> impl Iterator<Item = BeamLifecycleEntry<'a>> {
+    beams
+        .raw_beams
+        .iter()
+        .enumerate()
+        .map(move |(ordinal, (system_id, beam))| {
+            beam_lifecycle_entry(
+                *system_id,
+                "raw_beam",
+                ordinal,
+                NativeStemsBeamSource::RawBeam(ordinal),
+                beam,
+                heads,
+                reduction,
+            )
+        })
+        .chain(
+            beams
+                .hooks
+                .iter()
+                .enumerate()
+                .map(move |(ordinal, (system_id, beam))| {
+                    beam_lifecycle_entry(
+                        *system_id,
+                        "hook",
+                        ordinal,
+                        NativeStemsBeamSource::Hook(ordinal),
+                        beam,
+                        heads,
+                        reduction,
+                    )
+                }),
+        )
+}
+
+fn beam_lifecycle_entry<'a>(
+    system_id: usize,
+    source_kind: &'static str,
+    source_ordinal: usize,
+    source: NativeStemsBeamSource,
+    beam: &'a RawBeam,
+    heads: Option<&NativeHeadsEpilogRecognition>,
+    reduction: &NativeReductionRecognition,
+) -> BeamLifecycleEntry<'a> {
+    let system = reduction
+        .stems
+        .systems
+        .iter()
+        .find(|candidate| candidate.system_id == system_id);
+    let vertex = system.and_then(|system| {
+        system
+            .transaction
+            .state_after
+            .beam_state
+            .bindings
+            .beam_vertices
+            .get(&source)
+            .copied()
+    });
+    let reason = match vertex {
+        _ if heads.is_some_and(|heads| heads_removed_beam(heads, system_id, source)) => {
+            "heads_small_beam_arbitration"
+        }
+        None => "not_promoted_to_stems_sig",
+        Some(vertex)
+            if system.is_some_and(|system| {
+                system.transaction.state_after.beam_state.sig.vertices[vertex.0].active
+            }) =>
+        {
+            "survived"
+        }
+        Some(vertex)
+            if reduction
+                .stems
+                .beam_finalizations
+                .iter()
+                .any(|transaction| {
+                    transaction.system_id == system_id
+                        && transaction.removed_orphan_beams.contains(&vertex)
+                }) =>
+        {
+            "stems_missing_beam_stem_support"
+        }
+        Some(vertex) => reduction_beam_rejection_reason(reduction, system_id, vertex, source),
+    };
+    BeamLifecycleEntry {
+        system_id,
+        source_kind,
+        source_ordinal,
+        beam,
+        vertex,
+        reason,
+    }
+}
+
+fn heads_removed_beam(
+    heads: &NativeHeadsEpilogRecognition,
+    system_id: usize,
+    source: NativeStemsBeamSource,
+) -> bool {
+    let competitor = match source {
+        NativeStemsBeamSource::RawBeam(ordinal) => NativeHeadsCompetitorSource::RawBeam(ordinal),
+        NativeStemsBeamSource::Hook(ordinal) => NativeHeadsCompetitorSource::Hook(ordinal),
+    };
+    heads.systems.iter().any(|system| {
+        system.system_id == system_id
+            && system
+                .small_beams
+                .beam_provenance
+                .iter()
+                .zip(&system.small_beams.arbitration.beam_removed)
+                .any(|(provenance, removed)| provenance.source == competitor && *removed)
+    })
+}
+
+fn reduction_beam_rejection_reason(
+    reduction: &NativeReductionRecognition,
+    system_id: usize,
+    vertex: NativeSigVertexId,
+    source: NativeStemsBeamSource,
+) -> &'static str {
+    let Some(foundations) = reduction
+        .foundations
+        .iter()
+        .find(|candidate| candidate.system_id == system_id)
+    else {
+        return "removed_without_reduction_trace";
+    };
+    let passes = foundations
+        .first_epoch
+        .fixed_point
+        .consistency_passes
+        .iter()
+        .chain(
+            foundations
+                .continuation_epochs
+                .iter()
+                .flat_map(|epoch| epoch.consistency_passes.iter()),
+        );
+    for pass in passes {
+        if pass.hooks.removed_beams.contains(&vertex) {
+            return "reduction_hook_missing_non_center_stem";
+        }
+        if pass.beams.removed_beams.contains(&vertex) {
+            return "reduction_beam_missing_left_or_right_stem";
+        }
+    }
+    if foundations.all_removed_vertices.contains(&vertex) {
+        return "reduction_exclusion_or_weak_grade";
+    }
+    match source {
+        NativeStemsBeamSource::RawBeam(_) => "reduction_beam_removed_by_consistency",
+        NativeStemsBeamSource::Hook(_) => "reduction_hook_removed_by_consistency",
+    }
 }
 
 fn cue_beams_product(json: &mut Json, recognition: &NativeCueBeamsRecognition) {

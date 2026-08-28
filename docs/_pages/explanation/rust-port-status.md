@@ -7340,3 +7340,19 @@ differential, 778-test library suite (two intentional ignores), CLI protocol
 suite, formatting, and strict Clippy gates are green. The crop releases its
 discovery snapshot before active cue publication and runs serially after the
 cue corpus on macOS.
+
+## Boundary 315: BEAMS extension uses Java's live mutable state
+
+Rust now requires positive-area spot/lookup overlap, matching Java
+`Area.intersects`, and applies each accepted beam extension or merge to the
+live beam registry before evaluating the next snapshotted original. This
+removes four duplicate/overextended results on Chopin Op. 9 No. 1 page 1 and
+restores the legitimate system-1 hook that the stale registry erased. The
+complete BEAMS multiset is Java-exact at 98 objects; REDUCTION retains Java's
+same four beams and two hooks.
+
+REDUCTION JSON separately reports the original beam candidates and their final
+lifecycle. Each rejected object names its stable source ordinal, geometry, SIG
+identity where promoted, and its HEADS/STEMS/REDUCTION rejection reason. This
+lets downstream tools display candidate and reduced beam layers without
+mistaking Java's aggressive support policy for a renderer loss.

@@ -6903,3 +6903,23 @@ graph fixture. The full page passes locally in 980.70 seconds; the
 eight-page frozen Java cue differential passes in 198.14 seconds; the library
 suite reports 776 passed and two intentional ignores; and all five CLI
 protocol tests, formatting, and strict workspace Clippy pass.
+
+## Boundary 315: preserve Java's live beam-extension registry
+
+Ordinary BEAMS extension now matches Java at both geometric and state
+boundaries. Java `Area.intersects` requires positive interior overlap, so a
+spot which only touches the lookup rectangle at an edge is no longer admitted.
+Java also snapshots beam visitation order but mutates `rawSystemBeams` after
+each visit; Rust now evaluates each original against that live registry and
+applies an accepted extension or merge before visiting the next original.
+Focused regressions cover edge-only contact and the sequential three-beam case
+which formerly emitted the same merger twice.
+
+On Chopin Op. 9 No. 1 page 1 (source SHA-256
+`38c4bcc74221550b362e8bda2f3eae1c2d5bef1e0680014db289481b036881cc`),
+the BEAMS-stage multiset is now exactly Java's 98 objects, with no duplicate
+geometries. REDUCTION retains the same four beams and two hooks as Java; the
+missing hook at `x=355,y=159,w=21,h=7` is restored. REDUCTION JSON now keeps a
+candidate lifecycle ledger with stable raw/hook identity, geometry, final SIG
+identity, survivor status, and the concrete HEADS/STEMS/REDUCTION rejection
+reason, so consumers can expose candidate and reduced layers separately.

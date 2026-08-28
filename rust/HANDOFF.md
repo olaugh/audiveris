@@ -12546,3 +12546,21 @@ constructing the active lifecycle. GitHub's Linux runner repeatedly receives a
 shutdown signal during this image diagnostic, so that platform records one
 explicit ignore while still running the frozen S1A6 identity/tamper tests and
 the smaller terminal connected-cue fixture.
+
+## Boundary 315: Java-exact ordinary beam extension on dense Chopin
+
+The apparent `102 -> 5` beam collapse contained one real port defect and a
+larger upstream policy effect. Rust treated edge-only lookup contact as an
+intersection and evaluated every extension against an immutable pre-pass beam
+registry. Java requires positive-area `Area.intersects` contact and mutates the
+live registry between visits. The corrected pass exactly matches Java's 98
+BEAMS-stage beam/hook geometries on Op. 9 No. 1 page 1 and REDUCTION retains
+the same six objects (four beams, two hooks), including the formerly lost
+system-1 hook at `355,159 21x7`.
+
+The structured REDUCTION product now publishes `beam_candidate_count`,
+`reduced_beam_count`, `rejected_beam_candidate_count`, and one
+`beam_lifecycle` record per BEAMS object. This preserves both the proposal
+layer and Java's rejection provenance for StageAligner or corpus diagnostics.
+Weak HEADS candidate pruning and the separate page-2 STEMS fallback remain
+independent follow-up work.
