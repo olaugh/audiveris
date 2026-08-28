@@ -986,6 +986,99 @@ pub fn initialize_native_stems_beam_rejected_first_base_state_from_native_sig(
     })
 }
 
+/// Construct a neutral pre-B14 carrier for a system whose scheduler reaches
+/// the SIDES/STUMPS terminal without any actionable V-link frontier.
+///
+/// The state deliberately has no current beam or stem lookup. It still owns
+/// the exact native SIG/InterIndex baselines and page transaction state needed
+/// when Java proceeds directly to head-origin stem creation.
+pub fn initialize_native_stems_beam_idle_base_state_from_native_sig(
+    transaction_state: &NativeStemsBeamVLinkTransactionState,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    sheet_edit: NativeStemsBeamSheetEditState,
+) -> Result<NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyError> {
+    sig.validate_integrity()
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native idle SIG integrity",
+        })?;
+    bindings.validate_against(sig).map_err(|_| {
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native idle bindings",
+        }
+    })?;
+    if transaction_state.system_stems.system_id != sig.system_id
+        || transaction_state.system_stems.next_stem_identity != 0
+        || !transaction_state.system_stems.known_stems.is_empty()
+        || !bindings.stem_vertices.is_empty()
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native idle system stems",
+        });
+    }
+    let vertex_lineage = sig
+        .vertices
+        .iter()
+        .map(|vertex| format!("{vertex:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let edge_lineage = sig
+        .edges
+        .iter()
+        .map(|edge| format!("{edge:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let inter_lineage = format!("native-inter-index-idle-v1:{vertex_lineage}");
+    Ok(NativeStemsBeamVLinkBaseApplyState {
+        transaction_state: transaction_state.clone(),
+        inter_index: NativeStemsBeamInterIndexApplyState {
+            baseline_entry_count: sig.vertices.len(),
+            baseline_provenance_sha256: sha256_hex(inter_lineage.as_bytes()),
+            beam_lookup: NativeStemsBeamInterIndexLookup::Absent,
+            stem_lookup: NativeStemsBeamInterIndexLookup::Absent,
+            next_id_lookup: NativeStemsBeamNextPersistentIdLookup::NotRead,
+            appended_entries: Vec::new(),
+        },
+        sig: NativeStemsBeamSigApplyState {
+            system_id: sig.system_id,
+            baseline_vertex_count: sig.vertices.len(),
+            baseline_vertex_provenance_sha256: sha256_hex(vertex_lineage.as_bytes()),
+            baseline_relation_count: sig.edges.len(),
+            baseline_relation_provenance_sha256: sha256_hex(edge_lineage.as_bytes()),
+            beam_vertex: NativeStemsBeamSigVertexLookup::Absent,
+            stem_vertex: NativeStemsBeamSigVertexLookup::Absent,
+            appended_vertices: Vec::new(),
+            appended_relations: Vec::new(),
+            listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+            beam: NativeStemsBeamVLinkBeamRuntimeState {
+                source: NativeStemsBeamSource::RawBeam(usize::MAX),
+                sig_vertex_identity: None,
+                inter_id: 0,
+                inter_indexed: false,
+                sig_system_id: sig.system_id,
+                removed: false,
+                vip: false,
+                abnormal: false,
+                stump_group_ordinal: usize::MAX,
+                beam_group: None,
+            },
+            stem: NativeStemsBeamVLinkStemRuntimeState {
+                stem_identity: transaction_state.system_stems.next_stem_identity,
+                sig_vertex_identity: None,
+                inter_indexed: false,
+                sig_system_id: None,
+                removed: false,
+                vip: false,
+                abnormal: false,
+            },
+        },
+        sheet_edit,
+        certificate: None,
+        committed: None,
+        committed_apply: None,
+    })
+}
+
 /// Roll a committed one-shot B14 state onto the next native scheduler
 /// frontier without importing a transaction-2 B14 fixture.
 ///
@@ -4297,6 +4390,8 @@ fn sha256_hex(input: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use audiveris_image::{
         run_table::{FOREGROUND, Orientation, RunTable},
@@ -4326,6 +4421,79 @@ mod tests {
 
     fn hash() -> String {
         "0".repeat(64)
+    }
+
+    #[test]
+    fn idle_baseline_authenticates_empty_system_without_inventing_a_beam() {
+        let transaction_state = NativeStemsBeamVLinkTransactionState {
+            scope: NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier {
+                system_id: SYSTEM_ID,
+            },
+            glyph_index: NativeStemsBeamGlyphIndexTransactionState {
+                persistent_ids: NativeStemsBeamPersistentIdState {
+                    sheet_last_id: 0,
+                    glyph_index_last_id: 0,
+                    inter_index_last_id: 0,
+                },
+                alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
+                union_size: 0,
+                known_canonical_glyphs: Vec::new(),
+                exhaustive_lookup: None,
+            },
+            selected_glyph_bindings: Vec::new(),
+            line_states: Vec::new(),
+            applied_line_deltas: Vec::new(),
+            system_stems: NativeStemsBeamSystemStemTransactionState {
+                system_id: SYSTEM_ID,
+                next_stem_identity: 0,
+                authority: NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline,
+                known_stems: Vec::new(),
+                exhaustive_lookup: None,
+            },
+        };
+        let sig = NativeSigSystem {
+            system_id: SYSTEM_ID,
+            vertices: Vec::new(),
+            edges: Vec::new(),
+        };
+        let bindings = NativeSigSystemBindings {
+            system_id: SYSTEM_ID,
+            beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: BTreeMap::new(),
+        };
+        let idle = initialize_native_stems_beam_idle_base_state_from_native_sig(
+            &transaction_state,
+            &sig,
+            &bindings,
+            NativeStemsBeamSheetEditState::at_stems_entry(),
+        )
+        .expect("empty system owns an authenticated idle baseline");
+        assert_eq!(
+            idle.inter_index.beam_lookup,
+            NativeStemsBeamInterIndexLookup::Absent
+        );
+        assert_eq!(idle.sig.beam_vertex, NativeStemsBeamSigVertexLookup::Absent);
+        assert_eq!(idle.sig.beam.sig_vertex_identity, None);
+        assert_eq!(idle.committed, None);
+
+        let mut stale = transaction_state;
+        stale.system_stems.next_stem_identity = 1;
+        assert!(
+            initialize_native_stems_beam_idle_base_state_from_native_sig(
+                &stale,
+                &sig,
+                &bindings,
+                NativeStemsBeamSheetEditState::at_stems_entry(),
+            )
+            .is_err()
+        );
     }
 
     fn plan() -> NativeStemsBeamPlanRef {

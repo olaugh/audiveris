@@ -545,6 +545,7 @@ impl NativeStemsPreparedRecognition {
         let (mut transactions, mut rejected_transactions) = match first_advance {
             NativeStemsBeamSidesAdvance::Linked(transaction) => (vec![*transaction], Vec::new()),
             NativeStemsBeamSidesAdvance::Rejected(transaction) => (Vec::new(), vec![*transaction]),
+            NativeStemsBeamSidesAdvance::NoInitialVLink => (Vec::new(), Vec::new()),
         };
         let mut hook_removals = Vec::new();
         loop {
@@ -611,6 +612,12 @@ impl NativeStemsPreparedRecognition {
                 }
                 NativeStemsBeamSidesAdvance::Rejected(transaction) => {
                     rejected_transactions.push(*transaction);
+                }
+                NativeStemsBeamSidesAdvance::NoInitialVLink => {
+                    return Err(phase(
+                        format!("system {system_id} lost an already-awaited SIDES frontier"),
+                        "SIDES drive transaction",
+                    ));
                 }
             }
         }

@@ -44,6 +44,7 @@ use crate::{
         NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyTransaction,
         NativeStemsBeamVLinkBaseRolloverAuthority,
         apply_native_stems_beam_vlink_base_transaction_to_native_sig,
+        initialize_native_stems_beam_idle_base_state_from_native_sig,
         initialize_native_stems_beam_rejected_first_base_state_from_native_sig,
         initialize_native_stems_beam_vlink_base_apply_state_from_native_sig,
         roll_native_stems_beam_vlink_base_apply_state,
@@ -81,6 +82,8 @@ use crate::{
         NativeStemsFirstGlyphIndexBridge, NativeStemsGlyphRegistryAuthority,
         NativeStemsModeledGlyphRegistry, apply_native_stems_beam_vlink_create_stem_transaction,
         apply_native_stems_create_stem_candidate_transaction,
+        initialize_native_stems_beam_first_idle_state_from_modeled_registry,
+        initialize_native_stems_beam_serial_idle_state_from_modeled_registry,
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
         initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_registry,
         materialize_native_stems_beam_frontier_candidate,
@@ -174,6 +177,8 @@ pub struct NativeStemsBeamRejectedSidesTransaction {
 pub enum NativeStemsBeamSidesAdvance {
     Linked(Box<NativeStemsBeamSidesTransaction>),
     Rejected(Box<NativeStemsBeamRejectedSidesTransaction>),
+    /// The scheduler completed SIDES without ever exposing a V-link frontier.
+    NoInitialVLink,
 }
 
 /// Exact B12-B17 mutation plus B19 continuation for one STUMPS V frontier.
@@ -699,20 +704,17 @@ fn initialize_native_stems_beam_sides_carrier_with_entry(
     entry: NativeStemsBeamSidesCarrierEntry,
 ) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesAdvance), NativeStemsBeamSidesError> {
     let frontier = match &scheduler.status {
-        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier)
+            if frontier_matches_carrier_pass(frontier, CarrierPass::Sides) =>
+        {
+            frontier.as_ref()
+        }
         _ => {
-            return Err(stage(
-                "first-carrier-pass",
-                "scheduler is not awaiting a V frontier",
-            ));
+            return initialize_native_stems_beam_idle_sides_carrier(
+                scheduler, sig, bindings, context, registry, entry,
+            );
         }
     };
-    if !frontier_matches_carrier_pass(frontier, CarrierPass::Sides) {
-        return Err(stage(
-            "first-carrier-pass",
-            "frontier is not a SIDES transaction",
-        ));
-    }
     sig.validate_integrity()
         .map_err(|error| stage("first-carrier-SIG", error))?;
     bindings
@@ -991,6 +993,98 @@ fn initialize_native_stems_beam_sides_carrier_with_entry(
     Ok((
         carrier,
         NativeStemsBeamSidesAdvance::Linked(Box::new(transaction)),
+    ))
+}
+
+fn initialize_native_stems_beam_idle_sides_carrier(
+    scheduler: &NativeStemsBeamSchedulerSystem,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+    entry: NativeStemsBeamSidesCarrierEntry,
+) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesAdvance), NativeStemsBeamSidesError> {
+    sig.validate_integrity()
+        .map_err(|error| stage("idle-carrier-SIG", error))?;
+    bindings
+        .validate_against(sig)
+        .map_err(|error| stage("idle-carrier-bindings", error))?;
+    let (transaction_state, sheet_edit) = match entry {
+        NativeStemsBeamSidesCarrierEntry::FirstSystem => (
+            initialize_native_stems_beam_first_idle_state_from_modeled_registry(
+                scheduler.system_id,
+                registry,
+            )
+            .map_err(|error| stage("idle-carrier-state", error))?,
+            NativeStemsBeamSheetEditState::at_stems_entry(),
+        ),
+        NativeStemsBeamSidesCarrierEntry::SharedSheetSerial { sheet_edit } => (
+            initialize_native_stems_beam_serial_idle_state_from_modeled_registry(
+                scheduler.system_id,
+                registry,
+            )
+            .map_err(|error| stage("idle-carrier-state", error))?,
+            sheet_edit,
+        ),
+    };
+    let latest_base_apply = initialize_native_stems_beam_idle_base_state_from_native_sig(
+        &transaction_state,
+        sig,
+        bindings,
+        sheet_edit,
+    )
+    .map_err(|error| stage("idle-carrier-baseline", error))?;
+    let b_cells = initialize_native_stems_beam_b_linker_cells(context.reachability)
+        .map_err(|error| stage("idle-carrier-B-cells", error))?;
+    let s_cells = initialize_native_stems_beam_s_linker_cells(context.head_corners)
+        .map_err(|error| stage("idle-carrier-S-cells", error))?;
+    let mut carried_scheduler = scheduler.clone();
+    carried_scheduler.status = match &scheduler.status {
+        NativeStemsBeamSchedulerStatus::Completed {
+            retained_for_stumps,
+            final_local_worklist,
+        }
+        | NativeStemsBeamSchedulerStatus::SidesExhausted {
+            retained_for_stumps,
+            final_local_worklist,
+        } => NativeStemsBeamSchedulerStatus::SidesExhausted {
+            retained_for_stumps: retained_for_stumps.clone(),
+            final_local_worklist: final_local_worklist.clone(),
+        },
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier)
+            if frontier_matches_carrier_pass(frontier, CarrierPass::Stumps) =>
+        {
+            NativeStemsBeamSchedulerStatus::SidesExhausted {
+                retained_for_stumps: frontier.snapshot.sources.clone(),
+                final_local_worklist: frontier.snapshot.sources.clone(),
+            }
+        }
+        NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(_) => {
+            scheduler.status.clone()
+        }
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => {
+            return Err(stage(
+                "idle-carrier-pass",
+                "actionable SIDES frontier was routed to the idle initializer",
+            ));
+        }
+    };
+    if !linked_b_cells_match(&carried_scheduler.linked_b_linkers, &b_cells) {
+        return Err(stage(
+            "idle-carrier-linked-B-authority",
+            "scheduler linked-B set differs from fresh persistent cells",
+        ));
+    }
+    Ok((
+        NativeStemsBeamSidesCarrier {
+            scheduler: carried_scheduler,
+            latest_base_apply,
+            sig: sig.clone(),
+            bindings: bindings.clone(),
+            b_cells,
+            s_cells,
+        },
+        NativeStemsBeamSidesAdvance::NoInitialVLink,
     ))
 }
 

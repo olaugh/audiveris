@@ -1727,36 +1727,11 @@ pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_regi
     NativeStemsBeamVLinkTransactionError,
 > {
     let system_id = scheduler_system.system_id;
-    if system_id == 0 || plan_system.system_id != system_id || registry.system_id != system_id {
+    if plan_system.system_id != system_id {
         return Err(NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch);
     }
-    let last_id = i32::try_from(registry.len())
-        .map_err(|_| NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch)?;
-    let persistent_ids = NativeStemsBeamPersistentIdState {
-        sheet_last_id: last_id,
-        glyph_index_last_id: last_id,
-        inter_index_last_id: last_id,
-    };
-    let mut state = NativeStemsBeamVLinkTransactionState {
-        scope: NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id },
-        glyph_index: NativeStemsBeamGlyphIndexTransactionState {
-            persistent_ids,
-            alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
-            union_size: registry.len(),
-            known_canonical_glyphs: Vec::new(),
-            exhaustive_lookup: None,
-        },
-        selected_glyph_bindings: Vec::new(),
-        line_states: Vec::new(),
-        applied_line_deltas: Vec::new(),
-        system_stems: NativeStemsBeamSystemStemTransactionState {
-            system_id,
-            next_stem_identity: 0,
-            authority: NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
-            known_stems: Vec::new(),
-            exhaustive_lookup: None,
-        },
-    };
+    let mut state =
+        initialize_native_stems_beam_first_idle_state_from_modeled_registry(system_id, registry)?;
     let proof =
         NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(&state.system_stems, 0)?;
     let preparation = prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
@@ -1769,6 +1744,33 @@ pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_regi
     state.scope = NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id };
     validate_transaction_state(&state)?;
     Ok((preparation, state))
+}
+
+/// Construct the neutral shared-sheet state for a first system whose beam
+/// scheduler has no actionable V-link transaction.
+///
+/// Java still enters head-origin linking in this case, so the page allocator,
+/// modeled glyph authority and empty `systemStems` map must exist even though
+/// no B12 preparation is possible.
+pub fn initialize_native_stems_beam_first_idle_state_from_modeled_registry(
+    system_id: usize,
+    registry: &NativeStemsModeledGlyphRegistry,
+) -> Result<NativeStemsBeamVLinkTransactionState, NativeStemsBeamVLinkTransactionError> {
+    if system_id == 0 || registry.system_id != system_id {
+        return Err(NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch);
+    }
+    let last_id = i32::try_from(registry.len())
+        .map_err(|_| NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch)?;
+    modeled_idle_state(
+        NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id },
+        system_id,
+        registry,
+        NativeStemsBeamPersistentIdState {
+            sheet_last_id: last_id,
+            glyph_index_last_id: last_id,
+            inter_index_last_id: last_id,
+        },
+    )
 }
 
 /// Construct a later system's first shared-sheet B12 frontier.
@@ -1789,9 +1791,33 @@ pub fn initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_reg
     NativeStemsBeamVLinkTransactionError,
 > {
     let system_id = scheduler_system.system_id;
+    if plan_system.system_id != system_id {
+        return Err(NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch);
+    }
+    let mut state =
+        initialize_native_stems_beam_serial_idle_state_from_modeled_registry(system_id, registry)?;
+    let proof =
+        NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(&state.system_stems, 0)?;
+    let preparation = prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
+        scheduler_system,
+        plan_system,
+        &mut state,
+        registry,
+        proof,
+    )?;
+    state.scope = NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id };
+    validate_transaction_state(&state)?;
+    Ok((preparation, state))
+}
+
+/// Construct the neutral shared-sheet state for a later system whose beam
+/// scheduler has no actionable V-link transaction.
+pub fn initialize_native_stems_beam_serial_idle_state_from_modeled_registry(
+    system_id: usize,
+    registry: &NativeStemsModeledGlyphRegistry,
+) -> Result<NativeStemsBeamVLinkTransactionState, NativeStemsBeamVLinkTransactionError> {
     let persistent_ids = registry.persistent_ids();
     if system_id <= 1
-        || plan_system.system_id != system_id
         || registry.system_id != system_id
         || persistent_ids.sheet_last_id <= 0
         || persistent_ids.sheet_last_id != persistent_ids.glyph_index_last_id
@@ -1802,8 +1828,22 @@ pub fn initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_reg
     {
         return Err(NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch);
     }
-    let mut state = NativeStemsBeamVLinkTransactionState {
-        scope: NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id },
+    modeled_idle_state(
+        NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id },
+        system_id,
+        registry,
+        persistent_ids,
+    )
+}
+
+fn modeled_idle_state(
+    scope: NativeStemsBeamVLinkTransactionScope,
+    system_id: usize,
+    registry: &NativeStemsModeledGlyphRegistry,
+    persistent_ids: NativeStemsBeamPersistentIdState,
+) -> Result<NativeStemsBeamVLinkTransactionState, NativeStemsBeamVLinkTransactionError> {
+    let state = NativeStemsBeamVLinkTransactionState {
+        scope,
         glyph_index: NativeStemsBeamGlyphIndexTransactionState {
             persistent_ids,
             alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
@@ -1817,23 +1857,13 @@ pub fn initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_reg
         system_stems: NativeStemsBeamSystemStemTransactionState {
             system_id,
             next_stem_identity: 0,
-            authority: NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
+            authority: NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline,
             known_stems: Vec::new(),
             exhaustive_lookup: None,
         },
     };
-    let proof =
-        NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(&state.system_stems, 0)?;
-    let preparation = prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
-        scheduler_system,
-        plan_system,
-        &mut state,
-        registry,
-        proof,
-    )?;
-    state.scope = NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id };
     validate_transaction_state(&state)?;
-    Ok((preparation, state))
+    Ok(state)
 }
 
 /// Materialize the current frontier's selected glyph candidate without
@@ -3522,6 +3552,33 @@ mod tests {
             6,
             &[(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (0, 5)],
         )
+    }
+
+    #[test]
+    fn idle_modeled_state_retains_complete_empty_system_stem_authority() {
+        let registry = NativeStemsModeledGlyphRegistry {
+            system_id: 1,
+            persistent_ids: NativeStemsBeamPersistentIdState {
+                sheet_last_id: 0,
+                glyph_index_last_id: 0,
+                inter_index_last_id: 0,
+            },
+            entries: Vec::new(),
+        };
+        let state =
+            initialize_native_stems_beam_first_idle_state_from_modeled_registry(1, &registry)
+                .expect("an empty first system still owns its page allocator");
+        assert_eq!(
+            state.system_stems.authority,
+            NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline
+        );
+        assert!(state.system_stems.known_stems.is_empty());
+        assert_eq!(state.system_stems.next_stem_identity, 0);
+        assert_eq!(state.glyph_index.union_size, 0);
+        assert!(
+            initialize_native_stems_beam_first_idle_state_from_modeled_registry(2, &registry,)
+                .is_err()
+        );
     }
 
     fn stem_state(
