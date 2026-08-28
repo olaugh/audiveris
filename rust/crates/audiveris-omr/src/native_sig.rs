@@ -1999,6 +1999,12 @@ fn append_beams(
         .multiple_rests
         .iter()
         .map(|rest| rest.source_beam_ordinal)
+        .chain(
+            beams
+                .high_precision_rejected_raw_beam_ordinals
+                .iter()
+                .copied(),
+        )
         .collect::<BTreeSet<_>>();
     let removed_by_heads = heads
         .small_beams
@@ -2232,6 +2238,43 @@ fn append_beams(
             }
         }
     }
+    if !beams.stem_guided_beam_ordinals.is_empty() {
+        // The compatibility path reconstructs Java's provisional group-event
+        // history. An extension can introduce merge patterns outside that
+        // frozen corpus, where provisional identities no longer provide a
+        // reliable final-member order. The published final memberships are
+        // already authenticated against a fresh `group_beams` evaluation
+        // above, so use them directly for the opt-in extension.
+        for (group_ordinal, group) in groups.groups.iter().enumerate() {
+            let Some(&group_vertex) = bindings.beam_group_vertices.get(&group_ordinal) else {
+                continue;
+            };
+            let live = group
+                .iter()
+                .filter_map(|&index| grouping_to_live.get(index).copied().flatten())
+                .collect::<Vec<_>>();
+            for &beam in &live {
+                push_edge(
+                    graph,
+                    group_vertex.0,
+                    first + beam,
+                    NativeSigRelationKind::Containment,
+                );
+            }
+            for (left_index, &left) in live.iter().enumerate() {
+                for &right in &live[(left_index + 1)..] {
+                    let pair = (
+                        (first + left).min(first + right),
+                        (first + left).max(first + right),
+                    );
+                    if !exclusions.contains(&pair) {
+                        push_edge(graph, pair.0, pair.1, NativeSigRelationKind::BeamBeam);
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
     for edge in pending {
         match edge {
             Pending::Containment(group, beam) => {
@@ -2338,6 +2381,42 @@ pub fn append_native_cue_beam_stem_relation(
             ordinal: beam.0,
         });
     }
+    append_native_beam_stem_relation(graph, beam, stem, grade, beam_portion, stem_extension)
+}
+
+/// Append one opt-in stem-guided ordinary `BeamStemRelation`.
+pub fn append_native_recovery_beam_stem_relation(
+    graph: &mut NativeSigSystem,
+    beam: NativeSigVertexId,
+    stem: NativeSigVertexId,
+    grade: f64,
+    beam_portion: NativeBeamPortion,
+    stem_extension: NativeStemPoint,
+) -> Result<NativeCueBeamStemRelationAppend, NativeSigError> {
+    let system_id = graph.system_id;
+    if graph.vertex(beam.0).is_none_or(|vertex| {
+        !matches!(
+            vertex.kind,
+            NativeSigInterKind::Beam | NativeSigInterKind::BeamHook
+        )
+    }) {
+        return Err(NativeSigError::InvalidVertexState {
+            system_id,
+            ordinal: beam.0,
+        });
+    }
+    append_native_beam_stem_relation(graph, beam, stem, grade, beam_portion, stem_extension)
+}
+
+fn append_native_beam_stem_relation(
+    graph: &mut NativeSigSystem,
+    beam: NativeSigVertexId,
+    stem: NativeSigVertexId,
+    grade: f64,
+    beam_portion: NativeBeamPortion,
+    stem_extension: NativeStemPoint,
+) -> Result<NativeCueBeamStemRelationAppend, NativeSigError> {
+    let system_id = graph.system_id;
     if graph
         .vertex(stem.0)
         .is_none_or(|vertex| vertex.kind != NativeSigInterKind::Stem)

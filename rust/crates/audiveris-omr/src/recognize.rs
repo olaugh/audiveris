@@ -412,6 +412,12 @@ pub struct NativeBeamRecognition {
     pub staff_head_point_sizes: Vec<NativeStaffHeadPointSize>,
     pub spot_count: usize,
     pub raw_beams: Vec<(usize, crate::beam_inters::RawBeam)>,
+    /// Sheet-global raw-beam ordinals added by the opt-in stem-guided pass.
+    pub stem_guided_beam_ordinals: Vec<usize>,
+    /// Endpoint-seed provenance aligned to the opt-in recovered raw beams.
+    pub stem_guided_beam_recoveries: Vec<NativeStemGuidedBeamRecoveryRecord>,
+    /// Java candidates suppressed only by the opt-in musical-evidence gate.
+    pub high_precision_rejected_raw_beam_ordinals: Vec<usize>,
     /// Exact registered fixed glyph for each entry in `raw_beams`.
     ///
     /// The vectors are aligned by sheet-global raw-beam ordinal. Each tuple
@@ -442,6 +448,13 @@ pub struct NativeBeamRecognition {
     pub group_memberships: Vec<NativeBeamGroupMembership>,
     pub group_counts: Vec<(usize, usize)>,
     pub group_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeStemGuidedBeamRecoveryRecord {
+    pub raw_beam_ordinal: usize,
+    pub left_seed_id: usize,
+    pub right_seed_id: usize,
 }
 
 /// Ordered beam-group membership for one system.
@@ -734,7 +747,12 @@ pub fn recognize_native_beams(
     recognition: &GridLinesRecognition,
     header_erases: Vec<audiveris_image::spots::HeaderErase>,
 ) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
-    recognize_native_beams_impl(recognition, header_erases, &[])
+    recognize_native_beams_impl(
+        recognition,
+        header_erases,
+        &[],
+        NativeBeamRecognitionOptions::default(),
+    )
 }
 
 /// Run native BEAMS from GRID + HEADERS + accepted native STEM_SEEDS.
@@ -746,14 +764,36 @@ pub fn recognize_native_beams_with_stem_seeds(
     header_erases: Vec<audiveris_image::spots::HeaderErase>,
     stem_seeds: &crate::native_stem_seeds::NativeStemSeedRecognition,
 ) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
+    recognize_native_beams_with_stem_seeds_and_options(
+        recognition,
+        header_erases,
+        stem_seeds,
+        NativeBeamRecognitionOptions::default(),
+    )
+}
+
+/// Non-Java recognition switches. Defaults retain exact compatibility.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeBeamRecognitionOptions {
+    pub stem_guided_primary_recovery: bool,
+}
+
+/// Run BEAMS with explicit optional recognition extensions.
+pub fn recognize_native_beams_with_stem_seeds_and_options(
+    recognition: &GridLinesRecognition,
+    header_erases: Vec<audiveris_image::spots::HeaderErase>,
+    stem_seeds: &crate::native_stem_seeds::NativeStemSeedRecognition,
+    options: NativeBeamRecognitionOptions,
+) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
     let systems = native_stem_seeds_for_beams(recognition, stem_seeds)?;
-    recognize_native_beams_impl(recognition, header_erases, &systems)
+    recognize_native_beams_impl(recognition, header_erases, &systems, options)
 }
 
 fn recognize_native_beams_impl(
     recognition: &GridLinesRecognition,
     header_erases: Vec<audiveris_image::spots::HeaderErase>,
     stem_seed_systems: &[NativeBeamStemSeedSystem],
+    options: NativeBeamRecognitionOptions,
 ) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
     use audiveris_image::beam_structure::BeamRaster;
     use audiveris_image::spots::{
@@ -945,6 +985,8 @@ fn recognize_native_beams_impl(
         .map(|bounds| bounds.system_id)
         .collect::<Vec<_>>();
     let mut raw_beams = Vec::new();
+    let mut stem_guided_beam_ordinals = Vec::new();
+    let mut stem_guided_beam_recoveries = Vec::new();
     for system_id in &system_ids {
         let beams = initial
             .iter()
@@ -992,8 +1034,47 @@ fn recognize_native_beams_impl(
             .into_iter()
             .map(|beam| (*system_id, beam)),
         );
+        if options.stem_guided_primary_recovery {
+            let occupied = raw_beams
+                .iter()
+                .filter(|(id, _)| id == system_id)
+                .map(|(_, beam)| *beam)
+                .collect::<Vec<_>>();
+            for recovery in crate::stem_guided_beam_recovery::recover_stem_guided_beams(
+                seeds,
+                &occupied,
+                raster,
+                &item,
+                &sheet,
+                interline,
+                crate::stem_guided_beam_recovery::StemGuidedBeamRecoveryConfig::enabled(),
+            ) {
+                let raw_beam_ordinal = raw_beams.len();
+                stem_guided_beam_ordinals.push(raw_beam_ordinal);
+                stem_guided_beam_recoveries.push(NativeStemGuidedBeamRecoveryRecord {
+                    raw_beam_ordinal,
+                    left_seed_id: recovery.left_seed_id,
+                    right_seed_id: recovery.right_seed_id,
+                });
+                raw_beams.push((*system_id, recovery.beam));
+            }
+        }
     }
 
+    let high_precision_rejected_raw_beam_ordinals = if options.stem_guided_primary_recovery {
+        raw_beams
+            .iter()
+            .enumerate()
+            .filter_map(|(ordinal, (_, beam))| {
+                (!stem_guided_beam_ordinals.contains(&ordinal)
+                    && beam.kind == crate::beam_inters::BeamKind::Beam
+                    && (beam.impacts.core < 0.65 || beam.impacts.belt < 0.45))
+                    .then_some(ordinal)
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let multiple_rests = recognize_native_multiple_rests(recognition, &raw_beams)?;
     let raw_beam_glyphs = raw_beams
         .iter()
@@ -1011,6 +1092,7 @@ fn recognize_native_beams_impl(
             !multiple_rests
                 .iter()
                 .any(|rest| rest.source_beam_ordinal == *ordinal)
+                && !high_precision_rejected_raw_beam_ordinals.contains(ordinal)
         })
         .map(|(_, beam)| *beam)
         .collect::<Vec<_>>();
@@ -1071,6 +1153,9 @@ fn recognize_native_beams_impl(
         staff_head_point_sizes,
         spot_count: components.len(),
         raw_beams,
+        stem_guided_beam_ordinals,
+        stem_guided_beam_recoveries,
+        high_precision_rejected_raw_beam_ordinals,
         raw_beam_glyphs,
         beams_after_multiple_rests,
         multiple_rests,

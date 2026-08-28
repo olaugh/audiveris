@@ -6923,3 +6923,39 @@ missing hook at `x=355,y=159,w=21,h=7` is restored. REDUCTION JSON now keeps a
 candidate lifecycle ledger with stable raw/hook identity, geometry, final SIG
 identity, survivor status, and the concrete HEADS/STEMS/REDUCTION rejection
 reason, so consumers can expose candidate and reduced layers separately.
+
+## Boundary 316: accept systems with no initial beam frontier
+
+The page-wide STEMS driver now treats a system whose beam scheduler is already
+`Completed` or `SidesExhausted` as a valid zero-transaction SIDES system. Its
+idle carrier is authenticated from the empty complete-since-baseline stem
+registry and the live SIG/bindings; it invents neither a beam nor a stem and
+still rejects non-empty or tampered allocator state. This removes Chopin Op. 9
+No. 1 page 2's first-transaction `scheduler is not awaiting a V frontier`
+failure. The exact page now reaches terminal STEMS and REDUCTION instead of
+falling back to HEADS plus independent raw BEAMS.
+
+## Boundary 317: opt-in truth-backed high-precision beams
+
+`AUDIVERIS_ENABLE_HIGH_PRECISION_BEAMS=1` (or qualified constant
+`org.audiveris.omr.sheet.beam.BeamsStep.stemGuidedPrimaryRecovery=true`) enables
+a musical-evidence extension while the default remains Java-exact. Accepted
+vertical seeds propose only bounded top/top or bottom/bottom corridors; the
+NO_STAFF raster must contain a thick continuous band, slopes are bounded, and
+thin hairpins/slurs/pedal strokes fail the core/belt gates. Recovered beams
+retain endpoint-seed provenance, receive authenticated live left/right
+BeamStem relations after ordinary STEMS, and then pass through unmodified
+REDUCTION. Weak or belt-contaminated Java beam candidates are explicitly
+reported as `high_precision_raster_rejection`. The lifecycle ledger still
+accounts for every candidate.
+
+The checked-in `chopin-op09-no01-page1-beam-truth.txt` fixture grades systems
+1-3 against manually inspected musical beam corridors rather than Java object
+identity. Frozen terminal output improves from under 10% precision/recall to at
+least 90% precision and 40% horizontal corridor recall. On the complete page,
+118 beams survive rather than six, while the four ordinary false beam survivors
+on hairpin/slur/pedal-like ink are rejected. Page 2 reaches terminal REDUCTION
+with 213 stems and 103 reduced beams. Control pages 3-5 retain every prior
+survivor (39/39, 50/50, and 43/43) and add 0/1/13 supported fragments. With the
+extension disabled, page 1 remains the exact 98-candidate/six-survivor Java
+result.

@@ -328,6 +328,12 @@ pub fn materialize_native_heads_competitors(
                 .multiple_rests
                 .iter()
                 .map(|rest| rest.source_beam_ordinal)
+                .chain(
+                    beams
+                        .high_precision_rejected_raw_beam_ordinals
+                        .iter()
+                        .copied(),
+                )
                 .collect::<BTreeSet<_>>();
             let mut candidates = Vec::new();
 
@@ -441,6 +447,12 @@ fn validate_post_rest_beams(
         .multiple_rests
         .iter()
         .map(|rest| rest.source_beam_ordinal)
+        .chain(
+            beams
+                .high_precision_rejected_raw_beam_ordinals
+                .iter()
+                .copied(),
+        )
         .collect::<BTreeSet<_>>();
     let expected = beams
         .raw_beams

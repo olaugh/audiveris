@@ -21,6 +21,14 @@ including the evidence and the Rust parity policy for each finding.
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
 through active-capable `CUE_BEAMS`, including the final reduced
 STEMS graph and atomic REDUCTION phase and glyph-cleanup evidence.
+Chopin Op. 9 No. 1 also has an explicit default-off high-precision BEAMS mode:
+stem endpoints propose thick source-raster corridors, recovered beams receive
+live BeamStem support before REDUCTION, and weak Java-compatible beam proposals
+receive an auditable high-precision rejection reason. A manually annotated
+three-system fixture measures musical precision and horizontal beam coverage,
+while the ordinary default remains Java-exact. The same work lets systems with
+no initial beam frontier complete as valid empty SIDES systems, removing page
+2's former STEMS fallback.
 `omrscope` now runs Java and Rust concurrently and retains selectable immutable
 snapshots as each completes GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS
 -> HEADS -> STEMS -> REDUCTION -> CUE_BEAMS. The live view is completed-stage streaming only: it does not claim

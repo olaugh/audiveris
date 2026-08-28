@@ -13,8 +13,8 @@ use audiveris_omr::native_reduction::recognize_native_reduction;
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
 use audiveris_omr::native_stems::recognize_native_stems;
 use audiveris_omr::recognize::{
-    grid_lines_report, recognize_grid_lines_raster, recognize_native_beams_with_stem_seeds,
-    recognize_scale_raster, scale_report,
+    NativeBeamRecognitionOptions, grid_lines_report, recognize_grid_lines_raster,
+    recognize_native_beams_with_stem_seeds_and_options, recognize_scale_raster, scale_report,
 };
 use audiveris_omr::report::{
     beams_json, cue_beams_json, grid_json, headers_json, heads_json, ledgers_json, reduction_json,
@@ -82,6 +82,8 @@ const SMALL_HEADS_CONSTANT: &str = "org.audiveris.omr.sheet.ProcessingSwitches.s
 const CUE_BEAMS_ENABLED_CONSTANT: &str = "org.audiveris.omr.sheet.beam.CueBeamsStep.enabled";
 const CUE_BEAMS_RECOVERY_CONSTANT: &str =
     "org.audiveris.omr.sheet.beam.CueBeamsStep.supplementalHookRecovery";
+const HIGH_PRECISION_BEAMS_CONSTANT: &str =
+    "org.audiveris.omr.sheet.beam.BeamsStep.stemGuidedPrimaryRecovery";
 
 fn small_heads_enabled(parameters: &Parameters) -> bool {
     parameters
@@ -100,6 +102,17 @@ fn cue_beams_options(parameters: &Parameters) -> NativeCueBeamsOptions {
             .constants
             .get(CUE_BEAMS_RECOVERY_CONSTANT)
             .is_some_and(|value| value.eq_ignore_ascii_case("true")),
+    }
+}
+
+fn beam_options(parameters: &Parameters) -> NativeBeamRecognitionOptions {
+    NativeBeamRecognitionOptions {
+        stem_guided_primary_recovery: parameters
+            .constants
+            .get(HIGH_PRECISION_BEAMS_CONSTANT)
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+            || std::env::var("AUDIVERIS_ENABLE_HIGH_PRECISION_BEAMS")
+                .is_ok_and(|value| value != "0" && !value.eq_ignore_ascii_case("false")),
     }
 }
 
@@ -185,10 +198,11 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                         );
                         continue;
                     }
-                    let beams = recognize_native_beams_with_stem_seeds(
+                    let beams = recognize_native_beams_with_stem_seeds_and_options(
                         &recognition,
                         headers.beam_erases(),
                         &stem_seeds,
+                        beam_options(parameters),
                     )
                     .map_err(|error| {
                         format!("{} sheet {sheet}: BEAMS failed: {error}", input.display())
@@ -647,10 +661,11 @@ fn run_native_stream(parameters: &Parameters, json: bool) -> Result<bool, String
                 // BEAMS ------------------------------------------------------
                 stream.stage_started(OmrStep::Beams, &input_name, sheet)?;
                 let started = Instant::now();
-                let beams = match recognize_native_beams_with_stem_seeds(
+                let beams = match recognize_native_beams_with_stem_seeds_and_options(
                     &recognition,
                     headers.beam_erases(),
                     &stem_seeds,
+                    beam_options(parameters),
                 ) {
                     Ok(beams) => beams,
                     Err(error) => {

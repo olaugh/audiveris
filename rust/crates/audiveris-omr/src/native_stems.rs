@@ -17,9 +17,9 @@ use crate::{
     native_heads::NativeHeadsRecognition,
     native_ledgers::NativeLedgerRecognition,
     native_sig::{
-        NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigRecognition,
-        NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
-        assemble_native_sig,
+        NativeSigContextualization, NativeSigEdge, NativeSigEdgeId, NativeSigInterKind,
+        NativeSigRecognition, NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport,
+        NativeSigVertexId, append_native_recovery_beam_stem_relation, assemble_native_sig,
     },
     native_stem_seeds::STEM_SEEDS_BELT_MARGIN_RATIO,
     native_stem_seeds::{NativeStemSeedGlyph, NativeStemSeedRecognition},
@@ -86,7 +86,7 @@ use crate::{
     },
     recognize::{GridLinesRecognition, NativeBeamRecognition},
     stem_seeds_step::NativeStemCheckerParameters,
-    stems_step::NativeBeamPortion,
+    stems_step::{NativeBeamPortion, NativeStemPoint},
 };
 
 const GOOD_BEAM_GRADE: f64 = 0.35;
@@ -1947,6 +1947,7 @@ pub fn recognize_native_stems(
     )?;
     let mut finalized = prepared.finalize_all_system_stems()?;
     let beam_finalizations = finalize_native_stems_beams(grid, beams, &mut finalized.systems)?;
+    attach_native_stem_guided_beams(beams, &mut finalized.systems)?;
     let contextualizations = finalized
         .systems
         .iter_mut()
@@ -1972,6 +1973,124 @@ pub fn recognize_native_stems(
         beam_finalizations,
         contextualizations,
     })
+}
+
+fn attach_native_stem_guided_beams(
+    beams: &NativeBeamRecognition,
+    systems: &mut [NativeStemsSystemFinalizeDrive],
+) -> Result<(), NativeStemsPreparationError> {
+    for recovery in &beams.stem_guided_beam_recoveries {
+        let Some((system_id, beam)) = beams.raw_beams.get(recovery.raw_beam_ordinal) else {
+            return Err(phase(
+                "recovered raw-beam ordinal is out of range",
+                "stem-guided beam attachment",
+            ));
+        };
+        let system = systems
+            .iter_mut()
+            .find(|system| system.system_id == *system_id)
+            .ok_or_else(|| {
+                phase(
+                    "recovered beam system is absent",
+                    "stem-guided beam attachment",
+                )
+            })?;
+        let beam_state = &mut system.transaction.state_after.beam_state;
+        let source = NativeStemsBeamSource::RawBeam(recovery.raw_beam_ordinal);
+        let Some(&beam_vertex) = beam_state.bindings.beam_vertices.get(&source) else {
+            continue;
+        };
+        if beam_state.sig.vertex(beam_vertex.0).is_none_or(|vertex| {
+            !vertex.active
+                || !matches!(
+                    vertex.kind,
+                    NativeSigInterKind::Beam | NativeSigInterKind::BeamHook
+                )
+        }) {
+            continue;
+        }
+
+        let known = beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .filter_map(|stem| {
+                let vertex = beam_state
+                    .bindings
+                    .stem_vertices
+                    .get(&stem.stem_identity)
+                    .copied()?;
+                beam_state
+                    .sig
+                    .vertex(vertex.0)
+                    .is_some_and(|inter| inter.active)
+                    .then_some((vertex, stem.geometry.median))
+            })
+            .collect::<Vec<_>>();
+        let tolerance = beam.item.height.max(3.0);
+        let endpoint = |x: f64, y: f64| {
+            known
+                .iter()
+                .filter_map(|(vertex, median)| {
+                    let stem_x = (median.start.x + median.stop.x) / 2.0;
+                    let top = median.start.y.min(median.stop.y);
+                    let bottom = median.start.y.max(median.stop.y);
+                    let dx = (stem_x - x).abs();
+                    let dy = if y < top {
+                        top - y
+                    } else if y > bottom {
+                        y - bottom
+                    } else {
+                        0.0
+                    };
+                    (dx <= tolerance && dy <= tolerance).then_some((
+                        dx + dy,
+                        *vertex,
+                        stem_x,
+                        y.clamp(top, bottom),
+                    ))
+                })
+                .min_by(|left, right| left.0.total_cmp(&right.0))
+        };
+        let Some((_, left, left_x, left_y)) = endpoint(beam.item.median.x1, beam.item.median.y1)
+        else {
+            continue;
+        };
+        let Some((_, right, right_x, right_y)) = endpoint(beam.item.median.x2, beam.item.median.y2)
+        else {
+            continue;
+        };
+        if left == right {
+            continue;
+        }
+        append_native_recovery_beam_stem_relation(
+            &mut beam_state.sig,
+            beam_vertex,
+            left,
+            1.0,
+            NativeBeamPortion::Left,
+            NativeStemPoint {
+                x: left_x,
+                y: left_y,
+            },
+        )
+        .map_err(|error| phase(error, "stem-guided beam attachment"))?;
+        append_native_recovery_beam_stem_relation(
+            &mut beam_state.sig,
+            beam_vertex,
+            right,
+            1.0,
+            NativeBeamPortion::Right,
+            NativeStemPoint {
+                x: right_x,
+                y: right_y,
+            },
+        )
+        .map_err(|error| phase(error, "stem-guided beam attachment"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

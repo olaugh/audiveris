@@ -2215,10 +2215,17 @@ fn beam_lifecycle<'a>(
         .map(move |(ordinal, (system_id, beam))| {
             beam_lifecycle_entry(
                 *system_id,
-                "raw_beam",
+                if beams.stem_guided_beam_ordinals.contains(&ordinal) {
+                    "stem_guided_beam"
+                } else {
+                    "raw_beam"
+                },
                 ordinal,
                 NativeStemsBeamSource::RawBeam(ordinal),
                 beam,
+                beams
+                    .high_precision_rejected_raw_beam_ordinals
+                    .contains(&ordinal),
                 heads,
                 reduction,
             )
@@ -2235,6 +2242,7 @@ fn beam_lifecycle<'a>(
                         ordinal,
                         NativeStemsBeamSource::Hook(ordinal),
                         beam,
+                        false,
                         heads,
                         reduction,
                     )
@@ -2242,12 +2250,14 @@ fn beam_lifecycle<'a>(
         )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn beam_lifecycle_entry<'a>(
     system_id: usize,
     source_kind: &'static str,
     source_ordinal: usize,
     source: NativeStemsBeamSource,
     beam: &'a RawBeam,
+    high_precision_rejected: bool,
     heads: Option<&NativeHeadsEpilogRecognition>,
     reduction: &NativeReductionRecognition,
 ) -> BeamLifecycleEntry<'a> {
@@ -2267,6 +2277,7 @@ fn beam_lifecycle_entry<'a>(
             .copied()
     });
     let reason = match vertex {
+        _ if high_precision_rejected => "high_precision_raster_rejection",
         _ if heads.is_some_and(|heads| heads_removed_beam(heads, system_id, source)) => {
             "heads_small_beam_arbitration"
         }
