@@ -2354,13 +2354,75 @@ fn reduction_beam_rejection_reason(
             return "reduction_beam_missing_left_or_right_stem";
         }
     }
-    if foundations.all_removed_vertices.contains(&vertex) {
-        return "reduction_exclusion_or_weak_grade";
+    if foundation_exclusion_removed(foundations, vertex) {
+        return "reduction_exclusion";
+    }
+    if foundation_weak_grade_removed(foundations, vertex) {
+        return "reduction_weak_grade";
     }
     match source {
         NativeStemsBeamSource::RawBeam(_) => "reduction_beam_removed_by_consistency",
         NativeStemsBeamSource::Hook(_) => "reduction_hook_removed_by_consistency",
     }
+}
+
+fn foundation_exclusion_removed(
+    foundations: &crate::native_reduction::NativeReductionFoundationsTransaction,
+    vertex: NativeSigVertexId,
+) -> bool {
+    let first = &foundations.first_epoch;
+    first
+        .remaining_exclusions
+        .removed_vertices
+        .contains(&vertex)
+        || first
+            .late_consistency
+            .exclusions
+            .removed_vertices
+            .contains(&vertex)
+        || foundations.continuation_epochs.iter().any(|epoch| {
+            epoch
+                .remaining_exclusions
+                .removed_vertices
+                .contains(&vertex)
+                || epoch
+                    .late_consistency
+                    .exclusions
+                    .removed_vertices
+                    .contains(&vertex)
+        })
+}
+
+fn foundation_weak_grade_removed(
+    foundations: &crate::native_reduction::NativeReductionFoundationsTransaction,
+    vertex: NativeSigVertexId,
+) -> bool {
+    let removed = |transaction: &crate::native_reduction::NativeReductionWeakPurgeTransaction| {
+        transaction.removed_vertices.contains(&vertex)
+            || transaction.cascaded_members.contains(&vertex)
+    };
+    let pass_removed =
+        |pass: &crate::native_reduction::NativeReductionFoundationConsistencyPassTransaction| {
+            removed(&pass.post_stem_ending_weak_purge)
+                || removed(&pass.post_heads_weak_purge)
+                || removed(&pass.post_hooks_weak_purge)
+                || removed(&pass.post_beams_weak_purge)
+                || removed(&pass.post_ledgers_weak_purge)
+                || removed(&pass.post_stems_weak_purge)
+        };
+    let first = &foundations.first_epoch;
+    removed(&first.fixed_point.initial_weak_purge)
+        || first
+            .fixed_point
+            .consistency_passes
+            .iter()
+            .any(pass_removed)
+        || removed(&first.late_consistency.weak_purge)
+        || foundations.continuation_epochs.iter().any(|epoch| {
+            removed(&epoch.opening_weak_purge)
+                || epoch.consistency_passes.iter().any(pass_removed)
+                || removed(&epoch.late_consistency.weak_purge)
+        })
 }
 
 fn cue_beams_product(json: &mut Json, recognition: &NativeCueBeamsRecognition) {
