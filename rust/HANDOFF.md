@@ -12533,11 +12533,13 @@ passes locally. CI uses a lossless 1469x620 first-two-system crop with SHA-256
 `753ecce93da11d7204c72613e2712f86d6bf1997261557d3e835feb03a762c9f`.
 The crop retains the affected three-head geometry and asserts the actual
 creation/live ordinal split before publishing its cue beam/group containment
-and a terminal cue BeamStem relation. Disabled CUE_BEAMS retains an exact
-debug fingerprint of the incoming ordinary REDUCTION/STEMS/BEAMS state.
+and a terminal cue BeamStem relation. The eight-page corpus gate proves that
+disabled CUE_BEAMS retains an exact debug fingerprint of the incoming ordinary
+REDUCTION/STEMS/BEAMS state.
 
 Verification is 776 passed library tests plus two intentional ignores, 8/8
-frozen Java cue pages, 5/5 CLI protocol tests, the 199.69-second crop and
+frozen Java cue pages, 5/5 CLI protocol tests, the 73.44-second crop and
 980.70-second full-page diagnostics, formatting, and strict
 workspace/all-target/all-feature Clippy. The crop runs serially after the
-eight-page cue corpus so CI never launches two page pipelines concurrently.
+eight-page cue corpus so CI never launches two page pipelines concurrently,
+and drops its aggregate snapshot before constructing the active lifecycle.

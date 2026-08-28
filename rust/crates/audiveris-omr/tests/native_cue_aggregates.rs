@@ -179,20 +179,6 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
     }
 
     let (grid, reduction, aggregates) = recognize_page(CHOPIN_OP9_NO1_S1A6_PAGE);
-    let ordinary_fingerprint = debug_fingerprint(&reduction);
-    let disabled = recognize_native_cue_beams_with_options(
-        &grid,
-        reduction.clone(),
-        true,
-        NativeCueBeamsOptions {
-            enabled: false,
-            supplemental_hook_recovery: true,
-        },
-    )
-    .expect("disabled CUE_BEAMS must preserve ordinary recognition");
-    assert!(disabled.active.is_none());
-    assert_eq!(ordinary_fingerprint, debug_fingerprint(&disabled.reduction));
-
     // These are lossless pixels from the exact StageAligner 96% page. On the
     // full page this x869/y169 aggregate has zero-based ordinal 5 and renders
     // as S1A6. Cropping away later systems makes the corpus gate CI-safe and
@@ -210,28 +196,16 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
     assert_eq!(s1a6.ordinal, 4);
     assert_eq!(s1a6.members.len(), 3);
     let s1a6_ordinal = s1a6.ordinal;
+    let s1a6_members = s1a6.members.clone();
 
-    let completed = recognize_native_cue_beams_with_options(
-        &grid,
-        reduction,
-        true,
-        NativeCueBeamsOptions {
-            enabled: true,
-            supplemental_hook_recovery: true,
-        },
-    )
-    .expect("Chopin Op. 9 No. 1 page 1 CUE_BEAMS");
-    let active = completed.active.as_deref().expect("active CUE_BEAMS");
-    let final_s1 = completed
-        .reduction
+    let final_s1 = reduction
         .stems
         .systems
         .iter()
         .find(|system| system.system_id == 1)
         .expect("final S1 STEMS state");
     let bindings = &final_s1.transaction.state_after.beam_state.bindings;
-    let corners = completed
-        .reduction
+    let corners = reduction
         .stems
         .components
         .head_corners
@@ -240,7 +214,7 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
         .find(|system| system.system_id == 1)
         .expect("S1 head corners");
     assert!(
-        s1a6.members.iter().any(|(head_vertex, _)| {
+        s1a6_members.iter().any(|(head_vertex, _)| {
             let Some((reference, _)) = bindings
                 .head_vertices
                 .iter()
@@ -254,6 +228,19 @@ fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
         }),
         "the cropped S1A6 evidence must retain the creation/live ordinal split"
     );
+    drop(aggregates);
+
+    let completed = recognize_native_cue_beams_with_options(
+        &grid,
+        reduction,
+        true,
+        NativeCueBeamsOptions {
+            enabled: true,
+            supplemental_hook_recovery: true,
+        },
+    )
+    .expect("Chopin Op. 9 No. 1 page 1 CUE_BEAMS");
+    let active = completed.active.as_deref().expect("active CUE_BEAMS");
     let s1_mutations = active
         .mutations
         .systems

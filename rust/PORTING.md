@@ -6892,11 +6892,12 @@ which retains the affected three-member aggregate, explicitly proves the
 creation/live ordinal split, publishes its cue beam/group containment, and
 reaches a terminal cue BeamStem relation without exhausting a CI runner.
 
-The crop regression also fingerprints REDUCTION before and after disabled
-CUE_BEAMS to prove ordinary STEMS/BEAMS are unchanged. It passes in 199.69
-seconds and runs serially after the eight-page corpus (395.81 seconds total)
-to fit GitHub's Linux
-runner. The full page passes locally in 980.70 seconds; the eight-page frozen
-Java cue differential passes in 198.14 seconds; the library suite reports 776
-passed and two intentional ignores; and all five CLI protocol tests,
-formatting, and strict workspace Clippy pass.
+The eight-page corpus gate fingerprints REDUCTION before and after disabled
+CUE_BEAMS to prove ordinary STEMS/BEAMS are unchanged. The Chopin child drops
+its aggregate snapshot after authenticating the ordinal split, before it
+constructs the active lifecycle, and runs serially after the corpus to bound
+runner memory. The memory-tightened crop child passes locally in 73.44
+seconds. The full page passes locally in 980.70 seconds; the
+eight-page frozen Java cue differential passes in 198.14 seconds; the library
+suite reports 776 passed and two intentional ignores; and all five CLI
+protocol tests, formatting, and strict workspace Clippy pass.
