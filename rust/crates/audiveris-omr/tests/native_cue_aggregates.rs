@@ -155,8 +155,7 @@ fn chopin_cue_fixture_exposes_terminal_active_evidence() {
     assert_eq!(completed, repeated);
 }
 
-#[test]
-fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations() {
+fn run_chopin_op9_no1_page1_s1a6_regression() {
     let test_binary = std::env::current_exe().expect("current cue aggregate test binary");
     let status = Command::new(test_binary)
         .args([
@@ -328,6 +327,9 @@ fn active_cue_aggregate_corpus_matches_java() {
             "isolated cue aggregate page failed: {path}"
         );
     }
+    // This full-pipeline diagnostic must not run concurrently with the eight
+    // Java corpus pages on GitHub's smaller Linux runners.
+    run_chopin_op9_no1_page1_s1a6_regression();
 }
 
 #[test]

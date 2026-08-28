@@ -12537,6 +12537,7 @@ and a terminal cue BeamStem relation. Disabled CUE_BEAMS retains an exact
 debug fingerprint of the incoming ordinary REDUCTION/STEMS/BEAMS state.
 
 Verification is 776 passed library tests plus two intentional ignores, 8/8
-frozen Java cue pages, 5/5 CLI protocol tests, the 198.23-second crop and
+frozen Java cue pages, 5/5 CLI protocol tests, the 199.69-second crop and
 980.70-second full-page diagnostics, formatting, and strict
-workspace/all-target/all-feature Clippy.
+workspace/all-target/all-feature Clippy. The crop runs serially after the
+eight-page cue corpus so CI never launches two page pipelines concurrently.

@@ -7335,4 +7335,5 @@ the same creation/live ordinal split without the full page's runner memory
 cost. A disabled-cue fingerprint proves ordinary STEMS and BEAMS remain
 unchanged. The full-page diagnostic, cropped regression, eight-page Java cue
 differential, 778-test library suite (two intentional ignores), CLI protocol
-suite, formatting, and strict Clippy gates are green.
+suite, formatting, and strict Clippy gates are green. CI serializes the crop
+after the cue corpus to stay within Linux runner memory.
