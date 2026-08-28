@@ -123,52 +123,79 @@ pub fn beam_extension_evidence(
 ) -> Vec<BeamExtensionEvidence> {
     let mut evidence = Vec::new();
     for beam in input.beams.iter().copied().filter(|beam| !beam.removed) {
-        for side in [ExtensionSide::Left, ExtensionSide::Right] {
-            let side_beam = get_side_beam(beam, side, None, input.beams, input.parameters);
-            let mut max_dx = None;
-            if let Some(other) = side_beam {
-                if side == ExtensionSide::Left {
-                    let attempt = merge_attempt(beam, other, side, input);
-                    let accepted = attempt.rejection.is_none();
-                    evidence.push(attempt);
-                    if accepted {
-                        break;
-                    }
-                }
-                let gap = match side {
-                    ExtensionSide::Left => beam.median.x1 - other.median.x2,
-                    ExtensionSide::Right => other.median.x1 - beam.median.x2,
-                };
-                max_dx = Some(
-                    (gap - input.parameters.beams_x_margin)
-                        .max(0.0)
-                        .round_ties_even(),
-                );
-            }
+        evidence.extend(beam_extension_evidence_for_beam(
+            input,
+            beam,
+            &mut side_in_system,
+        ));
+    }
+    evidence
+}
 
-            if let Some(attempt) = glyph_attempt(beam, side, max_dx, input.seeds, true, input) {
+/// Emit Java-ordered extension attempts for one live beam against the supplied
+/// current beam registry.
+///
+/// Java snapshots the beams it will visit, but every visit queries the mutable
+/// `rawSystemBeams` registry left by earlier visits.  Production composition
+/// therefore calls this one-beam form while updating that registry between
+/// calls.  The all-beam function above remains useful for a read-only evidence
+/// projection.
+#[must_use]
+pub fn beam_extension_evidence_for_beam(
+    input: BeamExtensionInput<'_>,
+    beam: ExtensionBeam,
+    side_in_system: &mut impl FnMut((f64, f64), f64) -> bool,
+) -> Vec<BeamExtensionEvidence> {
+    if beam.removed {
+        return Vec::new();
+    }
+
+    let mut evidence = Vec::new();
+    for side in [ExtensionSide::Left, ExtensionSide::Right] {
+        let side_beam = get_side_beam(beam, side, None, input.beams, input.parameters);
+        let mut max_dx = None;
+        if let Some(other) = side_beam {
+            if side == ExtensionSide::Left {
+                let attempt = merge_attempt(beam, other, side, input);
                 let accepted = attempt.rejection.is_none();
                 evidence.push(attempt);
                 if accepted {
                     break;
                 }
             }
-            if let Some(attempt) = glyph_attempt(beam, side, max_dx, input.spots, false, input) {
-                let accepted = attempt.rejection.is_none();
-                evidence.push(attempt);
-                if accepted {
-                    break;
-                }
+            let gap = match side {
+                ExtensionSide::Left => beam.median.x1 - other.median.x2,
+                ExtensionSide::Right => other.median.x1 - beam.median.x2,
+            };
+            max_dx = Some(
+                (gap - input.parameters.beams_x_margin)
+                    .max(0.0)
+                    .round_ties_even(),
+            );
+        }
+
+        if let Some(attempt) = glyph_attempt(beam, side, max_dx, input.seeds, true, input) {
+            let accepted = attempt.rejection.is_none();
+            evidence.push(attempt);
+            if accepted {
+                break;
             }
-            if side_beam.is_none() {
-                let attempts = parallel_attempts(beam, side, input, &mut side_in_system);
-                let accepted = attempts
-                    .last()
-                    .is_some_and(|attempt| attempt.rejection.is_none());
-                evidence.extend(attempts);
-                if accepted {
-                    break;
-                }
+        }
+        if let Some(attempt) = glyph_attempt(beam, side, max_dx, input.spots, false, input) {
+            let accepted = attempt.rejection.is_none();
+            evidence.push(attempt);
+            if accepted {
+                break;
+            }
+        }
+        if side_beam.is_none() {
+            let attempts = parallel_attempts(beam, side, input, side_in_system);
+            let accepted = attempts
+                .last()
+                .is_some_and(|attempt| attempt.rejection.is_none());
+            evidence.extend(attempts);
+            if accepted {
+                break;
             }
         }
     }
@@ -718,7 +745,14 @@ fn convex_polygons_intersect(one: &[(f64, f64)], two: &[(f64, f64)]) -> bool {
             };
             let one_range = project(one);
             let two_range = project(two);
-            one_range.0 <= two_range.1 && two_range.0 <= one_range.1
+            // Java reaches `Area.intersects(Rectangle2D)`, whose contract
+            // requires a non-empty interior intersection.  Merely touching
+            // along an edge is not enough.  Accepting equality here let a
+            // leftover spot ending at x=349 enter a beam-extension lookup
+            // area beginning at x=349 on Chopin Op. 9 No. 1 page 1.  Both
+            // the hook and beam sharing the source item were then extended
+            // into duplicate beams, while Java retains the original pair.
+            one_range.0 < two_range.1 && two_range.0 < one_range.1
         })
 }
 
@@ -883,7 +917,9 @@ mod tests {
             id: 8,
             left: 15,
             top: 7,
-            width: 1,
+            // Positive-area overlap with the lookup begins at x=16, while
+            // the inclusive target remains just one pixel past the beam.
+            width: 2,
             height: 4,
             vertical_median: None,
         }];
@@ -905,5 +941,30 @@ mod tests {
             evidence[0].rejection,
             Some(BeamExtensionRejection::NoConcreteExtension)
         );
+    }
+
+    #[test]
+    fn edge_only_spot_contact_does_not_enter_java_area_intersection() {
+        let source = beam(1, 10.0, 15.0, 8.0);
+        let lookup = side_item(source, ExtensionSide::Left, 0.0, 10.0, 0.0);
+        let touching = ExtensionGlyph {
+            id: 7,
+            left: -2,
+            top: 7,
+            width: 2,
+            height: 4,
+            vertical_median: None,
+        };
+        let overlapping = ExtensionGlyph {
+            id: 8,
+            left: -1,
+            top: 7,
+            width: 2,
+            height: 4,
+            vertical_median: None,
+        };
+
+        assert!(!item_intersects_rect(lookup, touching));
+        assert!(item_intersects_rect(lookup, overlapping));
     }
 }

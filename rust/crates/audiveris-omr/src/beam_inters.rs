@@ -642,7 +642,7 @@ pub fn extend_beams(
     } = scaling;
     use audiveris_image::beam_extension::{
         BeamExtensionClass, BeamExtensionInput, BeamExtensionMode, BeamExtensionParameters,
-        ExtensionBeam, ExtensionClassParameters, beam_extension_evidence,
+        ExtensionBeam, ExtensionClassParameters, beam_extension_evidence_for_beam,
     };
 
     let members: Vec<ExtensionBeam> = beams
@@ -679,45 +679,69 @@ pub fn extend_beams(
         max_neighbor_slope_diff: 0.065,
     };
 
-    let evidence = beam_extension_evidence(
-        BeamExtensionInput {
-            beams: &members,
-            seeds,
-            spots,
-            raster: pixels,
-            parameters,
-        },
-        &mut in_system,
-    );
-
-    let mut survivors: Vec<RawBeam> = beams.to_vec();
-    let mut removed = vec![false; beams.len()];
-    for found in &evidence {
-        if found.rejection.is_some() {
+    // Java snapshots the original insertion order for visitation, while every
+    // visit reads and mutates the shared `rawSystemBeams` list.  In particular,
+    // when a hook and beam share geometry, the first successful merge removes
+    // both; the later original is skipped.  Evaluating every original against
+    // one immutable registry instead emits the same merger twice.
+    let original_count = members.len();
+    let mut live_members = members;
+    let mut live_beams = beams.to_vec();
+    for original_id in 0..original_count {
+        if live_members[original_id].removed {
             continue;
         }
+        let source = live_members[original_id];
+        let attempts = beam_extension_evidence_for_beam(
+            BeamExtensionInput {
+                beams: &live_members,
+                seeds,
+                spots,
+                raster: pixels,
+                parameters,
+            },
+            source,
+            &mut in_system,
+        );
+        let Some(found) = attempts
+            .into_iter()
+            .find(|attempt| attempt.rejection.is_none())
+        else {
+            continue;
+        };
         let (Some(item), Some(impacts), Some(grade)) =
             (found.resulting_item, found.impacts, found.grade)
         else {
             continue;
         };
-        removed[found.beam_id] = true;
+
+        live_members[found.beam_id].removed = true;
         if let BeamExtensionMode::Merge { other_beam_id } = found.mode {
-            removed[other_beam_id] = true;
+            live_members[other_beam_id].removed = true;
         }
-        survivors.push(RawBeam {
+        let impacts = clamped(impacts);
+        let id = live_members.len();
+        live_members.push(ExtensionBeam {
+            id,
+            median: item.median,
+            height: item.height,
+            distance_impact: impacts.distance,
+            class: source.class,
+            glyph_id: None,
+            removed: false,
+        });
+        live_beams.push(RawBeam {
             kind: BeamKind::Beam,
             item,
-            impacts: clamped(impacts),
+            impacts,
             grade,
         });
     }
 
-    survivors
+    live_beams
         .into_iter()
-        .enumerate()
-        .filter(|(index, _)| *index >= removed.len() || !removed[*index])
-        .map(|(_, raw)| raw)
+        .zip(live_members)
+        .filter_map(|(beam, member)| (!member.removed).then_some(beam))
         .collect()
 }
 
@@ -893,5 +917,77 @@ mod tests {
             }
         );
         assert_eq!(glyph.weight(), 4);
+    }
+
+    #[test]
+    fn sequential_extension_registry_suppresses_duplicate_results() {
+        let mut pixels = vec![BACKGROUND; 30 * 20];
+        for y in 6..10 {
+            pixels[(y * 30)..((y + 1) * 30)].fill(FOREGROUND);
+        }
+        let table = RunTable::from_pixels(Orientation::Horizontal, 30, 20, &pixels).unwrap();
+        let right = BeamItem {
+            median: audiveris_image::beam_structure::Segment {
+                x1: 10.0,
+                y1: 8.0,
+                x2: 20.0,
+                y2: 8.0,
+            },
+            height: 4.0,
+        };
+        let left = BeamItem {
+            median: audiveris_image::beam_structure::Segment {
+                x1: 5.0,
+                y1: 8.0,
+                x2: 8.0,
+                y2: 8.0,
+            },
+            height: 4.0,
+        };
+        let source_impacts = impacts([1.0; 6]);
+        let sources = [
+            RawBeam {
+                kind: BeamKind::Beam,
+                item: right,
+                impacts: source_impacts,
+                grade: beam_grade(source_impacts),
+            },
+            RawBeam {
+                kind: BeamKind::Beam,
+                item: right,
+                impacts: source_impacts,
+                grade: beam_grade(source_impacts),
+            },
+            RawBeam {
+                kind: BeamKind::Beam,
+                item: left,
+                impacts: source_impacts,
+                grade: beam_grade(source_impacts),
+            },
+        ];
+        let item_parameters = ItemParameters::new(10, 4.0, false);
+        let sheet = SheetParameters::new(10);
+        let result = extend_beams(
+            &sources,
+            ExtensionSources {
+                spots: &[],
+                seeds: &[],
+            },
+            BeamRaster {
+                table: &table,
+                offset_x: 0,
+                offset_y: 0,
+            },
+            &BeamScaling {
+                item_parameters: &item_parameters,
+                sheet: &sheet,
+                interline: 10,
+            },
+            |_, _| true,
+        );
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].item.median.x1, 5.0);
+        assert_eq!(result[0].item.median.x2, 20.0);
     }
 }
