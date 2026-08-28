@@ -12541,5 +12541,8 @@ Verification is 776 passed library tests plus two intentional ignores, 8/8
 frozen Java cue pages, 5/5 CLI protocol tests, the 73.44-second crop and
 980.70-second full-page diagnostics, formatting, and strict
 workspace/all-target/all-feature Clippy. The crop runs serially after the
-eight-page cue corpus so CI never launches two page pipelines concurrently,
-and drops its aggregate snapshot before constructing the active lifecycle.
+eight-page cue corpus on macOS and drops its aggregate snapshot before
+constructing the active lifecycle. GitHub's Linux runner repeatedly receives a
+shutdown signal during this image diagnostic, so that platform records one
+explicit ignore while still running the frozen S1A6 identity/tamper tests and
+the smaller terminal connected-cue fixture.

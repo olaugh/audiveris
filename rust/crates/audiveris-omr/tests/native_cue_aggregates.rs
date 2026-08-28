@@ -172,6 +172,13 @@ fn run_chopin_op9_no1_page1_s1a6_regression() {
     assert!(status.success(), "isolated Chopin S1A6 regression failed");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "GitHub's Linux runner is killed by this production image diagnostic"]
+fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations() {
+    run_chopin_op9_no1_page1_s1a6_regression();
+}
+
 #[test]
 fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
     if std::env::var_os(CHOPIN_OP9_NO1_S1A6_ENV).is_none() {
@@ -314,8 +321,9 @@ fn active_cue_aggregate_corpus_matches_java() {
             "isolated cue aggregate page failed: {path}"
         );
     }
-    // This full-pipeline diagnostic must not run concurrently with the eight
-    // Java corpus pages on GitHub's smaller Linux runners.
+    // macOS CI has enough memory for the production image diagnostic, but it
+    // must still run after (not concurrently with) the Java corpus pages.
+    #[cfg(not(target_os = "linux"))]
     run_chopin_op9_no1_page1_s1a6_regression();
 }
 

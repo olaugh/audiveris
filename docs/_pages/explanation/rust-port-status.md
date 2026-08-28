@@ -7330,11 +7330,13 @@ rejected without a center-point fallback or silent member loss.
 The exact 96% StageAligner candidate for Chopin Op. 9 No. 1 page 1 now crosses
 the former `S1A6: missing head corner` failure, resolves all three members,
 publishes the cue beam/group, and completes with terminal cue BeamStem
-relations. CI runs a lossless first-two-system crop that retains and asserts
-the same creation/live ordinal split without the full page's runner memory
-cost. A disabled-cue fingerprint proves ordinary STEMS and BEAMS remain
+relations. macOS CI runs a lossless first-two-system crop that retains and
+asserts the same creation/live ordinal split. GitHub's Linux runner records an
+explicit ignore for that image diagnostic after repeated runner shutdowns,
+while still enforcing focused S1A6 identity/tamper and terminal cue graph
+tests. A disabled-cue fingerprint proves ordinary STEMS and BEAMS remain
 unchanged. The full-page diagnostic, cropped regression, eight-page Java cue
 differential, 778-test library suite (two intentional ignores), CLI protocol
-suite, formatting, and strict Clippy gates are green. CI serializes the crop
-after the cue corpus and releases its discovery snapshot before active cue
-publication to stay within Linux runner memory.
+suite, formatting, and strict Clippy gates are green. The crop releases its
+discovery snapshot before active cue publication and runs serially after the
+cue corpus on macOS.

@@ -6890,14 +6890,16 @@ systems (SHA-256
 `753ecce93da11d7204c72613e2712f86d6bf1997261557d3e835feb03a762c9f`),
 which retains the affected three-member aggregate, explicitly proves the
 creation/live ordinal split, publishes its cue beam/group containment, and
-reaches a terminal cue BeamStem relation without exhausting a CI runner.
+reaches a terminal cue BeamStem relation.
 
 The eight-page corpus gate fingerprints REDUCTION before and after disabled
 CUE_BEAMS to prove ordinary STEMS/BEAMS are unchanged. The Chopin child drops
 its aggregate snapshot after authenticating the ordinal split, before it
-constructs the active lifecycle, and runs serially after the corpus to bound
-runner memory. The memory-tightened crop child passes locally in 73.44
-seconds. The full page passes locally in 980.70 seconds; the
+constructs the active lifecycle. It runs serially after the corpus on macOS CI
+and passes locally in 73.44 seconds. GitHub's Linux hosted runner is still
+killed by this image diagnostic, so Linux marks that one integration ignored
+while enforcing the focused frozen S1A6 identity/tamper tests and terminal cue
+graph fixture. The full page passes locally in 980.70 seconds; the
 eight-page frozen Java cue differential passes in 198.14 seconds; the library
 suite reports 776 passed and two intentional ignores; and all five CLI
 protocol tests, formatting, and strict workspace Clippy pass.
