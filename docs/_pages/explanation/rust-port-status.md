@@ -7316,3 +7316,21 @@ on unresized Chopin `pdf-page-06.png` (SHA-256
 A release build with this change and the separately developed arbitrary-size
 head-template prerequisite completes terminal STEMS JSON on that exact image.
 The full library and frozen B14-B17 differential chain remain green.
+
+## Boundary 314: stable cue-head identity closes Chopin S1A6
+
+The CUE_BEAMS stem-link planner now resolves a live head vertex through the
+final STEMS `head_vertices` binding and its stable HEADS epilog reference.
+This replaces the invalid assumption that a graph vertex ordinal remains equal
+to its original HEADS creation ordinal after STEMS mutates the SIG. The live
+head, bound head, and immutable corner record must agree on active state,
+shape, and bounds; stale, ambiguous, redirected, or tampered bindings are
+rejected without a center-point fallback or silent member loss.
+
+The exact 96% StageAligner candidate for Chopin Op. 9 No. 1 page 1 now crosses
+the former `S1A6: missing head corner` failure, resolves all three members,
+publishes the cue beam/group, and completes with terminal cue BeamStem
+relations. A disabled-cue fingerprint check proves ordinary STEMS and BEAMS
+remain unchanged. The exact production page, eight-page Java cue differential,
+778-test library suite (two intentional ignores), CLI protocol suite,
+formatting, and strict Clippy gates are green.

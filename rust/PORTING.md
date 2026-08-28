@@ -6868,3 +6868,28 @@ failure. A release build containing this boundary plus the separate
 arbitrary-size head-template prerequisite completes the original image and
 emits 3,959,754 bytes of terminal STEMS JSON. All 774 library tests pass (two
 ignored diagnostics), as do the 11 B14, 5 B15, 35 B16, and 15 B17 exact gates.
+
+## Boundary 314: resolve CUE_BEAMS head corners through stable bindings
+
+CUE_BEAMS no longer equates a live final-SIG vertex ordinal with the original
+HEADS creation ordinal when it asks for a head's stem-reference corner. The
+planner now reverse-resolves the live head through
+`NativeSigSystemBindings.head_vertices` to its stable
+`NativeHeadStaffEpilogRef`, then locates the immutable STEMS corner record.
+The bound and live vertices must both remain active heads with identical
+shape/bounds, and the corner record must independently match those same
+properties. Missing, ambiguous, redirected, removed, or otherwise tampered
+bindings fail closed; there is no head-center fallback and no skipped member.
+
+The exact StageAligner 96% candidate for Chopin Op. 9 No. 1 page 1 is frozen
+as `chopin-nocturne-op9-no1-page1-stage-aligner-96.png` (1469x1901, SHA-256
+`c70ca57d4e060b9befa0ce8bcf6bd8b439502f6d7da9ea7cb465fc9f9ee62102`).
+Its former `S1A6: missing head corner` failure now reaches terminal CUE_BEAMS:
+all three aggregate members resolve through stable bindings, the cue beam and
+group containment are published, and the page publishes cue BeamStem
+relations. The production-sized regression also fingerprints REDUCTION before
+and after disabled CUE_BEAMS to prove ordinary STEMS/BEAMS are unchanged. The
+exact page passes in 980.70 seconds; the eight-page frozen Java cue differential
+passes in 198.14 seconds; the library suite reports 776 passed and two
+intentional ignores; and all five CLI protocol tests, formatting, and strict
+workspace Clippy pass.

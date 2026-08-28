@@ -12509,3 +12509,30 @@ release, tested atop the separate arbitrary-size template prerequisite,
 completes the unresized image and writes 3,959,754 bytes of terminal STEMS JSON.
 Verification: 774/774 library tests with two intentional ignores; B14 11/11;
 B15 5/5; B16 35/35; B17 15/15.
+
+## Boundary 314: CUE_BEAMS keeps HEADS identity after SIG mutation
+
+The remaining Chopin Op. 9 No. 1 cue failure was an identity-domain mix-up,
+not missing recognition evidence. `plan_native_cue_beam_stem_links()` used a
+final SIG vertex ordinal as though it were the HEADS
+`system_creation_ordinal`. STEMS graph mutation makes those orderings diverge.
+Rust now uses the final beam state's `head_vertices` binding to recover the
+stable `NativeHeadStaffEpilogRef`, and uses that reference to select the exact
+left/right, top/bottom corner from the HEADS/STEMS corner product.
+
+The bridge is authenticated at every join: system IDs align; the binding and
+live graph slots are active heads; live and bound shape/bounds match; exactly
+one stable reference names the vertex; exactly one corner record names that
+reference; and its shape/bounds match the live head. Focused tamper tests cover
+missing, stale, redirected, ambiguous, and mismatched authority. Rust neither
+substitutes the head center nor silently drops the member.
+
+The checked-in 1469x1901 StageAligner 96% page candidate has SHA-256
+`c70ca57d4e060b9befa0ce8bcf6bd8b439502f6d7da9ea7cb465fc9f9ee62102`.
+The full integration test crosses the old `S1A6` boundary, resolves its three
+head members, publishes its cue beam/group containment, and reaches terminal
+page-wide cue BeamStem relations. Disabled CUE_BEAMS retains an exact debug
+fingerprint of the incoming ordinary REDUCTION/STEMS/BEAMS state. Verification
+is 776 passed library tests plus two intentional ignores, 8/8 frozen Java cue
+pages, 5/5 CLI protocol tests, the exact production page, formatting, and
+strict workspace/all-target/all-feature Clippy.

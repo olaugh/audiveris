@@ -30,8 +30,8 @@ use crate::native_heads_range_lookup::java_rectangle_grow;
 use crate::native_reduction::NativeReductionRecognition;
 use crate::native_sig::{
     NativeSigBounds, NativeSigEdgeId, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem,
-    NativeSigVertexId, append_native_cue_beam_groups, append_native_cue_beam_stem_relation,
-    append_native_cue_beam_vertex,
+    NativeSigSystemBindings, NativeSigVertexId, append_native_cue_beam_groups,
+    append_native_cue_beam_stem_relation, append_native_cue_beam_vertex,
 };
 use crate::native_stems_beam_stumps::NativeStemsBeamSource;
 use crate::native_stems_beam_vlink_reuse_check::{
@@ -1434,6 +1434,93 @@ fn cue_group_parameters(interline: i32) -> BeamGroupParameters {
     }
 }
 
+/// Resolve Java's live `HeadInter` back to the immutable STEMS corner product.
+///
+/// The SIG insertion ordinal is deliberately not compared with
+/// `system_creation_ordinal`: STEMS and REDUCTION retain stable graph slots
+/// while their mutations make those two ordering domains diverge.  The
+/// `head_vertices` binding is the authenticated bridge between them.
+#[allow(clippy::too_many_arguments)]
+fn resolve_native_cue_head_corner(
+    system_id: usize,
+    aggregate_ordinal: usize,
+    binding_sig: &NativeSigSystem,
+    live_sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    corners: &crate::native_stems_head_corners::NativeStemsHeadCornerSystem,
+    head_vertex: NativeSigVertexId,
+    horizontal: NativeStemHeadSide,
+    vertical: NativeStemVerticalSide,
+) -> Result<NativeStemPoint, NativeCueBeamMutationError> {
+    let fail = |message| cue_lookup_error(system_id, aggregate_ordinal, message);
+    if binding_sig.system_id != system_id
+        || live_sig.system_id != system_id
+        || bindings.system_id != system_id
+        || corners.system_id != system_id
+    {
+        return Err(fail("misaligned cue head binding system"));
+    }
+
+    let bound_head = binding_sig
+        .vertex(head_vertex.0)
+        .filter(|head| head.kind == NativeSigInterKind::Head)
+        .ok_or_else(|| fail("bound cue head is inactive"))?;
+    let live_head = live_sig
+        .vertex(head_vertex.0)
+        .filter(|head| head.kind == NativeSigInterKind::Head)
+        .ok_or_else(|| fail("live cue head is inactive"))?;
+    if bound_head.shape != live_head.shape || bound_head.bounds != live_head.bounds {
+        return Err(fail("live cue head differs from its bound head"));
+    }
+
+    let mut bound_references = bindings
+        .head_vertices
+        .iter()
+        .filter(|(_, vertex)| **vertex == head_vertex)
+        .map(|(reference, _)| *reference);
+    let reference = bound_references
+        .next()
+        .ok_or_else(|| fail("missing cue head binding"))?;
+    if bound_references.next().is_some() {
+        return Err(fail("ambiguous cue head binding"));
+    }
+
+    let mut corner_heads = corners
+        .heads_in_sig_order
+        .iter()
+        .filter(|head| head.reference == reference);
+    let corner_head = corner_heads
+        .next()
+        .ok_or_else(|| fail("missing bound cue head corner record"))?;
+    if corner_heads.next().is_some() {
+        return Err(fail("ambiguous bound cue head corner record"));
+    }
+    let expected_shape = match corner_head.shape {
+        crate::head_template::HeadTemplateShape::NoteheadBlack => "NOTEHEAD_BLACK",
+        crate::head_template::HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
+        crate::head_template::HeadTemplateShape::WholeNote => "WHOLE_NOTE",
+        crate::head_template::HeadTemplateShape::Breve => "BREVE",
+        crate::head_template::HeadTemplateShape::NoteheadBlackSmall => "NOTEHEAD_BLACK_SMALL",
+        crate::head_template::HeadTemplateShape::NoteheadVoidSmall => "NOTEHEAD_VOID_SMALL",
+        crate::head_template::HeadTemplateShape::WholeNoteSmall => "WHOLE_NOTE_SMALL",
+        crate::head_template::HeadTemplateShape::BreveSmall => "BREVE_SMALL",
+    };
+    let bounds_match = live_head.bounds.x == corner_head.bounds.x
+        && live_head.bounds.y == corner_head.bounds.y
+        && live_head.bounds.width == corner_head.bounds.width
+        && live_head.bounds.height == corner_head.bounds.height;
+    if live_head.shape.as_deref() != Some(expected_shape) || !bounds_match {
+        return Err(fail("cue head binding shape/bounds mismatch"));
+    }
+
+    corner_head
+        .corners_in_constructor_order
+        .iter()
+        .find(|corner| corner.horizontal == horizontal && corner.vertical == vertical)
+        .map(|corner| corner.reference)
+        .ok_or_else(|| fail("missing head corner"))
+}
+
 /// Reproduce the read-only `connectStemToBeams` / `lookupBeamGroups` prefix
 /// for every head in an aggregate which actually created cue beams.
 pub fn plan_native_cue_beam_stem_links(
@@ -1471,6 +1558,13 @@ pub fn plan_native_cue_beam_stem_links(
             .iter()
             .find(|system| system.system_id == system_id)
             .ok_or_else(|| cue_lookup_error(system_id, 0, "missing STEMS head-corner system"))?;
+        let final_system = reduction
+            .stems
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| cue_lookup_error(system_id, 0, "missing final STEMS system"))?;
+        let beam_state = &final_system.transaction.state_after.beam_state;
         let mut plans = Vec::new();
         for grouped in &grouping_system.aggregates {
             let aggregate_ordinal = grouped.aggregate_ordinal;
@@ -1499,17 +1593,17 @@ pub fn plan_native_cue_beam_stem_links(
             for &(head_sig_ordinal, stem_sig_ordinal) in &aggregate.members {
                 let head = grouping_system
                     .sig_after
-                    .vertices
-                    .get(head_sig_ordinal.0)
+                    .vertex(head_sig_ordinal.0)
+                    .filter(|head| head.kind == NativeSigInterKind::Head)
                     .ok_or_else(|| {
-                        cue_lookup_error(system_id, aggregate_ordinal, "missing head")
+                        cue_lookup_error(system_id, aggregate_ordinal, "missing live head")
                     })?;
                 let stem = grouping_system
                     .sig_after
-                    .vertices
-                    .get(stem_sig_ordinal.0)
+                    .vertex(stem_sig_ordinal.0)
+                    .filter(|stem| stem.kind == NativeSigInterKind::Stem)
                     .ok_or_else(|| {
-                        cue_lookup_error(system_id, aggregate_ordinal, "missing stem")
+                        cue_lookup_error(system_id, aggregate_ordinal, "missing live stem")
                     })?;
                 let head_x = f64::from(head.bounds.x) + (f64::from(head.bounds.width) / 2.0);
                 let stem_x = f64::from(stem.bounds.x) + (f64::from(stem.bounds.width) / 2.0);
@@ -1523,19 +1617,17 @@ pub fn plan_native_cue_beam_stem_links(
                 } else {
                     NativeStemVerticalSide::Top
                 };
-                let reference_point = corner_system
-                    .heads_in_sig_order
-                    .iter()
-                    .find(|head| head.system_creation_ordinal == head_sig_ordinal.0)
-                    .and_then(|head| {
-                        head.corners_in_constructor_order.iter().find(|corner| {
-                            corner.horizontal == horizontal_side && corner.vertical == vertical_side
-                        })
-                    })
-                    .map(|corner| corner.reference)
-                    .ok_or_else(|| {
-                        cue_lookup_error(system_id, aggregate_ordinal, "missing head corner")
-                    })?;
+                let reference_point = resolve_native_cue_head_corner(
+                    system_id,
+                    aggregate_ordinal,
+                    &beam_state.sig,
+                    &grouping_system.sig_after,
+                    &beam_state.bindings,
+                    corner_system,
+                    head_sig_ordinal,
+                    horizontal_side,
+                    vertical_side,
+                )?;
 
                 let mut fat_stem = rectangle(stem.bounds);
                 fat_stem = java_rectangle_grow(fat_stem, parameters.cue_box_dx, 0);
@@ -2953,6 +3045,236 @@ fn validate_sheet(sheet: &NeutralCueBeamsSheet) -> Result<(), CueBeamsContractEr
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    fn cue_head_binding_fixture() -> (
+        NativeSigSystem,
+        NativeSigSystemBindings,
+        crate::native_stems_head_corners::NativeStemsHeadCornerSystem,
+        NativeSigVertexId,
+        NativeStemPoint,
+    ) {
+        use crate::{
+            head_template::{HeadTemplateAnchor, HeadTemplateShape},
+            native_heads_staff_epilog::{
+                NativeHeadStaffEpilogOrigin, NativeHeadStaffEpilogProvenance,
+                NativeHeadStaffEpilogRef,
+            },
+            native_sig::NativeSigVertex,
+            native_stems_head_corners::{
+                NativeStemsHeadCorner, NativeStemsHeadCornerHead, NativeStemsHeadCornerSystem,
+            },
+        };
+
+        let bounds = NativeSigBounds {
+            x: 310,
+            y: 72,
+            width: 11,
+            height: 9,
+        };
+        let vertex = |ordinal: usize,
+                      kind: NativeSigInterKind,
+                      shape: Option<&str>,
+                      bounds: NativeSigBounds| NativeSigVertex {
+            ordinal,
+            active: true,
+            removed: false,
+            frozen: false,
+            kind,
+            shape: shape.map(str::to_owned),
+            grade: 0.8,
+            contextual_grade: Some(0.9),
+            bounds,
+            abnormal: false,
+            beam_geometry: None,
+        };
+        let head_vertex = NativeSigVertexId(1);
+        let sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![
+                vertex(
+                    0,
+                    NativeSigInterKind::Clef,
+                    Some("G_CLEF"),
+                    NativeSigBounds {
+                        x: 10,
+                        y: 10,
+                        width: 20,
+                        height: 40,
+                    },
+                ),
+                vertex(
+                    head_vertex.0,
+                    NativeSigInterKind::Head,
+                    Some("NOTEHEAD_BLACK_SMALL"),
+                    bounds,
+                ),
+                vertex(
+                    2,
+                    NativeSigInterKind::Head,
+                    Some("NOTEHEAD_BLACK_SMALL"),
+                    NativeSigBounds { x: 410, ..bounds },
+                ),
+            ],
+            edges: Vec::new(),
+        };
+        let reference = NativeHeadStaffEpilogRef {
+            staff_index: 0,
+            head_index: 6,
+        };
+        let bindings = NativeSigSystemBindings {
+            system_id: 1,
+            beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::from([(reference, head_vertex)]),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 12,
+            reduction_staffs: Vec::new(),
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: BTreeMap::new(),
+        };
+        let reference_point = NativeStemPoint { x: 317.0, y: 74.0 };
+        let corner = NativeStemsHeadCorner {
+            constructor_ordinal: 0,
+            inspection_ordinal: 0,
+            horizontal: NativeStemHeadSide::Right,
+            vertical: NativeStemVerticalSide::Top,
+            anchor: HeadTemplateAnchor::TopRightStem,
+            template_bounds: rectangle(bounds),
+            anchor_offset: (7, 2),
+            seed_dx_left: None,
+            seed_dx_right: None,
+            applied_seed_dx: None,
+            reference: reference_point,
+            out_point: NativeStemPoint { x: 323.0, y: 74.0 },
+            in_point: NativeStemPoint { x: 315.0, y: 74.0 },
+        };
+        let corners = NativeStemsHeadCornerSystem {
+            system_id: 1,
+            profile: 1,
+            interline: 12,
+            max_head_in_dx: 3,
+            max_head_out_dx: 5,
+            heads_in_sig_order: vec![NativeStemsHeadCornerHead {
+                reference,
+                staff_id: 1,
+                origin: NativeHeadStaffEpilogOrigin::Range(6),
+                provenance: NativeHeadStaffEpilogProvenance::Range {
+                    ordinal: 6,
+                    candidate_ordinal: 6,
+                    raw_ordinal: 6,
+                    attempt_ordinal: 6,
+                    geometry_ordinal: 6,
+                },
+                // Op. 9 No. 1 S1A6 exercises this exact ordering split: the
+                // original HEADS creation domain is not the live SIG slot.
+                system_creation_ordinal: 47,
+                shape: HeadTemplateShape::NoteheadBlackSmall,
+                pitch_bits: 0.0_f64.to_bits(),
+                bounds: rectangle(bounds),
+                grade_bits: 0.8_f64.to_bits(),
+                glyph_bounds: rectangle(bounds),
+                glyph_weight: 1,
+                glyph_run_digest: 1,
+                glyph_run_table: RunTable::new(Orientation::Vertical, 1, 1).unwrap(),
+                point_size: 52,
+                catalog_ordinal: 0,
+                corners_in_constructor_order: vec![corner],
+            }],
+            heads_by_abscissa: vec![0],
+            heads_by_reverse_grade: vec![0],
+        };
+        (sig, bindings, corners, head_vertex, reference_point)
+    }
+
+    #[test]
+    fn chopin_op9_no1_s1a6_resolves_corner_by_stable_head_binding() {
+        let (sig, bindings, corners, head_vertex, expected) = cue_head_binding_fixture();
+        assert_ne!(
+            corners.heads_in_sig_order[0].system_creation_ordinal, head_vertex.0,
+            "the regression must retain the post-STEMS ordinal split"
+        );
+
+        let resolved = resolve_native_cue_head_corner(
+            1,
+            5,
+            &sig,
+            &sig,
+            &bindings,
+            &corners,
+            head_vertex,
+            NativeStemHeadSide::Right,
+            NativeStemVerticalSide::Top,
+        )
+        .expect("S1A6 stable HeadInter binding");
+
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn cue_head_corner_binding_rejects_stale_and_tampered_authority() {
+        let (sig, bindings, corners, head_vertex, _) = cue_head_binding_fixture();
+        let resolve =
+            |sig: &NativeSigSystem,
+             bindings: &NativeSigSystemBindings,
+             corners: &crate::native_stems_head_corners::NativeStemsHeadCornerSystem| {
+                resolve_native_cue_head_corner(
+                    1,
+                    5,
+                    sig,
+                    sig,
+                    bindings,
+                    corners,
+                    head_vertex,
+                    NativeStemHeadSide::Right,
+                    NativeStemVerticalSide::Top,
+                )
+                .expect_err("tampered cue head authority must fail closed")
+                .message
+            };
+
+        let mut missing = bindings.clone();
+        missing.head_vertices.clear();
+        assert_eq!(
+            resolve(&sig, &missing, &corners),
+            "missing cue head binding"
+        );
+
+        let mut stale_sig = sig.clone();
+        stale_sig.vertices[head_vertex.0].active = false;
+        stale_sig.vertices[head_vertex.0].removed = true;
+        assert_eq!(
+            resolve(&stale_sig, &bindings, &corners),
+            "bound cue head is inactive"
+        );
+
+        let mut redirected = bindings.clone();
+        *redirected.head_vertices.values_mut().next().unwrap() = NativeSigVertexId(2);
+        assert_eq!(
+            resolve(&sig, &redirected, &corners),
+            "missing cue head binding"
+        );
+
+        let mut ambiguous = bindings.clone();
+        ambiguous.head_vertices.insert(
+            crate::native_heads_staff_epilog::NativeHeadStaffEpilogRef {
+                staff_index: 1,
+                head_index: 0,
+            },
+            head_vertex,
+        );
+        assert_eq!(
+            resolve(&sig, &ambiguous, &corners),
+            "ambiguous cue head binding"
+        );
+
+        let mut mismatched = corners.clone();
+        mismatched.heads_in_sig_order[0].bounds.x += 1;
+        assert_eq!(
+            resolve(&sig, &bindings, &mismatched),
+            "cue head binding shape/bounds mismatch"
+        );
+    }
 
     #[test]
     fn cue_group_parameters_use_java_pixel_rounding_and_cue_limits() {

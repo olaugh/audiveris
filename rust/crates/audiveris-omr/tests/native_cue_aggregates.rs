@@ -19,6 +19,7 @@ use audiveris_omr::{
     native_heads::recognize_native_heads_with_small_heads,
     native_ledgers::recognize_native_ledgers,
     native_reduction::{NativeReductionRecognition, recognize_native_reduction},
+    native_sig::NativeSigRelationKind,
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems::recognize_native_stems,
     recognize::{
@@ -30,6 +31,9 @@ use audiveris_omr::{
 const ORACLE: &str = include_str!("../../../oracle/cue-aggregates.txt");
 const CHOPIN_CUE_ORACLE: &str = include_str!("../../../oracle/cue-beams-chopin-page23-system4.txt");
 const CUE_AGGREGATE_PAGE_ENV: &str = "AUDIVERIS_CUE_AGGREGATE_TEST_PAGE";
+const CHOPIN_OP9_NO1_S1A6_ENV: &str = "AUDIVERIS_CHOPIN_OP9_NO1_S1A6_TEST";
+const CHOPIN_OP9_NO1_S1A6_PAGE: &str =
+    "rust/oracle/chopin-nocturne-op9-no1-page1-stage-aligner-96.png";
 const CUE_AGGREGATE_CORPUS: [&str; 8] = [
     "data/examples/chula.png",
     "data/examples/allegretto.png",
@@ -149,6 +153,125 @@ fn chopin_cue_fixture_exposes_terminal_active_evidence() {
     )
     .expect("repeat Chopin CUE_BEAMS");
     assert_eq!(completed, repeated);
+}
+
+#[test]
+fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations() {
+    let test_binary = std::env::current_exe().expect("current cue aggregate test binary");
+    let status = Command::new(test_binary)
+        .args([
+            "--exact",
+            "chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page",
+            "--nocapture",
+        ])
+        .env(CHOPIN_OP9_NO1_S1A6_ENV, "1")
+        .env("AUDIVERIS_ENABLE_CURVED_BEAM_RECOVERY", "1")
+        .env("AUDIVERIS_ENABLE_STEM_GUIDED_HOOK_RECOVERY", "1")
+        .env("AUDIVERIS_ENABLE_CUE_STEM_GUIDED_HOOK_RECOVERY", "1")
+        .status()
+        .expect("run isolated Chopin Op. 9 No. 1 S1A6 regression");
+    assert!(status.success(), "isolated Chopin S1A6 regression failed");
+}
+
+#[test]
+fn chopin_op9_no1_page1_s1a6_reaches_terminal_cue_relations_page() {
+    if std::env::var_os(CHOPIN_OP9_NO1_S1A6_ENV).is_none() {
+        return;
+    }
+
+    let (grid, reduction, aggregates) = recognize_page(CHOPIN_OP9_NO1_S1A6_PAGE);
+    let ordinary_fingerprint = debug_fingerprint(&reduction);
+    let disabled = recognize_native_cue_beams_with_options(
+        &grid,
+        reduction.clone(),
+        true,
+        NativeCueBeamsOptions {
+            enabled: false,
+            supplemental_hook_recovery: true,
+        },
+    )
+    .expect("disabled CUE_BEAMS must preserve ordinary recognition");
+    assert!(disabled.active.is_none());
+    assert_eq!(ordinary_fingerprint, debug_fingerprint(&disabled.reduction));
+
+    // NativeCueBeamMutationError renders the zero-based aggregate ordinal 5
+    // as S1A6.  This is the exact StageAligner 96% candidate that used to
+    // abort while looking up the first member's head corner.
+    let s1a6 = aggregates.systems[0]
+        .aggregates
+        .iter()
+        .find(|aggregate| aggregate.ordinal == 5)
+        .expect("Chopin S1A6 aggregate");
+    assert_eq!(s1a6.members.len(), 3);
+
+    let completed = recognize_native_cue_beams_with_options(
+        &grid,
+        reduction,
+        true,
+        NativeCueBeamsOptions {
+            enabled: true,
+            supplemental_hook_recovery: true,
+        },
+    )
+    .expect("Chopin Op. 9 No. 1 page 1 CUE_BEAMS");
+    let active = completed.active.as_deref().expect("active CUE_BEAMS");
+    let s1_mutations = active
+        .mutations
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("S1 cue beam mutations");
+    let s1a6_beam = s1_mutations
+        .beams
+        .iter()
+        .find(|beam| beam.aggregate_ordinal == 5)
+        .expect("S1A6 cue beam");
+    let s1_grouping = active
+        .grouping
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("S1 cue grouping");
+    let s1a6_group = s1_grouping
+        .aggregates
+        .iter()
+        .find(|aggregate| aggregate.aggregate_ordinal == 5)
+        .expect("S1A6 cue beam group");
+    assert_eq!(s1a6_group.group_sig_ordinals.len(), 1);
+    let group_vertex = s1a6_group.group_sig_ordinals[0].0;
+    assert!(
+        s1_grouping.sig_after.edges.iter().any(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::Containment
+                && edge.source == group_vertex
+                && edge.target == s1a6_beam.sig_ordinal.0
+        }),
+        "S1A6 must publish its cue beam containment relation"
+    );
+
+    let s1_lookup = active
+        .stem_lookup
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("S1 cue stem lookup");
+    assert_eq!(
+        s1_lookup
+            .plans
+            .iter()
+            .filter(|plan| plan.aggregate_ordinal == 5)
+            .count(),
+        3,
+        "every S1A6 head must resolve through its stable binding"
+    );
+    assert!(
+        active.stem_relations.systems.iter().any(|system| {
+            system.mutations.iter().any(|mutation| {
+                mutation.first_relation_created || !mutation.extended_relation_edges.is_empty()
+            })
+        }),
+        "the page must reach terminal cue BeamStem relation publication"
+    );
 }
 
 #[test]
@@ -357,6 +480,11 @@ fn assert_cue_aggregate_page(path: &str) {
     .expect("disabled ordinary CUE_BEAMS");
     assert!(disabled.active.is_none(), "{page}");
     assert!(disabled.supplemental_hook_recovery_enabled, "{page}");
+    assert_eq!(
+        debug_fingerprint(&baseline_reduction),
+        debug_fingerprint(&disabled.reduction),
+        "{page} disabled CUE_BEAMS must preserve ordinary STEMS/BEAMS"
+    );
     drop(disabled);
 
     let recovery_enabled = recognize_native_cue_beams_with_options(
