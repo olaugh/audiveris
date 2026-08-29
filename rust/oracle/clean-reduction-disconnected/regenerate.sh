@@ -16,6 +16,8 @@ verovio \
 
 rsvg-convert --background-color white --zoom 1 \
     -o "$fixture_dir/disconnected-1x.png" "$svg_path"
+rsvg-convert --background-color white --zoom 0.97 \
+    -o "$fixture_dir/disconnected-0_97x.png" "$svg_path"
 rsvg-convert --background-color white --zoom 1.5 \
     -o "$fixture_dir/disconnected-1_5x.png" "$svg_path"
 rsvg-convert --background-color white --zoom 2 \

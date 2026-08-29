@@ -7356,3 +7356,18 @@ now reaches terminal two-system REDUCTION instead of failing in STEMS.
 The two clean-score gates, all 778 library tests (two intentional ignores),
 the full workspace, formatting, strict Clippy, and existing Java-exact STEMS
 corpus gates pass.
+
+## Boundary 316: low-resolution REDUCTION recovery
+
+Rust now completes the clean 42-note fixture exactly from 91% through 100%
+raster scale. Two Rust-only aborts were removed: temporary StemBuilder
+filaments preserve Java's lazy-to-fixed-glyph geometry behavior, and zero-row
+stem grades propagate Java's NaN rather than panicking.
+
+Java rejects the 91--97% pages at SCALE because their 10-pixel main interline
+is below its supported floor. Rust's explicit TooLow/interline-10 recovery uses
+Java's historical stemless-head boost while leaving accepted-resolution parity
+unchanged. The permanent 0.97x gate has 92 raw heads and exactly 42
+truth-matched reduced survivors, including both whole notes. At 90%, all true
+heads remain but a quarter-rest fragment gains a false head/stem interpretation,
+so safe progress below that boundary depends on later rest-symbol competition.

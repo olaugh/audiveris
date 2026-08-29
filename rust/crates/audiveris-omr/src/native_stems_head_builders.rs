@@ -1376,7 +1376,7 @@ fn materialize_builder(
         .enumerate()
     {
         let geometry = filament
-            .straight_geometry()
+            .construction_geometry()
             .map_err(|source| NativeStemsHeadBuilderError::StickFactory { system_id, source })?;
         let reference = NativeStemsHeadBuilderGlyphRef::Chunk {
             builder_ordinal,

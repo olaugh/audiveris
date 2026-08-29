@@ -15,7 +15,8 @@ use std::{
 };
 
 use audiveris_image::{
-    lines_coordinator::StaffCandidateKind, staff_line_conversion::PersistentStaffLine,
+    lines_coordinator::StaffCandidateKind, scale_estimate::ResolutionStatus,
+    staff_line_conversion::PersistentStaffLine,
 };
 
 use crate::{
@@ -52,8 +53,8 @@ use crate::{
         retrieve_native_heads_range_glyphs,
     },
     native_heads_range_lookup::{
-        NativeHeadsRangeLookupError, NativeHeadsRangeLookupInput,
-        NativeHeadsRangeLookupRecognition, recognize_native_heads_range_lookup,
+        LOW_RESOLUTION_STEMLESS_BOOST, NativeHeadsRangeLookupError, NativeHeadsRangeLookupInput,
+        NativeHeadsRangeLookupRecognition, STEMLESS_BOOST, recognize_native_heads_range_lookup,
     },
     native_heads_scanner::{
         NativeHeadsScannerRecognition, NativeHeadsScannerRecognitionError,
@@ -179,6 +180,17 @@ pub fn recognize_native_heads_with_small_heads(
     ledgers: &NativeLedgerRecognition,
     small_heads: bool,
 ) -> Result<NativeHeadsRecognition, NativeHeadsRecognitionError> {
+    // Java rejects these pages as unreliable before HEADS. Rust deliberately
+    // continues below that floor; on the first unsupported interline band,
+    // revive Java's former stemless-head boost so clean whole notes remain
+    // usable without changing accepted-resolution parity.
+    let stemless_boost = if grid.scale.scale.resolution == ResolutionStatus::TooLow
+        && grid.scale.scale.interline.main == 10
+    {
+        LOW_RESOLUTION_STEMLESS_BOOST
+    } else {
+        STEMLESS_BOOST
+    };
     let obstacles = materialize_native_heads_bar_obstacles(grid)
         .map_err(NativeHeadsRecognitionError::Obstacles)?;
     let competitors = materialize_native_heads_competitors(grid, beams)
@@ -226,6 +238,7 @@ pub fn recognize_native_heads_with_small_heads(
         bar_slices: &bar_slices,
         competitors: &competitors,
         competitor_slices: &competitor_slices,
+        stemless_boost,
     })
     .map_err(NativeHeadsRecognitionError::RangeLookup)?;
     let range_glyphs = retrieve_native_heads_range_glyphs(NativeHeadsRangeGlyphsInput {
@@ -243,6 +256,7 @@ pub fn recognize_native_heads_with_small_heads(
         range_glyphs: &range_glyphs,
         competitors: &competitors,
         beams,
+        stemless_boost,
     })
     .map_err(NativeHeadsRecognitionError::Epilog)?;
 

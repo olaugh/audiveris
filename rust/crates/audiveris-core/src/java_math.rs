@@ -32,7 +32,7 @@ const fn bits(value: u64) -> f64 {
 /// `java.lang.FdLibm.Pow`, narrowed only by the public preconditions.
 #[must_use]
 pub fn java_positive_pow(x: f64, y: f64) -> f64 {
-    assert!(x >= 0.0 && y.is_finite());
+    assert!((x.is_nan() || x >= 0.0) && y.is_finite());
     if y == 0.0 {
         return 1.0;
     }
@@ -195,5 +195,6 @@ mod tests {
         );
         assert_eq!(java_positive_pow(0.25, 2.0), 0.0625);
         assert_eq!(java_positive_pow(0.0, 1.0 / 13.0), 0.0);
+        assert!(java_positive_pow(f64::NAN, 1.0 / 13.0).is_nan());
     }
 }

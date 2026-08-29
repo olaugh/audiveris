@@ -6927,3 +6927,34 @@ Both clean-score integration gates, all 778 library tests (two intentional
 ignores), the complete workspace suite, formatting, and strict
 workspace/all-target/all-feature Clippy pass. The existing eight-page
 Java-exact STEMS differential chain remains green.
+
+## Boundary 316: sub-floor REDUCTION robustness
+
+A dense 50--100% raster sweep of the 42-head disconnected-barline fixture
+exposed two Rust-only terminal failures before recognition quality became the
+limiting factor. StemBuilder was eagerly forcing the regression line of a
+temporary StickFactory filament. Java converts that lazy filament directly to
+a fixed Glyph, so square three-pixel compounds never ask a horizontal line for
+vertical intersections. Rust now preserves exact StraightFilament geometry
+when it is invertible and otherwise derives the construction geometry with the
+fixed-glyph regression orientation. Focused square-compound tests freeze both
+rough-horizontal and mixed-section cases.
+
+At 80%, a stem candidate with zero scanned rows produced a `0/0` black ratio.
+Java's `Math.pow` carries the NaN into a non-qualifying grade; Rust's fdlibm
+adapter asserted before its existing NaN propagation branch. The adapter now
+accepts NaN bases and retains Java's result, with a unit regression.
+
+Java refuses this fixture below 98% because the main interline becomes 10 and
+SCALE marks the sheet unreliable. Rust deliberately continues. In that first
+unsupported band only, HEADS revives Java's historical 0.38 stemless-head
+boost, records it in the existing evidence, and applies the same post-purge
+grade increase Java used. Accepted-resolution runs retain the current Java
+constant of zero and remain exact. The checked-in 0.97x raster has 92 raw heads
+and reaches terminal REDUCTION with all 42 musical heads, including both whole
+notes, matched one-to-one against scaled 1x truth.
+
+The resulting consecutive exact band is 91--100%. At 90%, all 42 truth heads
+survive but one quarter-rest silhouette is also promoted as a black head via a
+false stem, yielding 43. Rejecting that safely requires later rest-symbol
+competition; no coordinate or glyph-specific REDUCTION exception was added.

@@ -15,7 +15,7 @@ use audiveris_omr::{
     native_heads_competitors::materialize_native_heads_competitors,
     native_heads_obstacles::materialize_native_heads_bar_obstacles,
     native_heads_range_lookup::{
-        NativeHeadRangeKernelHashes, NativeHeadsRangeLookupInput,
+        NativeHeadRangeKernelHashes, NativeHeadsRangeLookupInput, STEMLESS_BOOST,
         recognize_native_heads_range_lookup,
     },
     native_heads_scanner::recognize_native_heads_scanner_context,
@@ -87,6 +87,7 @@ fn native_heads_range_lookup_matches_java_corpus() {
             bar_slices: &bar_slices,
             competitors: &competitors,
             competitor_slices: &competitor_slices,
+            stemless_boost: STEMLESS_BOOST,
         })
         .unwrap_or_else(|error| panic!("{page}: range lookup failed: {error}"));
 

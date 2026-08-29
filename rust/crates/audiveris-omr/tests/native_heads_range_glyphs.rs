@@ -18,7 +18,9 @@ use audiveris_omr::{
     native_heads_range_glyphs::{
         NativeHeadRangePostOutcome, NativeHeadsRangeGlyphsInput, retrieve_native_heads_range_glyphs,
     },
-    native_heads_range_lookup::{NativeHeadsRangeLookupInput, recognize_native_heads_range_lookup},
+    native_heads_range_lookup::{
+        NativeHeadsRangeLookupInput, STEMLESS_BOOST, recognize_native_heads_range_lookup,
+    },
     native_heads_scanner::recognize_native_heads_scanner_context,
     native_heads_scanner_pools::materialize_native_head_scanner_pools,
     native_heads_seed_glyphs::{NativeHeadsSeedGlyphsInput, retrieve_native_heads_seed_glyphs},
@@ -181,6 +183,7 @@ fn native_range_aggregation_conflicts_and_glyphs_match_java_corpus() {
             bar_slices: &bar_slices,
             competitors: &competitors,
             competitor_slices: &competitor_slices,
+            stemless_boost: STEMLESS_BOOST,
         })
         .unwrap_or_else(|error| panic!("{page}: range lookup failed: {error}"));
         let actual = retrieve_native_heads_range_glyphs(NativeHeadsRangeGlyphsInput {

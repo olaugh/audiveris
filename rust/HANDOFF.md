@@ -12558,3 +12558,24 @@ Verification is green for both new end-to-end fixtures, 778/778 library tests
 with two intentional ignores, the complete workspace, formatting, strict
 all-target/all-feature workspace Clippy, and the existing exact STEMS corpus
 differentials.
+
+## Boundary 316: low-resolution failure floor is explicit
+
+The clean 42-head fixture now has a permanent 0.97x recovery gate in addition
+to the Java-exact 1x/1.5x/2x gates. Its main interline is 10, so Java rejects it
+during SCALE; Rust continues under an explicit TooLow recovery. That mode alone
+uses Java's former 0.38 stemless boost in both range admission and the
+post-purge grade increase. The evidence object carries the boost, and
+Accepted/Specified resolutions continue to use the current Java value 0.
+
+Two earlier sweep aborts are fixed generically. StemBuilder construction no
+longer forces a temporary lazy filament through a non-invertible line before
+glyph creation, and Java grade math propagates the NaN from a zero-row stem
+sample instead of panicking. Focused tests cover the two square-filament
+orientations and NaN pow behavior.
+
+After these changes every raster from 0.91x through 1.00x reduces to exactly
+42/42. The first consecutive failure is 0.90x: it retains all 42 truth heads
+plus one quarter-rest fragment at approximately `(507,119,12,10)`, misread as
+a black head and supported by a false stem. This is a later symbol-competition
+quality frontier, not a safe REDUCTION-only special case.

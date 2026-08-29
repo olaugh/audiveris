@@ -969,7 +969,7 @@ fn materialize_builder(
         .zip(outcome.result.creation_ids())
         .enumerate()
     {
-        let geometry = filament.straight_geometry().map_err(|source| {
+        let geometry = filament.construction_geometry().map_err(|source| {
             NativeStemsBeamBuilderError::StickFactory {
                 system_id: context.system_id,
                 source,

@@ -21,19 +21,21 @@ use crate::{
         HeadPurgeInput, HeadPurgeOrigin, HeadPurgeResult, HeadSeedTally, purge_staff_heads,
     },
     head_scanner_slices::JavaRectangle,
-    head_template::{HeadTemplateBounds, HeadTemplateShape},
+    head_template::{HEAD_INTRINSIC_RATIO, HeadTemplateBounds, HeadTemplateShape},
     native_heads_range_glyphs::{
         NativeHeadRangeGlyph, NativeHeadsRangeGlyphRecognition, NativeHeadsRangeGlyphStaff,
     },
     native_heads_seed_glyphs::{
         NativeHeadSeedGlyph, NativeHeadsSeedGlyphRecognition, NativeHeadsSeedGlyphStaff,
     },
+    native_heads_seed_lookup::GOOD_INTER_GRADE,
 };
 
 /// Immutable inputs at the Java `buildHeads` post-range boundary.
 pub struct NativeHeadsStaffEpilogInput<'a> {
     pub seed_glyphs: &'a NativeHeadsSeedGlyphRecognition,
     pub range_glyphs: &'a NativeHeadsRangeGlyphRecognition,
+    pub stemless_boost: f64,
 }
 
 /// All staff-purge results and system-level traversal orders.
@@ -302,6 +304,7 @@ pub fn compose_native_heads_staff_epilog(
                 staff_identity,
                 &mut relative_java_id,
                 creation_order.len(),
+                input.stemless_boost,
             )?;
             creation_order.extend((0..staff.heads.len()).map(|head_index| {
                 NativeHeadStaffEpilogRef {
@@ -370,6 +373,7 @@ fn compose_staff(
     staff_identity: usize,
     relative_java_id: &mut i32,
     first_system_creation_ordinal: usize,
+    stemless_boost: f64,
 ) -> Result<NativeHeadsStaffEpilogStaff, NativeHeadsStaffEpilogError> {
     let capacity = seed_staff.heads.len() + range_staff.heads.len();
     let mut heads = Vec::with_capacity(capacity);
@@ -464,6 +468,24 @@ fn compose_staff(
             !duplicate_removed[creation_index] && !purge.tallies[creation_index].is_empty();
         head.duplicate_removed = duplicate_removed[creation_index];
         head.attachment_ordinal = attachment_ordinals[creation_index];
+        if head.attachment_ordinal.is_some()
+            && matches!(
+                head.shape,
+                HeadTemplateShape::WholeNote
+                    | HeadTemplateShape::Breve
+                    | HeadTemplateShape::WholeNoteSmall
+                    | HeadTemplateShape::BreveSmall
+            )
+        {
+            let grade = f64::from_bits(head.grade_bits);
+            let boosted = if grade < HEAD_INTRINSIC_RATIO {
+                grade + stemless_boost * (HEAD_INTRINSIC_RATIO - grade)
+            } else {
+                grade
+            };
+            head.grade_bits = boosted.to_bits();
+            head.good = boosted >= GOOD_INTER_GRADE;
+        }
     }
 
     Ok(NativeHeadsStaffEpilogStaff {
@@ -831,6 +853,7 @@ mod tests {
         let result = compose_native_heads_staff_epilog(NativeHeadsStaffEpilogInput {
             seed_glyphs: &seed_glyphs,
             range_glyphs: &range_glyphs,
+            stemless_boost: 0.0,
         })
         .expect("valid epilog");
 
@@ -892,6 +915,7 @@ mod tests {
         let result = compose_native_heads_staff_epilog(NativeHeadsStaffEpilogInput {
             seed_glyphs: &seed_glyphs,
             range_glyphs: &range_glyphs,
+            stemless_boost: 0.0,
         })
         .expect("valid epilog");
 
@@ -918,6 +942,7 @@ mod tests {
         let result = compose_native_heads_staff_epilog(NativeHeadsStaffEpilogInput {
             seed_glyphs: &seed_glyphs,
             range_glyphs: &range_glyphs,
+            stemless_boost: 0.0,
         })
         .expect("valid epilog");
         let staff = &result.systems[0].staffs[0];
@@ -938,6 +963,7 @@ mod tests {
             compose_native_heads_staff_epilog(NativeHeadsStaffEpilogInput {
                 seed_glyphs: &seed_glyphs,
                 range_glyphs: &range_glyphs,
+                stemless_boost: 0.0,
             }),
             Err(NativeHeadsStaffEpilogError::SystemOrder { .. })
         ));
@@ -957,6 +983,7 @@ mod tests {
             compose_native_heads_staff_epilog(NativeHeadsStaffEpilogInput {
                 seed_glyphs: &seed_glyphs,
                 range_glyphs: &range_glyphs,
+                stemless_boost: 0.0,
             }),
             Err(NativeHeadsStaffEpilogError::SourceOrdinal {
                 origin: "seed",
@@ -990,6 +1017,7 @@ mod tests {
         let result = compose_native_heads_staff_epilog(NativeHeadsStaffEpilogInput {
             seed_glyphs: &seed_glyphs,
             range_glyphs: &range_glyphs,
+            stemless_boost: 0.0,
         })
         .expect("valid epilog");
 

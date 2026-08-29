@@ -37,6 +37,7 @@ pub struct NativeHeadsEpilogInput<'a> {
     pub range_glyphs: &'a NativeHeadsRangeGlyphRecognition,
     pub competitors: &'a NativeHeadsCompetitorPool,
     pub beams: &'a NativeBeamRecognition,
+    pub stemless_boost: f64,
 }
 
 /// Java `Shape` declaration order for the eight oval template head shapes.
@@ -170,6 +171,7 @@ pub fn compose_native_heads_epilog(
     let staff_epilog = compose_native_heads_staff_epilog(NativeHeadsStaffEpilogInput {
         seed_glyphs: input.seed_glyphs,
         range_glyphs: input.range_glyphs,
+        stemless_boost: input.stemless_boost,
     })?;
     compose_from_staff_epilog(staff_epilog, input.competitors, input.beams)
 }

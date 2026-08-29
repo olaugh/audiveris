@@ -42,6 +42,9 @@ use crate::{
 pub const DEFAULT_CHAMFER_NORMALIZER: i32 = 3;
 /// Java `NoteHeadsBuilder.Constants.stemLessBoost`.
 pub const STEMLESS_BOOST: f64 = 0.0;
+/// Historical Java stemless-head boost, used only by Rust's explicit
+/// interline-10 recovery below Java's supported resolution floor.
+pub const LOW_RESOLUTION_STEMLESS_BOOST: f64 = 0.38;
 /// Java `Grades.minContextualGrade`.
 pub const MIN_CONTEXTUAL_GRADE: f64 = 0.5;
 
@@ -54,6 +57,7 @@ pub struct NativeHeadsRangeLookupInput<'a> {
     pub bar_slices: &'a NativeHeadScannerBarSlicesRecognition,
     pub competitors: &'a NativeHeadsCompetitorPool,
     pub competitor_slices: &'a NativeHeadScannerCompetitorSlicesRecognition,
+    pub stemless_boost: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -756,6 +760,7 @@ pub fn recognize_native_heads_range_lookup(
                             .competitor_indices,
                         attempt_ordinal_base: attempt_ordinal,
                         candidate_ordinal_base: candidate_ordinal,
+                        stemless_boost: input.stemless_boost,
                     },
                     &mut staff_hashers,
                 )?;
@@ -812,6 +817,7 @@ struct ScanInput<'a> {
     competitor_indices: &'a [usize],
     attempt_ordinal_base: usize,
     candidate_ordinal_base: usize,
+    stemless_boost: f64,
 }
 
 fn lookup_scan(
@@ -1340,7 +1346,7 @@ fn search_shape(
         } else {
             None
         };
-        let stemless = stemless_evidence(final_shape, best.distance);
+        let stemless = stemless_evidence(final_shape, best.distance, input.stemless_boost);
         weak_stemless = stemless.rejected;
         if weak_stemless {
             AttemptOutcome::WeakStemless
@@ -1398,7 +1404,11 @@ fn search_shape(
     })
 }
 
-fn stemless_evidence(shape: HeadTemplateShape, distance: f64) -> NativeHeadRangeStemlessEvidence {
+fn stemless_evidence(
+    shape: HeadTemplateShape,
+    distance: f64,
+    stemless_boost: f64,
+) -> NativeHeadRangeStemlessEvidence {
     let applicable = matches!(
         shape,
         HeadTemplateShape::WholeNote
@@ -1409,12 +1419,12 @@ fn stemless_evidence(shape: HeadTemplateShape, distance: f64) -> NativeHeadRange
     let intrinsic_grade = head_grade_of(distance);
     let mut contextual_grade = intrinsic_grade;
     if applicable && contextual_grade < HEAD_INTRINSIC_RATIO {
-        contextual_grade += STEMLESS_BOOST * (HEAD_INTRINSIC_RATIO - contextual_grade);
+        contextual_grade += stemless_boost * (HEAD_INTRINSIC_RATIO - contextual_grade);
     }
     NativeHeadRangeStemlessEvidence {
         applicable,
         intrinsic_grade,
-        boost: STEMLESS_BOOST,
+        boost: stemless_boost,
         contextual_grade,
         minimum_contextual_grade: MIN_CONTEXTUAL_GRADE,
         rejected: applicable && contextual_grade < MIN_CONTEXTUAL_GRADE,
@@ -2104,18 +2114,26 @@ mod tests {
 
     #[test]
     fn stemless_gate_applies_zero_boost_and_strict_contextual_threshold() {
-        let weak = stemless_evidence(HeadTemplateShape::WholeNote, 0.35);
+        let weak = stemless_evidence(HeadTemplateShape::WholeNote, 0.35, STEMLESS_BOOST);
         assert!(weak.applicable);
         assert_eq!(weak.contextual_grade, weak.intrinsic_grade);
         assert!(weak.rejected);
 
-        let retained = stemless_evidence(HeadTemplateShape::Breve, 0.18_75);
+        let retained = stemless_evidence(HeadTemplateShape::Breve, 0.18_75, STEMLESS_BOOST);
         assert_eq!(retained.contextual_grade, 0.5);
         assert!(!retained.rejected);
 
-        let stemmed = stemless_evidence(HeadTemplateShape::NoteheadVoid, 0.4);
+        let stemmed = stemless_evidence(HeadTemplateShape::NoteheadVoid, 0.4, STEMLESS_BOOST);
         assert!(!stemmed.applicable);
         assert!(!stemmed.rejected);
+
+        let recovered = stemless_evidence(
+            HeadTemplateShape::WholeNote,
+            0.201_333,
+            LOW_RESOLUTION_STEMLESS_BOOST,
+        );
+        assert!(recovered.contextual_grade >= MIN_CONTEXTUAL_GRADE);
+        assert!(!recovered.rejected);
     }
 
     #[test]

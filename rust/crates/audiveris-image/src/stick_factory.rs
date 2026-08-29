@@ -68,6 +68,21 @@ impl IdentifiedVerticalStick {
     pub fn straight_geometry(&self) -> Result<StraightStickGeometry, StraightStickError> {
         vertical_straight_geometry(self)
     }
+
+    /// Geometry for the fixed glyph that Java creates from a temporary
+    /// StemBuilder filament without first forcing the filament's lazy line.
+    /// Keep the exact StraightFilament geometry whenever it is invertible;
+    /// only non-invertible rough-orientation cases use the regression's own
+    /// orientation, as the resulting fixed Glyph does.
+    pub fn construction_geometry(&self) -> Result<StraightStickGeometry, StraightStickError> {
+        match vertical_straight_geometry(self) {
+            Ok(geometry) => Ok(geometry),
+            Err(StraightStickError::Line(LineError::Horizontal | LineError::Vertical)) => {
+                vertical_regression_geometry(self)
+            }
+            Err(error) => Err(error),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -810,15 +825,28 @@ fn vertical_straight_geometry(
     }
     let top = bounds.y as f64;
     let bottom = (bounds.y + bounds.height - 1) as f64;
+    let left = bounds.x as f64;
+    let right = (bounds.x + bounds.width - 1) as f64;
+    // Java StraightFilament does not retain StickFactory's requested
+    // orientation. Its rough orientation comes from the completed compound
+    // bounds, with square compounds treated as horizontal. This matters for
+    // small stem-builder chunks: asking a square's horizontal regression for
+    // vertical intersections is non-invertible even though Java safely uses
+    // the left and right bounds instead.
+    let rather_vertical = bounds.height > bounds.width;
     let start = if filament.weight() <= 1 {
-        (bounds.x as f64, top)
-    } else {
+        (left, top)
+    } else if rather_vertical {
         (line.x_at_y(top)?, top)
+    } else {
+        (left, line.y_at_x(left)?)
     };
     let stop = if filament.weight() <= 1 {
         start
-    } else {
+    } else if rather_vertical {
         (line.x_at_y(bottom)?, bottom)
+    } else {
+        (right, line.y_at_x(right)?)
     };
     Ok(StraightStickGeometry {
         bounds,
@@ -830,6 +858,42 @@ fn vertical_straight_geometry(
         } else {
             line.mean_distance()?
         },
+    })
+}
+
+fn vertical_regression_geometry(
+    filament: &IdentifiedVerticalStick,
+) -> Result<StraightStickGeometry, StraightStickError> {
+    let bounds = vertical_bounds(&filament.sections);
+    let mut line = BasicLine::default();
+    for section in &filament.sections {
+        for (offset, run) in section.runs().iter().enumerate() {
+            let position = section.first_pos() + offset;
+            for coordinate in run.start..=run.stop() {
+                let (x, y) = match section.orientation() {
+                    Orientation::Horizontal => (coordinate, position),
+                    Orientation::Vertical => (position, coordinate),
+                };
+                line.include_point(x as f64, y as f64);
+            }
+        }
+    }
+    let top = bounds.y as f64;
+    let bottom = (bounds.y + bounds.height - 1) as f64;
+    let left = bounds.x as f64;
+    let right = (bounds.x + bounds.width - 1) as f64;
+    let rather_vertical = line.coefficients()?.rather_vertical;
+    let (start, stop) = if rather_vertical {
+        ((line.x_at_y(top)?, top), (line.x_at_y(bottom)?, bottom))
+    } else {
+        ((left, line.y_at_x(left)?), (right, line.y_at_x(right)?))
+    };
+    Ok(StraightStickGeometry {
+        bounds,
+        start,
+        stop,
+        mean_thickness: vertical_mean_thickness(&filament.sections),
+        mean_distance: line.mean_distance()?,
     })
 }
 
@@ -1121,6 +1185,69 @@ mod tests {
         assert_eq!(outcome.error, None);
         assert_eq!(outcome.result.creation_ids(), [1]);
         assert_eq!(outcome.result.survivors().len(), 1);
+    }
+
+    #[test]
+    fn square_vertical_factory_chunk_uses_java_rough_horizontal_orientation() {
+        let mut table = RunTable::new(Orientation::Vertical, 3, 3).unwrap();
+        for position in 0..3 {
+            assert!(table.add_run(position, Run::new(0, 3)).unwrap());
+        }
+        let vertical = build_sections_from_id(&table, JunctionPolicy::Shift { max_shift: 0 }, 1);
+        assert_eq!(vertical.len(), 1);
+        let factory = VerticalStickFactory::new(VerticalStickParameters {
+            interline: 10,
+            maximum_stick_thickness: 3,
+            minimum_core_section_length: 0,
+            minimum_side_ratio: 0.4,
+        });
+
+        let outcome = factory.retrieve_sticks(&vertical, &[], 1);
+        let geometry = outcome.result.survivors()[0].straight_geometry().unwrap();
+
+        assert_eq!(
+            geometry.bounds,
+            Bounds {
+                x: 0,
+                y: 0,
+                width: 3,
+                height: 3,
+            }
+        );
+        assert_eq!(geometry.start, (0.0, 1.0));
+        assert_eq!(geometry.stop, (2.0, 1.0));
+        assert_eq!(geometry.mean_thickness, 3.0);
+    }
+
+    #[test]
+    fn square_vertical_chunk_construction_defers_to_fixed_glyph_regression() {
+        let mut vertical_table = RunTable::new(Orientation::Vertical, 3, 3).unwrap();
+        assert!(vertical_table.add_run(0, Run::new(0, 3)).unwrap());
+        assert!(vertical_table.add_run(1, Run::new(0, 3)).unwrap());
+        let vertical =
+            build_sections_from_id(&vertical_table, JunctionPolicy::Shift { max_shift: 0 }, 1);
+        let mut horizontal_table = RunTable::new(Orientation::Horizontal, 3, 3).unwrap();
+        assert!(horizontal_table.add_run(1, Run::new(2, 1)).unwrap());
+        let horizontal =
+            build_sections_from_id(&horizontal_table, JunctionPolicy::Shift { max_shift: 0 }, 2);
+        let factory = VerticalStickFactory::new(VerticalStickParameters {
+            interline: 10,
+            maximum_stick_thickness: 3,
+            minimum_core_section_length: 0,
+            minimum_side_ratio: 0.4,
+        });
+
+        let outcome = factory.retrieve_sticks(&vertical, &horizontal, 1);
+        let survivor = &outcome.result.survivors()[0];
+
+        assert_eq!(
+            survivor.straight_geometry(),
+            Err(StraightStickError::Line(LineError::Vertical))
+        );
+        let geometry = survivor.construction_geometry().unwrap();
+        assert_eq!(geometry.bounds.width, geometry.bounds.height);
+        assert_eq!(geometry.start.1, 0.0);
+        assert_eq!(geometry.stop.1, 2.0);
     }
 
     #[test]
