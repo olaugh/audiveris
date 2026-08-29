@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.1">
+  <meiHead><fileDesc><titleStmt><title>Disconnected piano barline stress fixture</title></titleStmt><pubStmt><availability><p>CC0 synthetic test fixture.</p></availability></pubStmt></fileDesc></meiHead>
+  <music><body><mdiv><score>
+    <scoreDef meter.count="4" meter.unit="4" key.sig="2f">
+      <staffGrp bar.thru="false"><grpSym symbol="brace"/>
+        <staffDef n="1" lines="5" clef.shape="G" clef.line="2"/>
+        <staffDef n="2" lines="5" clef.shape="F" clef.line="4"/>
+      </staffGrp>
+    </scoreDef>
+    <section>
+      <measure n="1">
+        <staff n="1"><layer n="1"><note pname="c" oct="5" dur="4"/><note pname="d" oct="5" dur="4"/><note pname="e" oct="5" dur="4"/><note pname="f" oct="5" dur="4"/></layer></staff>
+        <staff n="2"><layer n="1"><note pname="c" oct="3" dur="4"/><note pname="d" oct="3" dur="4"/><note pname="e" oct="3" dur="4"/><note pname="f" oct="3" dur="4"/></layer></staff>
+      </measure>
+      <measure n="2">
+        <staff n="1"><layer n="1"><beam><note pname="g" oct="5" dur="8"/><note pname="a" oct="5" dur="8"/><note pname="b" oct="5" dur="8"/><note pname="c" oct="6" dur="8"/></beam><note pname="g" oct="4" dur="2"/></layer></staff>
+        <staff n="2"><layer n="1"><beam><note pname="g" oct="3" dur="8"/><note pname="a" oct="3" dur="8"/><note pname="b" oct="3" dur="8"/><note pname="c" oct="4" dur="8"/></beam><note pname="g" oct="2" dur="2"/></layer></staff>
+      </measure>
+      <measure n="3" right="dbl">
+        <staff n="1"><layer n="1"><chord dur="4"><note pname="c" oct="5"/><note pname="e" oct="5"/></chord><rest dur="4"/><chord dur="4"><note pname="d" oct="5"/><note pname="f" oct="5"/></chord><rest dur="4"/></layer></staff>
+        <staff n="2"><layer n="1"><chord dur="4"><note pname="c" oct="3"/><note pname="g" oct="3"/></chord><rest dur="4"/><chord dur="4"><note pname="d" oct="3"/><note pname="a" oct="3"/></chord><rest dur="4"/></layer></staff>
+      </measure>
+      <measure n="4" left="rptstart">
+        <staff n="1"><layer n="1"><note pname="f" oct="5" dur="2" stem.dir="down"/><note pname="e" oct="5" dur="2" stem.dir="up"/></layer></staff>
+        <staff n="2"><layer n="1"><note pname="a" oct="3" dur="2" stem.dir="up"/><note pname="g" oct="3" dur="2" stem.dir="down"/></layer></staff>
+      </measure>
+      <measure n="5" right="rptend">
+        <staff n="1"><layer n="1"><beam><note pname="c" oct="6" dur="8"/><note pname="b" oct="5" dur="8"/><note pname="a" oct="5" dur="8"/><note pname="g" oct="5" dur="8"/></beam><note pname="f" oct="5" dur="2"/></layer></staff>
+        <staff n="2"><layer n="1"><beam><note pname="c" oct="4" dur="8"/><note pname="b" oct="3" dur="8"/><note pname="a" oct="3" dur="8"/><note pname="g" oct="3" dur="8"/></beam><note pname="f" oct="3" dur="2"/></layer></staff>
+      </measure>
+      <measure n="6" right="end">
+        <staff n="1"><layer n="1"><note pname="c" oct="5" dur="1"/></layer></staff>
+        <staff n="2"><layer n="1"><note pname="c" oct="3" dur="1"/></layer></staff>
+      </measure>
+    </section>
+  </score></mdiv></body></music>
+</mei>

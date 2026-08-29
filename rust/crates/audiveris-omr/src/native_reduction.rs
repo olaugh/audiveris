@@ -4038,7 +4038,11 @@ pub fn prune_native_foundation_heads(
     let head_order = sig
         .vertices
         .iter()
-        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Head)
+        .filter(|vertex| {
+            vertex.active
+                && vertex.kind == NativeSigInterKind::Head
+                && vertex.shape.as_deref().is_some_and(is_stem_head_shape)
+        })
         .map(|vertex| NativeSigVertexId(vertex.ordinal))
         .collect::<Vec<_>>();
     let mut mutations = Vec::new();
@@ -6723,6 +6727,34 @@ mod tests {
             sig.vertex(4).is_some(),
             "stemless heads are outside checkHeads"
         );
+    }
+
+    #[test]
+    fn complete_head_check_leaves_stemless_heads_outside_java_stem_head_pass() {
+        let mut sig = NativeSigSystem {
+            system_id: 8,
+            vertices: vec![
+                shaped_head(0, "NOTEHEAD_BLACK", 0),
+                shaped_head(1, "WHOLE_NOTE", 0),
+                shaped_head(2, "BREVE", 0),
+            ],
+            edges: Vec::new(),
+        };
+
+        let result =
+            prune_native_foundation_heads(&mut sig, &BTreeMap::new(), &BTreeMap::new(), &[])
+                .unwrap();
+
+        assert_eq!(result.head_order, vec![NativeSigVertexId(0)]);
+        assert_eq!(
+            result.mutations,
+            vec![NativeReductionHeadMutation::OrphanRemoved {
+                head: NativeSigVertexId(0),
+            }]
+        );
+        assert!(sig.vertex(0).is_none(), "unsupported stem head is removed");
+        assert!(sig.vertex(1).is_some(), "whole note remains active");
+        assert!(sig.vertex(2).is_some(), "breve remains active");
     }
 
     #[test]
