@@ -58,6 +58,34 @@ fn invoke(stage: &str, stream: bool) -> String {
     String::from_utf8(output.stdout).expect("CLI stdout is UTF-8")
 }
 
+#[test]
+fn capabilities_publish_the_exact_dense_head_template_registry() {
+    let output = Command::new(binary())
+        .arg("-capabilities-json")
+        .output()
+        .expect("run audiveris-cli capability discovery");
+    assert!(
+        output.status.success(),
+        "capability discovery failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload = String::from_utf8(output.stdout).expect("CLI stdout is UTF-8");
+    assert!(payload.contains("\"schema\":1"));
+    assert!(payload.contains("\"mode\":\"exact_integer_registry\""));
+    assert!(payload.contains("\"point_size_min\":24"));
+    assert!(payload.contains("\"point_size_max\":128"));
+    assert!(payload.contains("\"point_sizes\":[24,25,26"));
+    assert!(
+        payload.contains(",44,"),
+        "registry must cover Chopin size 44"
+    );
+    assert!(
+        payload.contains(",50,"),
+        "registry must cover Chopin size 50"
+    );
+    assert!(payload.contains(",126,127,128]"));
+}
+
 fn payload_for_stage(stream: &str, stage: &str) -> String {
     let lines: Vec<&str> = stream.lines().collect();
     let started = lines

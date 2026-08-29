@@ -298,7 +298,12 @@ def main() -> int:
         default="78,83,84,85,87",
         help="comma-separated sorted point sizes",
     )
-    parser.add_argument("--expected-page-pixels", type=int, default=41492)
+    parser.add_argument(
+        "--expected-page-pixels",
+        type=lambda value: None if value == "any" else int(value),
+        default=41492,
+        help="exact total pixel-record count, or 'any' for generated dense catalogs",
+    )
     parser.add_argument(
         "--check",
         action="store_true",

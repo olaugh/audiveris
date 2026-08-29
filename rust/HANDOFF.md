@@ -12509,3 +12509,26 @@ release, tested atop the separate arbitrary-size template prerequisite,
 completes the unresized image and writes 3,959,754 bytes of terminal STEMS JSON.
 Verification: 774/774 library tests with two intentional ignores; B14 11/11;
 B15 5/5; B16 35/35; B17 15/15.
+
+## Boundary 314: exact practical head sizes are consumer-discoverable
+
+HEADS now embeds exact Java `TemplateFactory` Bravura catalogs for every
+integer point size in 24...128. Eight historical pins stay independently
+frozen, while the new 97-page practical asset has SHA-256
+`2725cd91cb55b49bf95eba1903ac8a39fb553e80a1ad88977726c476854e2043`.
+The generation/check script is
+`rust/oracle/java/generate-practical-head-template-asset.sh`.
+
+The release capability report contains all 105 integers beginning
+`24,25,26,27,28,29,30,31,32`. All five prepared Graceful Ghost Rag PNG pages
+complete unresized terminal HEADS, so their former 26--28 pt enlargement is no
+longer a template prerequisite. The Java `--check` regeneration, full workspace
+tests, formatting, and strict Clippy pass.
+
+Consumers must call `audiveris-cli -capabilities-json` instead of duplicating
+the range. StageAligner now does so, and the Op. 9 No. 1 page-one wrapper smoke
+test stays at `recognition_scale: 1.0` with 3,920 heads, 555 stems, and 102
+beams. Ordinary STEMS completes. A later supplemental CUE_BEAMS retry can
+still fail at `compound equality authority is already occupied`; that is a
+separate cue lifecycle blocker and does not invalidate the terminal STEMS
+payload retained by the exporter.

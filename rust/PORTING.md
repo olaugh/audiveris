@@ -6868,3 +6868,32 @@ failure. A release build containing this boundary plus the separate
 arbitrary-size head-template prerequisite completes the original image and
 emits 3,959,754 bytes of terminal STEMS JSON. All 774 library tests pass (two
 ignored diagnostics), as do the 11 B14, 5 B15, 35 B16, and 15 B17 exact gates.
+
+## Boundary 314: practical exact head-template registry
+
+The Bravura HEADS catalog now carries Java `TemplateFactory` output for every
+integer point size from 24 through 128. The existing individually pinned
+52/53/54/78/83/84/85/87 catalogs remain unchanged; the other 97 exact Java
+pages live in `bravura-head-templates-practical.bin` (SHA-256
+`2725cd91cb55b49bf95eba1903ac8a39fb553e80a1ad88977726c476854e2043`).
+This is dense exact coverage, not runtime interpolation or image resizing.
+
+The release CLI reports `point_size_min: 24`, `point_size_max: 128`, and 105
+entries. All five unresized prepared Graceful Ghost Rag PNG pages complete
+terminal HEADS without an unavailable-template error, including the 26--28 pt
+sizes that previously forced StageAligner enlargement. The Java asset generator
+reproduces the checked-in bytes under `--check`; the full workspace suite,
+formatting, and strict workspace Clippy pass.
+
+`audiveris-cli -capabilities-json` publishes that compiled registry as a
+machine-readable contract. StageAligner queries the contract once per run and
+only considers a resize when the actual binary reports that the requested
+integer point size is absent. It no longer maintains a guessed local list of
+supported sizes.
+
+Unresized Chopin Op. 9 No. 1 page 1 now completes ordinary terminal STEMS at
+recognition scale 1.0 with 6 systems, 12 staves, 3,920 final head proposals,
+555 stems, and 102 beams. Supplemental CUE_BEAMS still exposes a separate
+`compound equality authority is already occupied` continuation failure; the
+ordinary STEMS result is retained and that cue-only blocker is not treated as
+a template-coverage failure.

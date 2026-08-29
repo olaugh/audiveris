@@ -51,6 +51,22 @@ env -u JAVA_TOOL_OPTIONS "$JAVA_HOME/bin/java" \
     -cp "$probe_classes:$probe_cp" \
     org.audiveris.omr.rustport.HeadTemplateCatalogProbe --header
 
+if [ "${1:-}" = "--point-sizes" ]; then
+    if [ "$#" -ne 2 ]; then
+        echo "expected --point-sizes comma-separated-list" >&2
+        exit 2
+    fi
+    (
+        cd "$repo_root/app"
+        env -u JAVA_TOOL_OPTIONS "$JAVA_HOME/bin/java" \
+            -Djava.awt.headless=true \
+            -Dlogback.configurationFile="$repo_root/rust/oracle/java/logback-quiet.xml" \
+            -cp "$probe_classes:$probe_cp" \
+            org.audiveris.omr.rustport.HeadTemplateCatalogProbe --point-sizes "$2"
+    )
+    exit 0
+fi
+
 if [ "$#" -gt 0 ]; then
     for target in "$@"; do
         run_probe "$target"

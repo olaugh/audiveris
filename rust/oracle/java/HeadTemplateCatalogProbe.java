@@ -66,12 +66,33 @@ public class HeadTemplateCatalogProbe
             System.exit(0);
         }
 
+        if ((args.length == 2) && args[0].equals("--point-sizes")) {
+            initializeAudiveris(false);
+            runPointSizes(args[1]);
+            System.exit(0);
+        }
+
         final boolean smallHeads = (args.length == 2) && args[0].equals("--small-heads");
         if ((!smallHeads && (args.length != 1)) || (smallHeads && (args.length != 2))) {
             throw new IllegalArgumentException(
-                    "expected [--small-heads] <path>:<sheet> target");
+                    "expected --point-sizes <comma-list> or [--small-heads] <path>:<sheet>");
         }
 
+        initializeAudiveris(smallHeads);
+
+        final String[] parts = args[smallHeads ? 1 : 0].split(":");
+        if (parts.length != 2) {
+            throw new IllegalArgumentException("target must be <path>:<sheet>");
+        }
+        final Path path = Paths.get(parts[0]).toAbsolutePath();
+        final int wanted = Integer.parseInt(parts[1]);
+        runPage(path, wanted, smallHeads);
+        System.exit(0);
+    }
+
+    private static void initializeAudiveris (boolean smallHeads)
+        throws Exception
+    {
         final CLI cli = new CLI(WellKnowns.TOOL_NAME);
         if (smallHeads) {
             cli.parseParameters(
@@ -87,15 +108,37 @@ public class HeadTemplateCatalogProbe
         cliField.setAccessible(true);
         cliField.set(null, cli);
         MusicFont.checkMusicFont();
+    }
 
-        final String[] parts = args[smallHeads ? 1 : 0].split(":");
-        if (parts.length != 2) {
-            throw new IllegalArgumentException("target must be <path>:<sheet>");
+    private static void runPointSizes (String text)
+    {
+        final List<Shape> activeFactoryOrder = List.of(
+                Shape.NOTEHEAD_BLACK,
+                Shape.NOTEHEAD_VOID,
+                Shape.WHOLE_NOTE,
+                Shape.BREVE,
+                Shape.NOTEHEAD_BLACK_SMALL,
+                Shape.NOTEHEAD_VOID_SMALL,
+                Shape.WHOLE_NOTE_SMALL,
+                Shape.BREVE_SMALL);
+        for (int ordinal = 0; ordinal < activeFactoryOrder.size(); ordinal++) {
+            if (ShapeSet.Heads.get(ordinal) != activeFactoryOrder.get(ordinal)) {
+                throw new IllegalStateException(
+                        "normal/small oval templates no longer lead ShapeSet.Heads factory order");
+            }
         }
-        final Path path = Paths.get(parts[0]).toAbsolutePath();
-        final int wanted = Integer.parseInt(parts[1]);
-        runPage(path, wanted, smallHeads);
-        System.exit(0);
+
+        int catalogOrdinal = 0;
+        for (String value : text.split(",")) {
+            final int pointSize = Integer.parseInt(value);
+            final String page = "Bravura-point-" + pointSize;
+            final CatalogUsage usage = new CatalogUsage(0, pointSize);
+            printCatalog(page, MusicFamily.Bravura, usage, activeFactoryOrder);
+            catalogOrdinal++;
+        }
+        if (catalogOrdinal == 0) {
+            throw new IllegalArgumentException("point-size list is empty");
+        }
     }
 
     private static void runPage (Path path,

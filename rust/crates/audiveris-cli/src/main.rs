@@ -6,6 +6,10 @@ use audiveris_image::ingest::Loader;
 use audiveris_omr::cue_beams_step::{
     NativeCueBeamsOptions, recognize_native_cue_beams_with_options,
 };
+use audiveris_omr::head_template_catalog::{
+    BRAVURA_HEAD_TEMPLATE_MAX_POINT_SIZE, BRAVURA_HEAD_TEMPLATE_MIN_POINT_SIZE,
+    BRAVURA_HEAD_TEMPLATE_POINT_SIZES,
+};
 use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::native_heads::recognize_native_heads_with_small_heads;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
@@ -40,6 +44,8 @@ fn usage() {
          \x20 -constant org.audiveris.omr.sheet.beam.CueBeamsStep.enabled=false\n\
          Supplemental hook recovery is independently enabled with:\n\
          \x20 -constant org.audiveris.omr.sheet.beam.CueBeamsStep.supplementalHookRecovery=true\n\n\
+         Machine-readable native capabilities are available with:\n\
+         \x20 audiveris-cli -capabilities-json\n\n\
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
@@ -938,10 +944,42 @@ fn take_stream_json_flag(args: &mut Vec<String>) -> bool {
     args.len() != before
 }
 
+/// `-capabilities-json` is a Rust-port extension for consumers that must not
+/// guess which native resources were compiled into a particular CLI build.
+fn take_capabilities_json_flag(args: &mut Vec<String>) -> bool {
+    let before = args.len();
+    args.retain(|argument| argument != "-capabilities-json");
+    args.len() != before
+}
+
+fn capabilities_json() -> String {
+    let point_sizes = BRAVURA_HEAD_TEMPLATE_POINT_SIZES
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schema\":1,\"producer\":{{\"name\":\"audiveris-rust\",\"version\":{}}},\"head_templates\":{{\"family\":\"Bravura\",\"mode\":\"exact_integer_registry\",\"point_size_min\":{},\"point_size_max\":{},\"point_sizes\":[{}]}}}}\n",
+        json_string(env!("CARGO_PKG_VERSION")),
+        BRAVURA_HEAD_TEMPLATE_MIN_POINT_SIZE,
+        BRAVURA_HEAD_TEMPLATE_MAX_POINT_SIZE,
+        point_sizes,
+    )
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let json = take_json_flag(&mut args);
     let stream_json = take_stream_json_flag(&mut args);
+    let capabilities = take_capabilities_json_flag(&mut args);
+    if capabilities {
+        if !args.is_empty() || json || stream_json {
+            eprintln!("error: -capabilities-json must be used by itself");
+            std::process::exit(2);
+        }
+        print!("{}", capabilities_json());
+        return;
+    }
     match parse(&args) {
         Ok(parameters) if parameters.help => usage(),
         Ok(parameters) => match if stream_json {
@@ -967,9 +1005,9 @@ fn main() {
 mod tests {
     use super::{
         CUE_BEAMS_ENABLED_CONSTANT, CUE_BEAMS_RECOVERY_CONSTANT, SMALL_HEADS_CONSTANT,
-        cue_beams_options, is_native_step, json_string, omrscope_marker_line, run_native,
-        run_native_stream, sheets_to_process, small_heads_enabled, stream_stages_through,
-        take_stream_json_flag,
+        capabilities_json, cue_beams_options, is_native_step, json_string, omrscope_marker_line,
+        run_native, run_native_stream, sheets_to_process, small_heads_enabled,
+        stream_stages_through, take_capabilities_json_flag, take_stream_json_flag,
     };
     use audiveris_cli::Parameters;
     use audiveris_core::step::OmrStep;
@@ -1081,6 +1119,22 @@ mod tests {
         extended.insert(3, "-stream-json".to_owned());
         assert!(take_stream_json_flag(&mut extended));
         assert_eq!(extended, legacy);
+    }
+
+    #[test]
+    fn capabilities_report_the_exact_dense_head_template_registry() {
+        let payload = capabilities_json();
+        assert!(payload.contains("\"mode\":\"exact_integer_registry\""));
+        assert!(payload.contains("\"point_size_min\":24"));
+        assert!(payload.contains("\"point_size_max\":128"));
+        assert!(payload.contains("\"point_sizes\":[24,25,26"));
+        assert!(payload.contains(",44,"));
+        assert!(payload.contains(",50,"));
+        assert!(payload.contains(",126,127,128]"));
+
+        let mut args = vec!["-capabilities-json".to_owned()];
+        assert!(take_capabilities_json_flag(&mut args));
+        assert!(args.is_empty());
     }
 
     #[test]

@@ -504,8 +504,8 @@ impl fmt::Display for NativeHeadsPrologRecognitionError {
                 point_size,
             } => write!(
                 formatter,
-                "HEADS system {system_id} staff {staff_id} needs unpinned Bravura template point \
-                 size {point_size}"
+                "HEADS system {system_id} staff {staff_id} needs unavailable Bravura template \
+                 point size {point_size} (exact registry covers every integer from 24 through 128)"
             ),
             Self::TemplateCatalog(source) => {
                 write!(formatter, "HEADS template catalog failed: {source}")
@@ -887,6 +887,7 @@ fn select_native_head_template_catalogs(
 mod tests {
     use super::*;
     use crate::{
+        head_template_catalog::BRAVURA_HEAD_TEMPLATE_POINT_SIZES,
         native_headers::recognize_native_headers,
         native_ledgers::recognize_native_ledgers,
         native_stem_seeds::recognize_native_stem_seeds,
@@ -936,7 +937,7 @@ mod tests {
                 .iter()
                 .map(HeadTemplateCatalog::point_size)
                 .collect::<Vec<_>>(),
-            [52, 53, 54, 78, 83, 84, 85, 87]
+            BRAVURA_HEAD_TEMPLATE_POINT_SIZES
         );
         assert_eq!(heads.staff_template_catalogs.len(), 6);
         let point_84_ordinal = heads
@@ -964,16 +965,16 @@ mod tests {
         ));
 
         let mut unsupported = beams.clone();
-        unsupported.music_font_scale.as_mut().unwrap().point_size = 79;
+        unsupported.music_font_scale.as_mut().unwrap().point_size = 129;
         for point_size in &mut unsupported.staff_head_point_sizes {
-            point_size.point_size = 79;
+            point_size.point_size = 129;
         }
         assert!(matches!(
             select_native_head_template_catalogs(&grid, &unsupported),
             Err(NativeHeadsPrologRecognitionError::MissingTemplateCatalog {
                 system_id: 1,
                 staff_id: 1,
-                point_size: 79,
+                point_size: 129,
             })
         ));
     }

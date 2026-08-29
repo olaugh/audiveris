@@ -7316,3 +7316,20 @@ on unresized Chopin `pdf-page-06.png` (SHA-256
 A release build with this change and the separately developed arbitrary-size
 head-template prerequisite completes terminal STEMS JSON on that exact image.
 The full library and frozen B14-B17 differential chain remain green.
+
+## Boundary 314: exact Bravura templates cover practical integer sizes
+
+The Rust HEADS registry now embeds the exact Java `TemplateFactory` catalog for
+every integer point size from 24 through 128. This removes StageAligner's need
+to enlarge scans merely to land on a small set of pinned sizes. The CLI exposes
+the compiled set through `-capabilities-json`, and StageAligner consumes that
+answer rather than assuming a range.
+
+The release capability report contains all 105 integer sizes. All five prepared
+Graceful Ghost Rag PNG pages now complete unresized HEADS, eliminating their
+former 26--28 pt template enlargement fallback.
+
+On the original Op. 9 No. 1 page-one raster, the integrated exporter uses scale
+1.0 and retains a successful ordinary STEMS payload with 3,920 heads, 555
+stems, and 102 beams. The remaining supplemental CUE_BEAMS failure is a
+separate native continuation issue, not missing template coverage.
