@@ -12532,3 +12532,29 @@ beams. Ordinary STEMS completes. A later supplemental CUE_BEAMS retry can
 still fail at `compound equality authority is already occupied`; that is a
 separate cue lifecycle blocker and does not invalidate the terminal STEMS
 payload retained by the exporter.
+
+## Boundary 315: clean-score REDUCTION parity and empty STEMS systems
+
+The clean disconnected-barline score revealed a real domain mismatch in
+`SigReducer.checkHeads()`. Java visits only `ShapeSet.StemHeads`, while Rust's
+complete pass visited every live head and therefore removed legitimate
+stemless whole notes as `reduction_orphan_head`. The complete pass now shares
+the existing Java-exact `is_stem_head_shape` predicate. Black/void unsupported
+heads remain subject to orphan removal; whole-note and breve families do not.
+
+A checked-in Verovio 6.2.1/Bravura fixture freezes the MEI, 1x/1.5x/2x PNGs,
+and the complete live Java REDUCTION geometry. Raw HEADS remains 113/118/90.
+Reduced heads are 42/42/42 rather than 40/40/40, both far-right whole notes
+survive at every scale, and every survivor shape/bounds tuple matches Java, so
+the count cannot be satisfied by replacement false positives.
+
+The independent control-notation score retains raw HEADS parity at 58 but has
+zero beam builders in system 1. Rust now treats authenticated `NoInitialVLink`
+plus `SidesExhausted` and already-completed zero-work STUMPS as successful Java
+empty loops. It still rejects a zero bound when an actionable frontier exists.
+The permanent 2x control reaches terminal STEMS and two-system REDUCTION.
+
+Verification is green for both new end-to-end fixtures, 778/778 library tests
+with two intentional ignores, the complete workspace, formatting, strict
+all-target/all-feature workspace Clippy, and the existing exact STEMS corpus
+differentials.

@@ -1201,6 +1201,12 @@ fn drive_native_stems_beam_stumps_with_authority(
                 status,
             });
         }
+        if transaction_limit == 0 {
+            return Err(stage(
+                "STUMPS-drive-limit",
+                "transaction limit must be positive for an actionable frontier",
+            ));
+        }
         if transactions.len() + rejected_transactions.len() == transaction_limit {
             *carrier = shadow;
             return Ok(NativeStemsBeamStumpsDrive {

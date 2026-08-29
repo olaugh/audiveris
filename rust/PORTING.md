@@ -6897,3 +6897,33 @@ recognition scale 1.0 with 6 systems, 12 staves, 3,920 final head proposals,
 `compound equality authority is already occupied` continuation failure; the
 ordinary STEMS result is retained and that cue-only blocker is not treated as
 a template-coverage failure.
+
+## Boundary 315: REDUCTION retains Java's stemless-head domain
+
+Java `SigReducer.checkHeads()` iterates `ShapeSet.StemHeads`, so its orphan
+HeadStem check does not apply to `WHOLE_NOTE`, `WHOLE_NOTE_SMALL`, `BREVE`, or
+`BREVE_SMALL`. Rust's complete head-check path had widened that loop to every
+live `HeadInter`, even though its earlier orphan sub-primitive already carried
+the correct shape filter. The production loop now uses the same stem-head set.
+Unsupported black/void heads are still removed; stemless head shapes bypass
+only the relation check Java never runs on them.
+
+The permanent `piano-disconnected-barlines.mei` fixture contains 42 true heads
+and is rendered deterministically with Verovio 6.2.1/Bravura plus librsvg at
+1x, 1.5x, and 2x. Raw HEADS remains Java-exact at 113, 118, and 90 candidates.
+REDUCTION improves from 40 to 42 survivors at every scale, including the two
+far-right whole notes, and the complete sorted shape/bounds set matches the
+live Java REDUCTION SIG exactly. This full-set oracle prevents an extra false
+positive from hiding a missing true head.
+
+The separate `piano-control-notation-coverage.mei` fixture exposed a valid
+system with no beam-origin builders. Its scheduler already owns authenticated
+empty SIDES and STUMPS terminals, which Java's empty loops accept. Native STEMS
+now accepts only those completed zero-work terminals; a zero transaction bound
+with an actionable frontier remains an atomic error. The 2x control retains
+Java-exact raw HEADS at 58 and reaches terminal two-system REDUCTION.
+
+Both clean-score integration gates, all 778 library tests (two intentional
+ignores), the complete workspace suite, formatting, and strict
+workspace/all-target/all-feature Clippy pass. The existing eight-page
+Java-exact STEMS differential chain remains green.

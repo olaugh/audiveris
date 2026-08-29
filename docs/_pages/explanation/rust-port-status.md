@@ -7333,3 +7333,26 @@ On the original Op. 9 No. 1 page-one raster, the integrated exporter uses scale
 1.0 and retains a successful ordinary STEMS payload with 3,920 heads, 555
 stems, and 102 beams. The remaining supplemental CUE_BEAMS failure is a
 separate native continuation issue, not missing template coverage.
+
+## Boundary 315: stemless whole notes survive clean-score REDUCTION
+
+Rust REDUCTION now matches the domain of Java `SigReducer.checkHeads()`: only
+stem-bearing head shapes are candidates for orphan HeadStem removal. Whole-note
+and breve families are left outside that check, while unsupported black/void
+false positives are still removed normally.
+
+The deterministic Verovio/Bravura disconnected-barline fixture contains 42
+ground-truth heads. At 1x, 1.5x, and 2x, raw Rust HEADS remains Java-exact at
+113, 118, and 90. REDUCTION now retains 42 at all three scales instead of 40,
+including both far-right stemless whole notes, and its full sorted survivor
+geometry equals the live Java SIG oracle with no extra survivors.
+
+A second clean control fixture covers a system with no beam-origin builders.
+Authenticated empty SIDES and STUMPS terminals now behave like Java's empty
+loops and continue to later systems; actionable frontiers still require a
+positive transaction bound. Its 58 raw heads remain Java-exact and the page
+now reaches terminal two-system REDUCTION instead of failing in STEMS.
+
+The two clean-score gates, all 778 library tests (two intentional ignores),
+the full workspace, formatting, strict Clippy, and existing Java-exact STEMS
+corpus gates pass.
