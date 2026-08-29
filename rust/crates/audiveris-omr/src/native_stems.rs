@@ -537,8 +537,23 @@ impl NativeStemsPreparedRecognition {
         let context = self.sides_context(system_id)?;
         let transaction_limit = context.builders.builders.len();
         if transaction_limit == 0 {
+            if matches!(first_advance, NativeStemsBeamSidesAdvance::NoInitialVLink)
+                && matches!(
+                    carrier.scheduler.status,
+                    NativeStemsBeamSchedulerStatus::SidesExhausted { .. }
+                )
+            {
+                return Ok(NativeStemsSystemSidesDrive {
+                    system_id,
+                    registry,
+                    carrier,
+                    transactions: Vec::new(),
+                    rejected_transactions: Vec::new(),
+                    hook_removals: Vec::new(),
+                });
+            }
             return Err(phase(
-                format!("system {system_id} has no builders"),
+                format!("system {system_id} has no builders but SIDES is not exhausted"),
                 "SIDES drive",
             ));
         }

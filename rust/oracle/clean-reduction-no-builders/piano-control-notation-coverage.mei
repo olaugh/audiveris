@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.1">
+   <meiHead>
+      <fileDesc>
+         <titleStmt><title>Piano control-notation coverage fixture</title></titleStmt>
+         <pubStmt><availability><p>CC0 synthetic test fixture.</p></availability></pubStmt>
+      </fileDesc>
+   </meiHead>
+   <music>
+      <body>
+         <mdiv>
+            <score>
+               <scoreDef meter.count="4" meter.unit="4" key.sig="0">
+                  <staffGrp bar.thru="true">
+                     <grpSym symbol="brace"/>
+                     <staffDef n="1" lines="5" clef.shape="G" clef.line="2"/>
+                     <staffDef n="2" lines="5" clef.shape="F" clef.line="4"/>
+                  </staffGrp>
+               </scoreDef>
+               <section>
+                  <measure n="1" left="rptstart">
+                     <staff n="1"><layer n="1"><note xml:id="cov-n1" pname="c" oct="5" dur="4"/><note pname="d" oct="5" dur="4"/><note pname="e" oct="5" dur="4"/><note xml:id="cov-n4" pname="f" oct="5" dur="4"/></layer></staff>
+                     <staff n="2"><layer n="1"><chord dur="2"><note pname="c" oct="3"/><note pname="g" oct="3"/></chord><chord dur="2"><note pname="f" oct="3"/><note pname="c" oct="4"/></chord></layer></staff>
+                     <octave staff="1" startid="#cov-n1" endid="#cov-n4" dis="8" dis.place="above"/>
+                     <pedal staff="2" tstamp="1" dir="down" form="pedstar"/><pedal staff="2" tstamp="3" dir="up" form="pedstar"/>
+                  </measure>
+                  <ending n="1" label="1.">
+                     <measure n="2" right="rptend">
+                        <staff n="1"><layer n="1"><note pname="g" oct="5" dur="1"/></layer></staff>
+                        <staff n="2"><layer n="1"><note pname="c" oct="3" dur="1"/></layer></staff>
+                     </measure>
+                  </ending>
+                  <ending n="2" label="2.">
+                     <measure n="3">
+                        <staff n="1"><layer n="1"><note pname="a" oct="5" dur="1"/></layer></staff>
+                        <staff n="2"><layer n="1"><note pname="f" oct="2" dur="1"/></layer></staff>
+                        <pedal staff="2" tstamp="1" dir="down" form="pedline"/><pedal staff="2" tstamp="2" dir="bounce" form="pedline"/><pedal staff="2" tstamp="4" dir="up" form="pedline"/>
+                     </measure>
+                  </ending>
+                  <measure n="4">
+                     <staff n="1"><layer n="1"><note xml:id="cov-15a" pname="c" oct="6" dur="2"/><note xml:id="cov-15b" pname="g" oct="6" dur="2"/></layer></staff>
+                     <staff n="2"><layer n="1"><note pname="c" oct="3" dur="4"/><note pname="g" oct="3" dur="4"/><note pname="e" oct="3" dur="4"/><note pname="c" oct="3" dur="4"/></layer></staff>
+                     <octave staff="1" startid="#cov-15a" endid="#cov-15b" dis="15" dis.place="above"/>
+                     <repeatMark staff="1" tstamp="1" func="segno"/>
+                     <pedal staff="2" tstamp="1" dir="half" form="altpedstar"/>
+                  </measure>
+                  <measure n="5">
+                     <staff n="1"><layer n="1"><note pname="c" oct="5" dur="1"/></layer></staff>
+                     <staff n="2"><layer n="1"><note xml:id="cov-8b-a" pname="c" oct="3" dur="2"/><note xml:id="cov-8b-b" pname="g" oct="2" dur="2"/></layer></staff>
+                     <octave staff="2" startid="#cov-8b-a" endid="#cov-8b-b" dis="8" dis.place="below"/>
+                     <repeatMark staff="1" tstamp="1" func="coda"/>
+                     <dir staff="2" tstamp="1" place="below">una corda</dir>
+                  </measure>
+                  <measure n="6">
+                     <staff n="1"><layer n="1"><note pname="e" oct="5" dur="1"/></layer></staff>
+                     <staff n="2"><layer n="1"><note xml:id="cov-15b-a" pname="c" oct="3" dur="2"/><note xml:id="cov-15b-b" pname="g" oct="2" dur="2"/></layer></staff>
+                     <octave staff="2" startid="#cov-15b-a" endid="#cov-15b-b" dis="15" dis.place="below"/>
+                     <repeatMark staff="1" tstamp="4" func="dalSegno">D.S. al Coda</repeatMark>
+                     <dir staff="2" tstamp="3" place="below">tre corde</dir>
+                  </measure>
+                  <measure n="7">
+                     <staff n="1"><layer n="1"><note pname="d" oct="5" dur="1"/></layer></staff>
+                     <staff n="2"><layer n="1"><note pname="g" oct="2" dur="4"/><note pname="d" oct="3" dur="4"/><note pname="b" oct="2" dur="4"/><note pname="g" oct="2" dur="4"/></layer></staff>
+                     <repeatMark staff="1" tstamp="4" func="daCapo">D.C. al Fine</repeatMark>
+                     <dir staff="2" tstamp="1" place="below">Sost. Ped.</dir>
+                  </measure>
+                  <measure n="8" right="end">
+                     <staff n="1"><layer n="1"><note pname="c" oct="5" dur="1"/></layer></staff>
+                     <staff n="2"><layer n="1"><note pname="c" oct="3" dur="4"/><note pname="g" oct="3" dur="4"/><note pname="e" oct="3" dur="4"/><note pname="c" oct="3" dur="4"/></layer></staff>
+                     <repeatMark staff="1" tstamp="4" func="fine"/>
+                  </measure>
+               </section>
+            </score>
+         </mdiv>
+      </body>
+   </music>
+</mei>

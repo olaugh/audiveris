@@ -1185,13 +1185,6 @@ fn drive_native_stems_beam_stumps_with_authority(
     glyphs: GlyphAuthority<'_>,
     transaction_limit: usize,
 ) -> Result<NativeStemsBeamStumpsDrive, NativeStemsBeamSidesError> {
-    if transaction_limit == 0 {
-        return Err(stage(
-            "STUMPS-drive-limit",
-            "transaction limit must be positive",
-        ));
-    }
-
     let mut shadow = carrier.clone();
     let mut transactions = Vec::new();
     let mut rejected_transactions = Vec::new();
@@ -1200,8 +1193,15 @@ fn drive_native_stems_beam_stumps_with_authority(
         if matches!(
             status,
             NativeStemsBeamSchedulerStumpsStatus::Completed { .. }
-        ) || transactions.len() + rejected_transactions.len() == transaction_limit
-        {
+        ) {
+            *carrier = shadow;
+            return Ok(NativeStemsBeamStumpsDrive {
+                transactions,
+                rejected_transactions,
+                status,
+            });
+        }
+        if transactions.len() + rejected_transactions.len() == transaction_limit {
             *carrier = shadow;
             return Ok(NativeStemsBeamStumpsDrive {
                 transactions,
